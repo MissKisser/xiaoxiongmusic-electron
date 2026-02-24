@@ -189,14 +189,14 @@ class SongManager {
     const finalUrl = isTrial && !settingStore.playSongDemo ? null : originalUrl;
     // 获取音质
     const quality = handleSongQuality(songData, "online");
-      // 检查本地缓存（仅 Electron 端）
-      if (finalUrl && quality && isElectron) {
-        const cachedUrl = await this.checkLocalCache(id, quality);
-        if (cachedUrl) {
-          console.log(`✅ [${id}] 使用本地缓存播放`);
-          return { id, url: cachedUrl, isTrial, quality, unlockSource: "cache" };
-        }
+    // 检查本地缓存（仅 Electron 端）
+    if (finalUrl && quality && isElectron) {
+      const cachedUrl = await this.checkLocalCache(id, quality);
+      if (cachedUrl) {
+        console.log(`✅ [${id}] 使用本地缓存播放`);
+        return { id, url: cachedUrl, isTrial, quality, unlockSource: "cache" };
       }
+    }
     // Web 端：统一通过代理转发（与 Electron 端逻辑对齐）
     let processedUrl = finalUrl;
     if (!isElectron && finalUrl) {
@@ -248,7 +248,7 @@ class SongManager {
     const enabledServers = settingStore.songUnlockServer
       .filter((s) => s.enabled)
       .map((s) => s.key);
-    
+
     if (enabledServers.length === 0) {
       return { id: songId, url: undefined };
     }
@@ -260,13 +260,13 @@ class SongManager {
     console.log(`🔓 [${songId}] 开始按优先级尝试解锁服务`);
     console.log(`   📋 启用的服务: ${enabledServers.map(s => this.getUnlockSourceName(s)).join(', ')}`);
     console.log(`   🎯 优先级顺序: ${sortedServers.map(s => this.getUnlockSourceName(s)).join(' -> ')}`);
-    
+
     // 检查是否有服务被跳过（在优先级列表中但未启用）
     const skippedServers = priorityOrder.filter((server) => !enabledServers.includes(server));
     if (skippedServers.length > 0) {
       console.log(`   ⚠️ 跳过的服务（未启用）: ${skippedServers.map(s => this.getUnlockSourceName(s)).join(', ')}`);
     }
-    
+
     for (const server of sortedServers) {
       try {
         const sourceName = this.getUnlockSourceName(server);
@@ -277,22 +277,22 @@ class SongManager {
         // 检查是否成功
         if (result.code === 200 && result.url && result.url.trim() !== "") {
           const originalUrl = result.url.trim();
-          
+
           // Web 端：统一通过代理转发（与 Electron 端逻辑对齐）
           // Electron 端：直接使用原始 URL（MPV 不受浏览器限制）
           const unlockUrl = this.processUrlForWeb(originalUrl);
           if (!isElectron) {
             console.log(`🌐 [${songId}] Web 端使用代理接口，原始 URL:`, originalUrl);
           }
-          
+
           const finalUnlockUrl = unlockUrl || undefined;
-          
+
           // 推断音质
           let quality = QualityType.HQ;
           if (originalUrl.includes(".flac") || originalUrl.includes(".wav")) {
             quality = QualityType.SQ;
           }
-          
+
           // 调试信息：显示使用的解锁源
           const sourceName = this.getUnlockSourceName(server);
           console.log(`✅ [${songId}] 解锁成功！`);
@@ -302,10 +302,10 @@ class SongManager {
           if (!isElectron) {
             console.log(`   🌐 代理 URL: ${finalUnlockUrl?.substring(0, 80)}${finalUnlockUrl && finalUnlockUrl.length > 80 ? '...' : ''}`);
           }
-          
+
           // 解锁成功后，触发下载（使用原始 URL，仅 Electron 端）
           this.triggerCacheDownload(songId, originalUrl);
-          
+
           return {
             id: songId,
             url: finalUnlockUrl,
@@ -373,27 +373,31 @@ class SongManager {
 
       // 是否可解锁（移除 isElectron 限制，允许 Web 端也使用解锁功能）
       const canUnlock = nextSong.type !== "radio" && settingStore.useSongUnlock;
-      
-      // 优先尝试解锁（获取完整音频，避免30秒试听限制）
-      if (canUnlock) {
-        console.log(`🔓 [${songId}] 预加载：优先尝试解锁获取完整音频...`);
-        const unlockUrl = await this.getUnlockSongUrl(nextSong);
-        if (unlockUrl.url) {
-          console.log(`✅ [${songId}] 预加载：解锁成功，使用解锁链接`);
-          this.nextPrefetch = { id: songId, url: unlockUrl.url, isUnlocked: true, quality: unlockUrl.quality };
-          return this.nextPrefetch;
-        }
-        console.log(`⚠️ [${songId}] 预加载：解锁失败，尝试使用官方链接...`);
-      }
-      
-      // 解锁失败或未启用解锁，尝试获取官方链接作为备选
+
+      // 优先尝试获取官方链接（对齐 SPlayer 逻辑，避免免费歌曲被第三方翻唱替换）
       const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, false);
       if (officialUrl && !isTrial) {
         // 官方可播放且非试听
         this.nextPrefetch = { id: songId, url: officialUrl, isUnlocked: false, quality };
         return this.nextPrefetch;
+      } else if (canUnlock) {
+        // 官方失败或为试听时尝试解锁兜底
+        console.log(`🔓 [${songId}] 预加载：官方链接无效或仅可试听，尝试解锁兜底...`);
+        const unlockUrl = await this.getUnlockSongUrl(nextSong);
+        if (unlockUrl.url) {
+          console.log(`✅ [${songId}] 预加载：解锁成功，使用解锁链接`);
+          this.nextPrefetch = { id: songId, url: unlockUrl.url, isUnlocked: true, quality: unlockUrl.quality };
+          return this.nextPrefetch;
+        } else if (officialUrl && isTrial && settingStore.playSongDemo) {
+          // 解锁失败，若官方为试听且允许试听，保留官方试听地址
+          this.nextPrefetch = { id: songId, url: officialUrl, isUnlocked: false, quality };
+          return this.nextPrefetch;
+        } else {
+          // 无可用源
+          return;
+        }
       } else if (officialUrl && isTrial && settingStore.playSongDemo) {
-        // 官方为试听且允许试听
+        // 官方为试听且允许试听，但未启用解锁
         this.nextPrefetch = { id: songId, url: officialUrl, isUnlocked: false, quality };
         return this.nextPrefetch;
       } else {
@@ -483,37 +487,27 @@ class SongManager {
     try {
       // 是否可解锁（移除 isElectron 限制，允许 Web 端也使用解锁功能）
       const canUnlock = song.type !== "radio" && settingStore.useSongUnlock;
-      
-      // 优先尝试解锁（获取完整音频，避免30秒试听限制）
+
+      // 优先尝试获取官方链接（对齐 SPlayer 逻辑，避免免费歌曲被第三方翻唱替换）
+      const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, !!song.pc);
+      console.log(`🌐 [${songId}] 官方链接获取结果:`, { url: officialUrl, isTrial, quality });
+
+      // 如果官方链接有效且非试听（或者用户接受试听）
+      if (officialUrl && officialUrl.trim() !== "" && (!isTrial || (isTrial && settingStore.playSongDemo))) {
+        if (isTrial) window.$message.warning("当前歌曲仅可试听");
+        return { id: songId, url: officialUrl, quality, isUnlocked: false, unlockSource: "official" };
+      }
+
+      // 官方失败（或被跳过），且允许解锁时，尝试解锁兜底
       if (canUnlock) {
-        console.log(`🔓 [${songId}] 优先尝试解锁获取完整音频...`);
+        console.log(`🔓 [${songId}] 官方链接无效或仅可试听，尝试解锁兜底...`);
         const unlockResult = await this.getUnlockSongUrl(song);
         if (unlockResult.url && unlockResult.url.trim() !== "") {
           console.log(`✅ [${songId}] 解锁成功，使用解锁链接播放`);
           return unlockResult;
         }
-        console.log(`⚠️ [${songId}] 解锁失败，尝试使用官方链接...`);
       }
-      
-      // 解锁失败或未启用解锁，尝试获取官方链接
-      const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, !!song.pc);
-      console.log(`🌐 [${songId}] 官方链接获取结果:`, { url: officialUrl, isTrial, quality });
-      
-      // 验证官方链接是否有效（不能是空字符串）
-      if (officialUrl && officialUrl.trim() !== "" && (!isTrial || (isTrial && settingStore.playSongDemo))) {
-        if (isTrial) {
-          window.$message.warning("当前歌曲仅可试听");
-          // 如果是试听且启用了解锁但解锁失败，提示用户
-          if (canUnlock) {
-            console.warn(`⚠️ [${songId}] 解锁失败，使用官方试听链接（30秒限制）`);
-          }
-        } else {
-          console.log(`✅ [${songId}] 使用官方链接播放`);
-        }
-        return { id: songId, url: officialUrl, quality, isUnlocked: false, unlockSource: "official" };
-      }
-      
-      // 如果官方链接无效，返回空
+
       // 最后的兜底：检查本地是否有缓存（不区分音质）
       const fallbackUrl = await this.checkLocalCache(songId);
       if (fallbackUrl) {
