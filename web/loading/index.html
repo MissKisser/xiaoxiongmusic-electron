@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPlayer</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+  <main>
+    <div class="logo">
+      <img src="/images/圆角-logo.png" alt="小熊音乐 Logo" style="width: 100%; height: 100%; object-fit: contain;" />
+    </div>
+    <div class="loader"></div>
+    <button id="startApp">直接启动</button>
+  </main>
+  <footer>
+    <span>小熊音乐 · Copyright &copy; <span id="year"></span> Hackerdallas</span>
+  </footer>
+
+  <script>
+    const startAppDom = document.getElementById("startApp");
+
+    // 更改年份
+    const currentYear = new Date().getFullYear();
+    document.getElementById("year").innerHTML = currentYear;
+
+    startAppDom.addEventListener("click", () => {
+      window.electron.ipcRenderer.send("win-loaded");
+    });
+
+    window.addEventListener("load", () => {
+      setTimeout(() => {
+        startAppDom.style.opacity = 1;
+      }, 3000);
+    });
+  </script>
+</body>
+
+</html>
