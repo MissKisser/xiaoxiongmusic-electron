@@ -5,8 +5,8 @@ import { getCookie } from "./cookie";
 import { isLogin } from "./auth";
 import axiosRetry from "axios-retry";
 
-// 全局地址
-const baseURL: string = String(isDev ? "/api/netease" : import.meta.env["VITE_API_URL"]);
+// 全局地址，避免遇到 VITE_API_URL 为 undefined 时变成字符串 "undefined" 的问题
+const baseURL: string = isDev ? "/api/netease" : (import.meta.env["VITE_API_URL"] || "/api/netease");
 
 // 基础配置
 const server: AxiosInstance = axios.create({

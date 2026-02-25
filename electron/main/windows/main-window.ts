@@ -116,13 +116,8 @@ class MainWindow {
     if (!this.win) return null;
     // 加载地址
     this.win.loadURL(this.winURL);
-    // 注册 F12 打开 DevTools（开发和生产模式均可用）
-    this.win.webContents.on("before-input-event", (event, input) => {
-      if (input.key === "F12" && input.type === "keyDown") {
-        this.win?.webContents.toggleDevTools();
-        event.preventDefault();
-      }
-    });
+    // 移除 F12 快捷键处理
+
     // 窗口事件
     this.event();
     return this.win;
