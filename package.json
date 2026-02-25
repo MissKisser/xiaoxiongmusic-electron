@@ -1,7 +1,7 @@
 {
   "name": "XiaoXiong-music",
   "productName": "小熊音乐",
-  "version": "3.0.0-beta.9",
+  "version": "3.1.0",
   "description": "A minimalist music player",
   "main": "./out/main/index.js",
   "author": "Hackerdallas",
