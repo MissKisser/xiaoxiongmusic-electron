@@ -25,7 +25,7 @@ pnpm install
 
 # 构建项目
 SKIP_NATIVE_BUILD=true pnpm build
-pnpm server:build
+pnpm build:server
 ```
 
 ### 3. 使用 PM2 启动服务器
@@ -85,7 +85,7 @@ git pull
 
 # 重新构建
 SKIP_NATIVE_BUILD=true pnpm build
-pnpm server:build
+pnpm build:server
 
 # 重启服务器
 pm2 restart splayer-server

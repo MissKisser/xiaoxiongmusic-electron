@@ -3,13 +3,13 @@
     <!-- 发布新版本 -->
     <n-card title="发布新版本" class="publish-card">
       <n-form ref="formRef" :model="publishForm" :rules="rules" label-placement="left" label-width="100">
-        <n-grid :cols="2" :x-gap="24">
-          <n-gi>
+        <n-grid :cols="2" :x-gap="24" responsive="screen" :item-responsive="true">
+          <n-gi span="2 m:1">
             <n-form-item label="版本号" path="version">
               <n-input v-model:value="publishForm.version" placeholder="如 3.9" />
             </n-form-item>
           </n-gi>
-          <n-gi>
+          <n-gi span="2 m:1">
             <n-form-item label="平台">
               <n-select v-model:value="publishForm.platform" :options="platformOptions" />
             </n-form-item>
@@ -49,6 +49,7 @@
         :loading="isLoading"
         :pagination="{ pageSize: 10 }"
         :row-key="(row: AppVersion) => row.id"
+        :scroll-x="800"
       />
     </n-card>
   </div>

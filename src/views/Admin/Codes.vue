@@ -2,8 +2,8 @@
   <div class="admin-codes">
     <!-- 操作栏 -->
     <n-card class="action-bar">
-      <n-flex justify="space-between" align="center">
-        <n-flex :size="12">
+      <n-flex justify="space-between" align="center" :wrap="true" :size="[12, 12]">
+        <n-flex :size="12" :wrap="true">
           <n-input-number
             v-model:value="generateCount"
             :min="1"
@@ -21,7 +21,7 @@
           </n-button>
         </n-flex>
         
-        <n-flex>
+        <n-flex :size="12">
           <n-button :disabled="checkedRowKeys.length === 0" @click="handleBatchExport">
             批量导出 ({{ checkedRowKeys.length }})
           </n-button>
@@ -32,25 +32,38 @@
 
     <!-- 筛选与列表 -->
     <n-card style="margin-top: 16px;">
-      <n-tabs type="line" animated v-model:value="currentTab" @update:value="handleTabChange">
-        <n-tab-pane name="all" tab="全部" />
-        <n-tab-pane name="unused" tab="未使用" />
-        <n-tab-pane name="active" tab="已激活" />
-        <n-tab-pane name="disabled" tab="已禁用" />
-      </n-tabs>
+      <n-flex justify="space-between" align="center" :wrap="true" :size="[12, 12]" style="margin-bottom: 12px;">
+        <n-tabs type="line" animated v-model:value="currentTab" @update:value="handleTabChange" style="flex: 1; min-width: 0;">
+          <n-tab-pane name="all" tab="全部" />
+          <n-tab-pane name="unused" tab="未使用" />
+          <n-tab-pane name="active" tab="已激活" />
+          <n-tab-pane name="disabled" tab="已禁用" />
+        </n-tabs>
+        <n-input
+          v-model:value="searchKeyword"
+          placeholder="搜索授权码 / 备注 / IP"
+          clearable
+          style="width: 260px; flex-shrink: 0;"
+        >
+          <template #prefix>
+            <n-icon><SearchOutline /></n-icon>
+          </template>
+        </n-input>
+      </n-flex>
 
       <n-data-table
         :columns="columns"
-        :data="filteredCodes"
+        :data="displayCodes"
         :loading="isLoading"
         :pagination="{ pageSize: 20 }"
         :row-key="(row: AuthCode) => row.id"
+        :scroll-x="900"
         @update:checked-row-keys="handleCheck"
       />
     </n-card>
 
     <!-- 编辑弹窗 -->
-    <n-modal v-model:show="showEditModal" preset="card" title="编辑授权码" style="width: 400px;">
+    <n-modal v-model:show="showEditModal" preset="card" title="编辑授权码" style="width: 400px; max-width: 90vw;">
       <n-form :model="editForm">
         <n-form-item label="备注">
           <n-input v-model:value="editForm.remarks" placeholder="输入备注" />
@@ -71,7 +84,8 @@
 
 <script setup lang="ts">
 import { ref, h, computed, onMounted } from 'vue';
-import { NButton, NTag, NFlex, useMessage, useDialog, type DataTableColumns } from 'naive-ui';
+import { NButton, NTag, NFlex, NIcon, useMessage, useDialog, type DataTableColumns } from 'naive-ui';
+import { SearchOutline } from '@vicons/ionicons5';
 import axios from 'axios';
 import { useClipboard } from '@vueuse/core';
 
@@ -104,6 +118,7 @@ const generateCount = ref(1);
 const generateRemarks = ref('');
 const currentTab = ref('all');
 const checkedRowKeys = ref<number[]>([]);
+const searchKeyword = ref('');
 
 // 编辑相关
 const showEditModal = ref(false);
@@ -124,15 +139,43 @@ const getAuthHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem('admin_token')}`,
 });
 
-// 计算过滤后的数据
+// 计算过滤后的数据（Tab + 搜索）
 const filteredCodes = computed(() => {
-  if (currentTab.value === 'all') {
-    return codes.value;
+  let result = codes.value;
+  
+  // Tab 筛选
+  if (currentTab.value !== 'all') {
+    result = result.filter(code => code.status === currentTab.value);
   }
-  return codes.value.filter(code => code.status === currentTab.value);
+  
+  // 搜索筛选
+  if (searchKeyword.value.trim()) {
+    const keyword = searchKeyword.value.trim().toLowerCase();
+    result = result.filter(code => {
+      const codeMatch = code.code.toLowerCase().includes(keyword);
+      const remarksMatch = code.remarks?.toLowerCase().includes(keyword);
+      const ipMatch = code.last_login_ip?.toLowerCase().includes(keyword);
+      return codeMatch || remarksMatch || ipMatch;
+    });
+  }
+  
+  return result;
 });
 
-// 表格列
+// 展示用数据（搜索 + Tab 过滤后的结果）
+const displayCodes = computed(() => filteredCodes.value);
+
+// 获取设备最近活跃时间（用于排序）
+const getLastActiveTime = (row: AuthCode): number => {
+  if (!row.bound_devices || row.bound_devices.length === 0) return 0;
+  const times = row.bound_devices
+    .map(d => d.lastActiveAt)
+    .filter(Boolean)
+    .map(t => new Date(t!).getTime());
+  return times.length > 0 ? Math.max(...times) : 0;
+};
+
+// 表格列（含排序）
 const columns: DataTableColumns<AuthCode> = [
   {
     type: 'selection',
@@ -141,12 +184,14 @@ const columns: DataTableColumns<AuthCode> = [
     title: '授权码',
     key: 'code',
     width: 250,
+    sorter: (a: AuthCode, b: AuthCode) => a.code.localeCompare(b.code),
     render: (row: AuthCode) => h('code', { style: 'font-size: 12px; cursor: pointer;', onClick: () => copyCode(row.code) }, row.code),
   },
   {
     title: '状态',
     key: 'status',
     width: 100,
+    sorter: (a: AuthCode, b: AuthCode) => a.status.localeCompare(b.status),
     render: (row: AuthCode) => {
       const typeMap: Record<string, 'default' | 'success' | 'error'> = {
         unused: 'default',
@@ -166,11 +211,13 @@ const columns: DataTableColumns<AuthCode> = [
     key: 'remarks',
     width: 150,
     ellipsis: { tooltip: true },
+    sorter: (a: AuthCode, b: AuthCode) => (a.remarks || '').localeCompare(b.remarks || ''),
   },
   {
     title: '绑定设备',
     key: 'bound_devices',
     width: 220,
+    sorter: (a: AuthCode, b: AuthCode) => (a.bound_devices?.length || 0) - (b.bound_devices?.length || 0),
     render: (row: AuthCode) => {
       if (!row.bound_devices || row.bound_devices.length === 0) return '-';
       const platformLabels: Record<string, string> = {
@@ -190,21 +237,18 @@ const columns: DataTableColumns<AuthCode> = [
     title: '最近登录IP',
     key: 'last_login_ip',
     width: 120,
+    sorter: (a: AuthCode, b: AuthCode) => (a.last_login_ip || '').localeCompare(b.last_login_ip || ''),
     render: (row: AuthCode) => row.last_login_ip || '-',
   },
   {
     title: '最近活跃',
     key: 'last_active',
     width: 160,
+    sorter: (a: AuthCode, b: AuthCode) => getLastActiveTime(a) - getLastActiveTime(b),
     render: (row: AuthCode) => {
-      if (!row.bound_devices || row.bound_devices.length === 0) return '-';
-      // 取所有绑定设备中最近的活跃时间
-      const times = row.bound_devices
-        .map(d => d.lastActiveAt)
-        .filter(Boolean)
-        .map(t => new Date(t!).getTime());
-      if (times.length === 0) return '-';
-      return new Date(Math.max(...times)).toLocaleString();
+      const time = getLastActiveTime(row);
+      if (time === 0) return '-';
+      return new Date(time).toLocaleString();
     },
   },
   {
@@ -245,7 +289,7 @@ const handleBatchExport = () => {
     copy(selectedCodes);
     message.success(`已复制 ${checkedRowKeys.value.length} 个授权码到剪贴板`);
   } else {
-    // 降级处理：弹窗显示让用户复制
+    // 降级处理
      dialog.info({
         title: '批量导出',
         content: () => h('textarea', { 
@@ -368,6 +412,18 @@ onMounted(() => {
 .admin-codes {
   .action-bar {
     margin-bottom: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-codes {
+    :deep(.n-input-number) {
+      width: 80px !important;
+    }
+
+    :deep(.n-input:not(.n-input-number)) {
+      width: 100% !important;
+    }
   }
 }
 </style>

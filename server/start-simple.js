@@ -9,7 +9,7 @@ try {
     console.error('启动失败:', err);
     console.log('\n提示: 如果遇到权限错误，请尝试:');
     console.log('1. 以管理员身份运行 PowerShell');
-    console.log('2. 或者运行: pnpm server:build && pnpm server:start');
+    console.log('2. 或者运行: pnpm build:server && pnpm server:start');
     process.exit(1);
   });
 } catch (err) {

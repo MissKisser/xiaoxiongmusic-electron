@@ -10,6 +10,7 @@
         :data="logs"
         :loading="isLoading"
         :pagination="{ pageSize: 20 }"
+        :scroll-x="700"
       />
     </n-card>
   </div>

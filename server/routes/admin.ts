@@ -110,13 +110,29 @@ export const initAdminAPI: FastifyPluginAsync = async (fastify) => {
                 platformDistribution[row.platform] = row.count;
             });
 
+            // 最近 10 条设备活跃记录
+            const recentActivity = await query<any[]>(
+                `SELECT d.platform, d.name as device_name, d.last_active_at,
+                        ac.code as auth_code
+                 FROM devices d
+                 LEFT JOIN auth_codes ac ON d.auth_code_id = ac.id
+                 ORDER BY d.last_active_at DESC
+                 LIMIT 10`
+            );
+
             return reply.send({
                 success: true,
                 data: {
                     totalCodes,
                     activeCodes,
                     yesterdayActive,
-                    platformDistribution
+                    platformDistribution,
+                    recentActivity: recentActivity.map(r => ({
+                        code: r.auth_code || '-',
+                        platform: r.platform,
+                        deviceName: r.device_name || '-',
+                        lastActiveAt: r.last_active_at,
+                    })),
                 }
             });
         } catch (error) {

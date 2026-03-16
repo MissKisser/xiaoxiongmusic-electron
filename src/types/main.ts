@@ -313,8 +313,7 @@ export type SettingType =
   | "local"
   | "third"
   | "streaming"
-  | "other"
-  | "about";
+  | "other";
 
 // 更新信息
 export interface UpdateInfoType {

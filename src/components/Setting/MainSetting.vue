@@ -4,8 +4,8 @@
     <Transition name="fade">
       <div v-if="showLeftMenu" class="mobile-overlay" @click="showLeftMenu = false" />
     </Transition>
-    <!-- 左侧菜单已隐藏，只显示歌词设置 -->
-    <!-- <Transition name="slideLeft">
+    <!-- 左侧菜单 -->
+    <Transition name="slideLeft">
       <div v-show="showLeftMenu" class="set-left">
         <n-flex class="title" :size="0" vertical>
           <n-h1>设置</n-h1>
@@ -20,12 +20,12 @@
           />
         </n-scrollbar>
       </div>
-    </Transition> -->
+    </Transition>
     <div class="set-right">
       <!-- 标题 -->
       <n-flex class="set-title" size="small" align="end" vertical>
-        <n-h1>歌词设置</n-h1>
-        <n-text :depth="3">个性化歌词显示设置</n-text>
+        <n-h1>{{ currentTitle }}</n-h1>
+        <n-text :depth="3">{{ currentSubtitle }}</n-text>
       </n-flex>
       <n-scrollbar
         ref="setScrollbar"
@@ -33,8 +33,7 @@
         :content-style="{ overflow: 'hidden', padding: '40px 0' }"
       >
         <Transition name="fade" mode="out-in">
-          <!-- 只显示歌词设置 -->
-          <LyricsSetting :scroll-to="props.scrollTo" />
+          <component :is="currentComponent" :scroll-to="props.scrollTo" />
         </Transition>
       </n-scrollbar>
     </div>
@@ -43,18 +42,27 @@
 
 <script setup lang="ts">
 import type { NScrollbar } from "naive-ui";
+import type { MenuOption, MenuInst } from "naive-ui";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
-// import type { MenuOption } from "naive-ui";
-// import { renderIcon } from "@/utils/helper";
-// import { isElectron } from "@/utils/env";
-// import { useStatusStore } from "@/stores";
-// import packageJson from "@/../package.json";
-
+import { renderIcon } from "@/utils/helper";
+import { isElectron } from "@/utils/env";
+import { useStatusStore } from "@/stores";
+import packageJson from "@/../package.json";
+import GeneralSetting from "./GeneralSetting.vue";
+import PlaySetting from "./PlaySetting.vue";
+import LyricsSetting from "./LyricsSetting.vue";
+import KeyboardSetting from "./KeyboardSetting.vue";
+import LocalSetting from "./LocalSetting.vue";
+import ThirdSetting from "./ThirdSetting.vue";
+import StreamingSetting from "./StreamingSetting.vue";
+import OtherSetting from "./OtherSetting.vue";
+import AboutSetting from "./AboutSetting.vue";
 
 const props = defineProps<{ type: SettingType; scrollTo?: string }>();
 
 const { isSmallScreen } = useMobile();
+const statusStore = useStatusStore();
 
 // 设置内容
 const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
@@ -68,10 +76,6 @@ watch(isSmallScreen, (small) => {
     showLeftMenu.value = true;
   }
 });
-
-// 左侧菜单相关逻辑（当前模板已注释隐藏，保留代码以便以后恢复）
-/*
-const statusStore = useStatusStore();
 
 // 菜单数据
 const activeKey = ref<SettingType>(props.type);
@@ -95,13 +99,47 @@ const menuOptions: MenuOption[] = [
   { key: "third", label: "连接与集成", icon: renderIcon("Extension") },
   { key: "streaming", label: "流媒体设置", icon: renderIcon("Stream") },
   { key: "other", label: "其他设置", icon: renderIcon("SettingsOther") },
-  { key: "about", label: "关于", icon: renderIcon("Info") },
+  // { key: "about", label: "关于", icon: renderIcon("Info") },
 ];
+
+// 当前组件映射
+const componentMap: Record<SettingType, any> = {
+  general: GeneralSetting,
+  play: PlaySetting,
+  lyrics: LyricsSetting,
+  keyboard: KeyboardSetting,
+  local: LocalSetting,
+  third: ThirdSetting,
+  streaming: StreamingSetting,
+  other: OtherSetting,
+  // about: AboutSetting,
+};
+
+// 当前标题映射
+const titleMap: Record<SettingType, { title: string; subtitle: string }> = {
+  general: { title: "常规设置", subtitle: "主题、外观与全局设置" },
+  play: { title: "播放设置", subtitle: "播放行为与音质设置" },
+  lyrics: { title: "歌词设置", subtitle: "个性化歌词显示设置" },
+  keyboard: { title: "快捷键设置", subtitle: "自定义键盘快捷键" },
+  local: { title: "本地与缓存", subtitle: "本地音乐与缓存管理" },
+  third: { title: "连接与集成", subtitle: "第三方服务连接设置" },
+  streaming: { title: "流媒体设置", subtitle: "流媒体服务器配置" },
+  other: { title: "其他设置", subtitle: "代理、数据与高级选项" },
+  // about: { title: "关于", subtitle: "应用信息与版本" },
+};
+
+// 当前组件
+const currentComponent = computed(() => componentMap[activeKey.value]);
+
+// 当前标题
+const currentTitle = computed(() => titleMap[activeKey.value]?.title || "设置");
+
+// 当前副标题
+const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || "");
 
 const toGithub = () => {
   window.open(packageJson.github);
 };
-*/
 </script>
 
 <style lang="scss" scoped>
@@ -116,7 +154,7 @@ const toGithub = () => {
     display: none;
   }
   .set-left {
-    display: none; // 隐藏左侧菜单
+    display: flex;
     flex-direction: column;
     width: 280px;
     height: 100%;

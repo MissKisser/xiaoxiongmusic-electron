@@ -56,13 +56,13 @@
         <!-- 用户 -->
         <User v-if="settingStore.useOnlineService" />
         <!-- 设置菜单 -->
-        <!-- <n-dropdown :options="setOptions" trigger="click" show-arrow @select="setSelect">
+        <n-dropdown :options="setOptions" trigger="click" show-arrow @select="setSelect">
           <n-button :focusable="false" title="设置" tertiary circle>
             <template #icon>
               <SvgIcon name="Settings" />
             </template>
           </n-button>
-        </n-dropdown> -->
+        </n-dropdown>
       </n-flex>
     </n-flex>
     <!-- 客户端控制 -->
@@ -137,11 +137,11 @@
 </template>
 
 <script setup lang="ts">
-// import type { DropdownOption } from "naive-ui";
+import type { DropdownOption } from "naive-ui";
 import { useSettingStore, useStatusStore } from "@/stores";
-// import { renderIcon } from "@/utils/helper";
-// import { openSetting } from "@/utils/modal";
-// import { isDev } from "@/utils/env";
+import { renderIcon } from "@/utils/helper";
+import { openSetting } from "@/utils/modal";
+import { isDev } from "@/utils/env";
 import { isElectron } from "@/utils/env";
 import { useMobile } from "@/composables/useMobile";
 
@@ -170,8 +170,7 @@ const toggleGlobalColor = () => {
   settingStore.themeFollowCover = newValue;
 };
 
-// 缩放相关（当前模板中设置菜单已注释隐藏，保留代码以便以后恢复）
-/*
+// 缩放相关
 // 当前缩放系数
 const currentZoomFactor = ref(1.0);
 
@@ -189,7 +188,6 @@ const zoomOptions = computed<DropdownOption[]>(() =>
     };
   }),
 );
-*/
 
 // 最小化
 const min = () => window.electron.ipcRenderer.send("win-min");
@@ -222,8 +220,7 @@ const tryClose = () => {
   }
 };
 
-// 设置菜单（当前模板中已注释隐藏，保留代码以便以后恢复）
-/*
+// 设置菜单
 const setOptions = computed<DropdownOption[]>(() => [
   {
     label:
@@ -296,7 +293,6 @@ const setSelect = (key: string) => {
       break;
   }
 };
-*/
 
 onMounted(async () => {
   // 获取窗口状态并监听主进程的状态变更
@@ -304,8 +300,8 @@ onMounted(async () => {
     // 获取无边框窗口配置
     const windowConfig = await window.api.store.get("window");
     useBorderless.value = windowConfig?.useBorderless ?? true;
-    // 获取当前缩放系数（设置菜单已注释隐藏，缩放功能暂不需要）
-    // currentZoomFactor.value = await window.electron.ipcRenderer.invoke("get-zoom-factor");
+    // 获取当前缩放系数
+    currentZoomFactor.value = await window.electron.ipcRenderer.invoke("get-zoom-factor");
     // 获取窗口状态
     isMax.value = window.electron.ipcRenderer.sendSync("win-state");
     window.electron.ipcRenderer.on("win-state-change", (_event, value: boolean) => {

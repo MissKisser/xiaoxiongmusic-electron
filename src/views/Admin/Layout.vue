@@ -2,18 +2,26 @@
   <n-config-provider :theme="darkTheme">
     <div class="admin-layout">
       <n-layout has-sider class="main-layout">
+        <!-- 移动端遮罩 -->
+        <div 
+          v-if="isMobile && siderVisible" 
+          class="sider-overlay" 
+          @click="siderVisible = false"
+        />
+
         <!-- 侧边栏 -->
         <n-layout-sider
+          v-show="!isMobile || siderVisible"
           bordered
           :width="240"
           :collapsed-width="64"
           collapse-mode="width"
           :native-scrollbar="false"
-          class="admin-sider"
+          :class="['admin-sider', { 'mobile-sider': isMobile }]"
         >
           <div class="sider-header">
             <div class="logo-icon">🐻</div>
-            <h2 v-if="!collapsed">小熊管理</h2>
+            <h2>小熊管理</h2>
           </div>
           
           <n-menu
@@ -32,7 +40,7 @@
                   <template #icon>
                     <n-icon><LogOutOutline /></n-icon>
                   </template>
-                  <span v-if="!collapsed">退出登录</span>
+                  <span>退出登录</span>
                 </n-button>
               </template>
               退出登录
@@ -44,12 +52,22 @@
         <n-layout class="content-layout">
           <n-layout-header bordered class="admin-header">
             <div class="header-left">
+              <n-button
+                v-if="isMobile"
+                text
+                class="menu-toggle"
+                @click="siderVisible = !siderVisible"
+              >
+                <template #icon>
+                  <n-icon size="22"><MenuOutline /></n-icon>
+                </template>
+              </n-button>
               <span class="page-title">{{ currentTitle }}</span>
             </div>
             <div class="header-right">
               <div class="user-profile">
                 <n-avatar round size="small" src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-                <span class="username">{{ adminUsername }}</span>
+                <span class="username" v-if="!isMobile">{{ adminUsername }}</span>
               </div>
             </div>
           </n-layout-header>
@@ -70,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h } from 'vue';
+import { ref, computed, h, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { 
   darkTheme, 
@@ -90,14 +108,34 @@ import {
   KeyOutline, 
   GitNetworkOutline, 
   ReaderOutline,
-  LogOutOutline
+  LogOutOutline,
+  MenuOutline
 } from '@vicons/ionicons5';
 
 const router = useRouter();
 const route = useRoute();
-const collapsed = ref(false);
 
 const adminUsername = ref(localStorage.getItem('admin_username') || '管理员');
+
+// 移动端响应式状态
+const isMobile = ref(false);
+const siderVisible = ref(false);
+
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768;
+  if (!isMobile.value) {
+    siderVisible.value = false;
+  }
+};
+
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile);
+});
 
 // 渲染图标辅助函数
 function renderIcon(icon: any) {
@@ -147,6 +185,10 @@ const currentTitle = computed(() => {
 // 处理菜单选择
 const handleMenuSelect = (key: string) => {
   router.push(`/bamger/${key}`);
+  // 移动端选择后自动收起
+  if (isMobile.value) {
+    siderVisible.value = false;
+  }
 };
 
 // 退出登录
@@ -170,6 +212,18 @@ const handleLogout = () => {
 .main-layout {
   height: 100%;
   background-color: transparent !important;
+}
+
+// 移动端遮罩层
+.sider-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  backdrop-filter: blur(4px);
 }
 
 .admin-sider {
@@ -210,6 +264,16 @@ const handleLogout = () => {
       }
     }
   }
+
+  // 移动端侧边栏样式
+  &.mobile-sider {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 100;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+  }
 }
 
 .content-layout {
@@ -225,6 +289,19 @@ const handleLogout = () => {
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .menu-toggle {
+    color: rgba(255, 255, 255, 0.7);
+    &:hover {
+      color: #fff;
+    }
+  }
 
   .header-title {
     font-size: 18px;
@@ -271,5 +348,18 @@ const handleLogout = () => {
 .fade-slide-leave-to {
   opacity: 0;
   transform: translateY(-20px);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .admin-header {
+    padding: 0 16px;
+  }
+
+  .admin-content {
+    .content-wrapper {
+      padding: 16px;
+    }
+  }
 }
 </style>

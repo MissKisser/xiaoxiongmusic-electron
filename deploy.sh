@@ -37,7 +37,7 @@ echo "🔨 构建前端..."
 SKIP_NATIVE_BUILD=true pnpm build
 
 echo "🔨 编译服务器..."
-pnpm server:build
+pnpm build:server
 
 # 检查构建结果
 if [ ! -f "out/renderer/index.html" ]; then

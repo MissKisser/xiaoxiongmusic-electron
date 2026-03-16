@@ -129,6 +129,332 @@
 
 </details>
 
+## 🔐 授权系统
+
+本项目包含一套完整的应用授权系统，用于控制客户端的访问权限。该系统仅对 Electron 桌面客户端生效，Web 端无需授权。
+
+### 系统架构
+
+```mermaid
+flowchart TB
+    subgraph Client[Electron 客户端]
+        AuthModal[授权弹窗组件]
+        AuthStore[Pinia 授权状态]
+        DeviceId[设备 ID 生成]
+    end
+    
+    subgraph Server[后端服务]
+        AuthAPI[授权 API]
+        AdminAPI[管理后台 API]
+        JWTAuth[JWT 认证中间件]
+    end
+    
+    subgraph Database[(MySQL 数据库)]
+        AuthCodes[授权码表]
+        Devices[设备表]
+        AdminUsers[管理员表]
+        AuditLogs[审计日志表]
+    end
+    
+    AuthModal --> AuthStore
+    AuthStore -->|验证授权码| AuthAPI
+    AuthStore -->|检查授权状态| AuthAPI
+    AuthAPI --> AuthCodes
+    AuthAPI --> Devices
+    AdminAPI --> JWTAuth
+    JWTAuth --> AdminUsers
+    AdminAPI --> AuthCodes
+    AdminAPI --> AuditLogs
+```
+
+### 前端实现
+
+#### 授权状态管理
+
+授权状态通过 Pinia Store 进行管理，主要文件为 [`src/stores/auth.ts`](src/stores/auth.ts)：
+
+```typescript
+// 核心状态
+interface AuthState {
+    isAuthorized: boolean;      // 是否已授权
+    authCode: string | null;    // 当前授权码
+    deviceId: string;           // 设备唯一标识
+    isChecking: boolean;        // 是否正在验证
+    errorMessage: string | null; // 错误信息
+}
+```
+
+**核心功能：**
+- **设备 ID 生成**：首次启动时生成唯一设备 ID 并存储在 localStorage
+- **平台检测**：自动识别 Windows/macOS 平台
+- **授权验证**：调用后端 API 验证授权码有效性
+- **状态持久化**：授权状态通过 `pinia-plugin-persistedstate` 持久化存储
+
+#### 授权弹窗组件
+
+授权弹窗组件位于 [`src/components/Modal/GlobalAuthModal.vue`](src/components/Modal/GlobalAuthModal.vue)：
+
+- 仅在 Electron 环境下显示
+- 未授权时阻止应用其他功能使用
+- 支持回车键快捷验证
+- 显示详细的错误提示信息
+
+#### 应用入口集成
+
+在 [`src/App.vue`](src/App.vue) 中进行授权检查初始化：
+
+```typescript
+// 仅 Electron 端需要授权验证
+if (isElectron) {
+  const authStore = useAuthStore();
+  onMounted(() => {
+    authStore.checkAuth();
+  });
+}
+```
+
+### 后端服务实现
+
+#### API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/auth/verify` | POST | 验证授权码并绑定设备 |
+| `/api/auth/check` | GET | 检查设备授权状态 |
+| `/api/admin/login` | POST | 管理员登录 |
+| `/api/admin/dashboard` | GET | 获取仪表盘数据 |
+| `/api/admin/codes` | GET/POST | 授权码管理 |
+
+#### 授权验证流程
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant API as 后端 API
+    participant DB as 数据库
+    
+    Client->>API: POST /api/auth/verify
+    Note right of Client: 携带授权码、设备ID、平台
+    
+    API->>DB: 查询授权码
+    DB-->>API: 返回授权码信息
+    
+    alt 授权码无效
+        API-->>Client: 401 授权码无效
+    else 授权码已禁用
+        API-->>Client: 403 授权码已禁用
+    else 授权码有效
+        API->>DB: 解绑同平台其他设备
+        API->>DB: 绑定当前设备
+        API-->>Client: 200 授权成功
+    end
+```
+
+#### 平台独立绑定机制
+
+系统采用**按平台独立绑定**策略，即：
+- 同一授权码可在 Windows 和 macOS 各绑定一台设备
+- 同一平台的新设备登录会自动踢掉该平台的旧设备
+- 实现代码位于 [`server/routes/auth.ts`](server/routes/auth.ts)
+
+### 数据库设计
+
+数据库初始化脚本位于 [`scripts/init_database.sql`](scripts/init_database.sql)。
+
+#### 核心表结构
+
+```sql
+-- 授权码表
+CREATE TABLE auth_codes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(50) UNIQUE NOT NULL,        -- 授权码
+  status ENUM('unused', 'active', 'disabled'), -- 状态
+  remarks VARCHAR(255),                     -- 备注
+  generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_login_at TIMESTAMP NULL,
+  last_login_ip VARCHAR(50) NULL
+);
+
+-- 设备表
+CREATE TABLE devices (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id VARCHAR(100) NOT NULL,          -- 设备唯一标识
+  auth_code_id INT NULL,                    -- 绑定的授权码ID
+  platform VARCHAR(20) DEFAULT 'android',   -- 平台：windows/macos/android/ios
+  status ENUM('active', 'banned'),          -- 设备状态
+  ip VARCHAR(50),                           -- 最后登录IP
+  name VARCHAR(100),                        -- 设备名称
+  first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (auth_code_id) REFERENCES auth_codes(id)
+);
+
+-- 管理员表
+CREATE TABLE admin_users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password VARCHAR(255) NOT NULL,           -- bcrypt 加密存储
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 审计日志表
+CREATE TABLE audit_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admin_username VARCHAR(50),
+  action VARCHAR(50),                       -- 操作类型
+  details TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### ER 图
+
+```mermaid
+erDiagram
+    AUTH_CODES ||--o{ DEVICES : "binds"
+    ADMIN_USERS ||--o{ AUDIT_LOGS : "generates"
+    
+    AUTH_CODES {
+        int id PK
+        string code UK
+        string status
+        string remarks
+        timestamp generated_at
+        timestamp last_login_at
+        string last_login_ip
+    }
+    
+    DEVICES {
+        int id PK
+        string device_id UK
+        int auth_code_id FK
+        string platform
+        string status
+        string ip
+        string name
+        timestamp first_seen_at
+        timestamp last_active_at
+    }
+    
+    ADMIN_USERS {
+        int id PK
+        string username UK
+        string password
+        timestamp created_at
+    }
+    
+    AUDIT_LOGS {
+        int id PK
+        string admin_username
+        string action
+        text details
+        timestamp created_at
+    }
+```
+
+### 管理后台
+
+项目内置 Web 管理后台，提供授权码管理和数据统计功能：
+
+- **访问地址**：`/admin`
+- **功能模块**：
+  - 仪表盘：总授权码数、活跃授权码数、昨日在线人数统计
+  - 授权码管理：生成、查询、编辑、禁用授权码
+  - 设备管理：查看设备列表、封禁设备
+  - 操作日志：记录管理员操作历史
+
+## 🔧 构建与运行
+
+### 环境要求
+
+- Node.js >= 20
+- pnpm >= 8（推荐使用 pnpm）
+- Rust 工具链（可选，用于原生模块开发）
+
+### 安装依赖
+
+```bash
+# 安装 pnpm（如未安装）
+npm install pnpm -g
+
+# 安装项目依赖
+pnpm install
+```
+
+### 开发命令
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm dev` | 启动 Electron 开发模式（包含热重载） |
+| `pnpm web:dev` | 启动 Web 开发服务器（仅渲染进程） |
+| `pnpm docs:dev` | 启动文档开发服务器 |
+
+### 构建命令
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm build` | 构建所有平台客户端（当前架构） |
+| `pnpm build:win` | 构建 Windows 客户端 |
+| `pnpm build:linux` | 构建 Linux 客户端 |
+| `pnpm build:mac` | 构建 macOS 客户端 |
+| `pnpm build:web` | 构建 Web 前端（无 Electron） |
+| `pnpm build:native` | 单独构建 Rust 原生模块 |
+
+> **提示**：如需构建多架构版本，可在命令后追加参数，例如：`pnpm build:win -- --x64 --arm64`
+
+### 服务器命令
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm server:dev` | 开发模式启动后端服务器 |
+| `pnpm build:server` | 编译后端 TypeScript |
+| `pnpm server:start` | 启动编译后的后端服务 |
+| `pnpm server` | 构建并启动后端服务（生产模式） |
+| `pnpm server:verify` | 验证服务器配置 |
+
+服务器默认运行在 `http://localhost:25884`，可通过环境变量 `VITE_SERVER_PORT` 修改端口。
+
+### 代码质量命令
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm lint` | 运行 ESLint 检查并自动修复 |
+| `pnpm format` | 使用 Prettier 格式化代码 |
+| `pnpm typecheck` | TypeScript 类型检查 |
+
+### 环境变量配置
+
+复制 `.env.example` 为 `.env` 并按需修改：
+
+```bash
+# 必填：网易云音乐 API 地址
+VITE_API_URL=https://your-api.example.com
+
+# 可选：服务器配置
+VITE_SERVER_PORT=25884
+
+# 可选：数据库配置（服务器模式）
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=your_password
+DB_NAME=music
+DB_PORT=3306
+
+# 可选：JWT 密钥
+JWT_SECRET=your_secret_key
+```
+
+### 常见问题
+
+**Q: `pnpm install` 失败？**
+> 检查网络连接，可使用国内镜像源：`pnpm config set registry https://registry.npmmirror.com`
+
+**Q: 原生模块编译失败？**
+> 确保已安装 Rust 工具链：`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+
+**Q: Electron 启动白屏？**
+> 检查控制台错误，可能是 API 地址配置错误或服务未启动
+
 ## 📦️ 获取
 
 ### 二进制安装方案
