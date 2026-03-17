@@ -42,13 +42,13 @@
 
 <script setup lang="ts">
 import type { NScrollbar } from "naive-ui";
-import type { MenuOption, MenuInst } from "naive-ui";
+import type { MenuOption /* , MenuInst */ } from "naive-ui";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
 import { renderIcon } from "@/utils/helper";
 import { isElectron } from "@/utils/env";
-import { useStatusStore } from "@/stores";
-import packageJson from "@/../package.json";
+// import { useStatusStore } from "@/stores";
+// import packageJson from "@/../package.json";
 import GeneralSetting from "./GeneralSetting.vue";
 import PlaySetting from "./PlaySetting.vue";
 import LyricsSetting from "./LyricsSetting.vue";
@@ -57,12 +57,12 @@ import LocalSetting from "./LocalSetting.vue";
 import ThirdSetting from "./ThirdSetting.vue";
 import StreamingSetting from "./StreamingSetting.vue";
 import OtherSetting from "./OtherSetting.vue";
-import AboutSetting from "./AboutSetting.vue";
+// import AboutSetting from "./AboutSetting.vue";
 
 const props = defineProps<{ type: SettingType; scrollTo?: string }>();
 
 const { isSmallScreen } = useMobile();
-const statusStore = useStatusStore();
+// const statusStore = useStatusStore();
 
 // 设置内容
 const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
@@ -137,9 +137,9 @@ const currentTitle = computed(() => titleMap[activeKey.value]?.title || "设置"
 // 当前副标题
 const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || "");
 
-const toGithub = () => {
-  window.open(packageJson.github);
-};
+// const toGithub = () => {
+//   window.open(packageJson.github);
+// };
 </script>
 
 <style lang="scss" scoped>
