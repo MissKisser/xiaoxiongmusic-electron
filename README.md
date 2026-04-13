@@ -149,12 +149,18 @@ flowchart TB
         JWTAuth[JWT 认证中间件]
     end
     
-    subgraph Database[(MySQL 数据库)]
+    subgraph Database[数据库]
+        MySQL[(MySQL)]
         AuthCodes[授权码表]
         Devices[设备表]
         AdminUsers[管理员表]
         AuditLogs[审计日志表]
     end
+    
+    MySQL --> AuthCodes
+    MySQL --> Devices
+    MySQL --> AdminUsers
+    MySQL --> AuditLogs
     
     AuthModal --> AuthStore
     AuthStore -->|验证授权码| AuthAPI
