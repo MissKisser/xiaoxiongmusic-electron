@@ -189,6 +189,8 @@ export interface SettingState {
   playSongDemo: boolean;
   /** 显示搜索历史 */
   showSearchHistory: boolean;
+  /** 显示热搜榜 */
+  showHotSearch: boolean;
   /** 是否使用 AMLL 歌词 */
   useAMLyrics: boolean;
   /** 是否使用 AMLL 歌词弹簧效果 */
@@ -282,6 +284,26 @@ export interface SettingState {
     /** 隐藏心动模式 */
     hideHeartbeatMode: boolean;
   };
+  /** 右键菜单显示配置 */
+  contextMenuOptions: {
+    play: boolean;
+    playNext: boolean;
+    addToPlaylist: boolean;
+    mv: boolean;
+    dislike: boolean;
+    more: boolean;
+    cloudImport: boolean;
+    deleteFromPlaylist: boolean;
+    deleteFromCloud: boolean;
+    deleteFromLocal: boolean;
+    openFolder: boolean;
+    cloudMatch: boolean;
+    wiki: boolean;
+    search: boolean;
+    download: boolean;
+    copyName: boolean;
+    musicTagEditor: boolean;
+  };
   /** 启用搜索关键词获取 */
   enableSearchKeyword: boolean;
   /** 失焦后自动清空搜索框 */
@@ -360,6 +382,7 @@ export const useSettingStore = defineStore("setting", {
     koreanLyricFont: "follow",
     hideVipTag: false,
     showSearchHistory: true,
+    showHotSearch: true,
     menuShowCover: true,
     menuExpandedKeys: [],
     routeAnimation: "slide",
@@ -477,6 +500,25 @@ export const useSettingStore = defineStore("setting", {
       hideUserPlaylists: false,
       hideLikedPlaylists: false,
       hideHeartbeatMode: false,
+    },
+    contextMenuOptions: {
+      play: true,
+      playNext: true,
+      addToPlaylist: true,
+      mv: true,
+      dislike: true,
+      more: true,
+      cloudImport: true,
+      deleteFromPlaylist: true,
+      deleteFromCloud: true,
+      deleteFromLocal: true,
+      openFolder: true,
+      cloudMatch: true,
+      wiki: true,
+      search: true,
+      download: true,
+      copyName: true,
+      musicTagEditor: true,
     },
     enableSearchKeyword: true,
     clearSearchOnBlur: false,

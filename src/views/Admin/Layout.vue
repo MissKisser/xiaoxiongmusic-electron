@@ -1,50 +1,47 @@
 <template>
-  <n-config-provider :theme="darkTheme">
-    <div class="admin-layout">
+  <n-config-provider :theme="isDark ? darkTheme : null">
+    <div class="admin-layout" :class="{ 'dark-mode': isDark }">
       <n-layout has-sider class="main-layout">
         <!-- 移动端遮罩 -->
-        <div 
-          v-if="isMobile && siderVisible" 
-          class="sider-overlay" 
-          @click="siderVisible = false"
-        />
+        <div v-if="isMobile && siderVisible" class="sider-overlay" @click="siderVisible = false" />
 
         <!-- 侧边栏 -->
         <n-layout-sider
           v-show="!isMobile || siderVisible"
           bordered
-          :width="240"
+          :width="220"
           :collapsed-width="64"
           collapse-mode="width"
           :native-scrollbar="false"
           :class="['admin-sider', { 'mobile-sider': isMobile }]"
         >
           <div class="sider-header">
-            <div class="logo-icon">🐻</div>
+            <n-icon size="24" :color="isDark ? '#3b82f6' : '#2563eb'"><MusicalNotesOutline /></n-icon>
             <h2>小熊管理</h2>
           </div>
-          
+
           <n-menu
             :value="activeKey"
             :options="menuOptions"
             :collapsed-width="64"
-            :collapsed-icon-size="22"
-            :icon-size="20"
+            :collapsed-icon-size="20"
+            :icon-size="18"
             @update:value="handleMenuSelect"
           />
-          
+
           <div class="sider-footer">
-            <n-tooltip trigger="hover" placement="right">
-              <template #trigger>
-                <n-button text class="logout-btn" @click="handleLogout">
-                  <template #icon>
-                    <n-icon><LogOutOutline /></n-icon>
-                  </template>
-                  <span>退出登录</span>
-                </n-button>
-              </template>
-              退出登录
-            </n-tooltip>
+            <n-flex vertical :size="12">
+              <n-button text class="theme-btn" @click="toggleTheme">
+                <template #icon>
+                  <n-icon size="18"><component :is="isDark ? SunnyOutline : MoonOutline" /></n-icon>
+                </template>
+                {{ isDark ? '浅色模式' : '深色模式' }}
+              </n-button>
+              <n-button text class="logout-btn" @click="handleLogout">
+                <template #icon><n-icon size="18"><LogOutOutline /></n-icon></template>
+                退出登录
+              </n-button>
+            </n-flex>
           </div>
         </n-layout-sider>
 
@@ -52,31 +49,21 @@
         <n-layout class="content-layout">
           <n-layout-header bordered class="admin-header">
             <div class="header-left">
-              <n-button
-                v-if="isMobile"
-                text
-                class="menu-toggle"
-                @click="siderVisible = !siderVisible"
-              >
-                <template #icon>
-                  <n-icon size="22"><MenuOutline /></n-icon>
-                </template>
+              <n-button v-if="isMobile" text class="menu-toggle" @click="siderVisible = !siderVisible">
+                <template #icon><n-icon size="20"><MenuOutline /></n-icon></template>
               </n-button>
               <span class="page-title">{{ currentTitle }}</span>
             </div>
             <div class="header-right">
-              <div class="user-profile">
-                <n-avatar round size="small" src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-                <span class="username" v-if="!isMobile">{{ adminUsername }}</span>
-              </div>
+              <span class="username">{{ adminUsername }}</span>
             </div>
           </n-layout-header>
-          
+
           <n-layout-content class="admin-content" :native-scrollbar="false">
-            <div class="content-wrapper">
+            <div class="content-center">
               <router-view v-slot="{ Component }">
-                <transition name="fade-slide" mode="out-in">
-                  <component :is="Component" />
+                <transition name="fade" mode="out-in">
+                  <component :is="Component" :is-dark="isDark" />
                 </transition>
               </router-view>
             </div>
@@ -88,44 +75,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted } from 'vue';
+import { ref, computed, h, onMounted, onUnmounted, provide } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { 
-  darkTheme, 
-  NConfigProvider, 
-  NLayout, 
-  NLayoutSider, 
-  NLayoutHeader, 
+import {
+  darkTheme,
+  NConfigProvider,
+  NLayout,
+  NLayoutSider,
+  NLayoutHeader,
   NLayoutContent,
   NMenu,
   NButton,
   NIcon,
-  NAvatar,
-  NTooltip
+  NFlex,
 } from 'naive-ui';
-import { 
-  SpeedometerOutline, 
-  KeyOutline, 
-  GitNetworkOutline, 
-  ReaderOutline,
+import {
+  GridOutline,
+  KeyOutline,
+  GitBranchOutline,
+  DocumentTextOutline,
   LogOutOutline,
-  MenuOutline
+  MenuOutline,
+  MusicalNotesOutline,
+  MoonOutline,
+  SunnyOutline,
 } from '@vicons/ionicons5';
 
 const router = useRouter();
 const route = useRoute();
-
 const adminUsername = ref(localStorage.getItem('admin_username') || '管理员');
-
-// 移动端响应式状态
 const isMobile = ref(false);
 const siderVisible = ref(false);
+const isDark = ref(localStorage.getItem('admin_theme') === 'dark');
+
+// 提供主题状态给子组件
+provide('adminTheme', isDark);
+
+const toggleTheme = () => {
+  isDark.value = !isDark.value;
+  localStorage.setItem('admin_theme', isDark.value ? 'dark' : 'light');
+};
 
 const checkMobile = () => {
   isMobile.value = window.innerWidth <= 768;
-  if (!isMobile.value) {
-    siderVisible.value = false;
-  }
+  if (!isMobile.value) siderVisible.value = false;
 };
 
 onMounted(() => {
@@ -137,36 +130,17 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile);
 });
 
-// 渲染图标辅助函数
 function renderIcon(icon: any) {
   return () => h(NIcon, null, { default: () => h(icon) });
 }
 
-// 菜单选项
 const menuOptions = [
-  {
-    label: '仪表盘',
-    key: 'dashboard',
-    icon: renderIcon(SpeedometerOutline)
-  },
-  {
-    label: '授权码管理',
-    key: 'codes',
-    icon: renderIcon(KeyOutline)
-  },
-  {
-    label: '版本管理',
-    key: 'versions',
-    icon: renderIcon(GitNetworkOutline)
-  },
-  {
-    label: '操作日志',
-    key: 'logs',
-    icon: renderIcon(ReaderOutline)
-  },
+  { label: '仪表盘', key: 'dashboard', icon: renderIcon(GridOutline) },
+  { label: '授权码', key: 'codes', icon: renderIcon(KeyOutline) },
+  { label: '版本管理', key: 'versions', icon: renderIcon(GitBranchOutline) },
+  { label: '操作日志', key: 'logs', icon: renderIcon(DocumentTextOutline) },
 ];
 
-// 当前选中的菜单
 const activeKey = computed(() => {
   const path = route.path;
   if (path.includes('dashboard')) return 'dashboard';
@@ -176,22 +150,16 @@ const activeKey = computed(() => {
   return 'dashboard';
 });
 
-// 当前页面标题
 const currentTitle = computed(() => {
   const option = menuOptions.find(opt => opt.key === activeKey.value);
   return option ? option.label : '管理后台';
 });
 
-// 处理菜单选择
 const handleMenuSelect = (key: string) => {
   router.push(`/bamger/${key}`);
-  // 移动端选择后自动收起
-  if (isMobile.value) {
-    siderVisible.value = false;
-  }
+  if (isMobile.value) siderVisible.value = false;
 };
 
-// 退出登录
 const handleLogout = () => {
   localStorage.removeItem('admin_token');
   localStorage.removeItem('admin_username');
@@ -200,53 +168,51 @@ const handleLogout = () => {
 </script>
 
 <style lang="scss" scoped>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 .admin-layout {
   height: 100vh;
-  background-color: #000;
-  font-family: 'Inter', sans-serif;
-  overflow: hidden;
+  background: #f5f5f7;
+  transition: background 0.3s;
+
+  &.dark-mode {
+    background: #0a0a0f;
+  }
 }
 
 .main-layout {
   height: 100%;
-  background-color: transparent !important;
+  background: transparent !important;
 }
 
-// 移动端遮罩层
 .sider-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
   z-index: 99;
-  backdrop-filter: blur(4px);
 }
 
 .admin-sider {
-  background-color: #111 !important;
-  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
-  
+  background: #ffffff !important;
+  border-right: 1px solid #e5e5e5 !important;
+  transition: background 0.3s, border-color 0.3s;
+
+  .dark-mode & {
+    background: #12121a !important;
+    border-right-color: rgba(255, 255, 255, 0.06) !important;
+  }
+
   .sider-header {
-    height: 64px;
+    height: 60px;
     display: flex;
     align-items: center;
-    padding: 0 20px;
-    
-    .logo-icon {
-      font-size: 24px;
-      margin-right: 12px;
-    }
+    gap: 10px;
+    padding: 0 18px;
 
     h2 {
-      font-size: 16px;
-      font-weight: 700;
-      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      color: #18181b;
       margin: 0;
-      white-space: nowrap;
+      .dark-mode & { color: #e4e4e7; }
     }
   }
 
@@ -254,112 +220,86 @@ const handleLogout = () => {
     position: absolute;
     bottom: 0;
     width: 100%;
-    padding: 20px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-    
+    padding: 16px 18px;
+    border-top: 1px solid #e5e5e5;
+    .dark-mode & { border-top-color: rgba(255, 255, 255, 0.06); }
+
+    .theme-btn {
+      color: #71717a;
+      &:hover { color: #2563eb; .dark-mode & { color: #3b82f6; } }
+    }
+
     .logout-btn {
-      color: rgba(255, 255, 255, 0.6);
-      &:hover {
-        color: #ff6b6b;
-      }
+      color: #71717a;
+      &:hover { color: #ef4444; }
     }
   }
 
-  // 移动端侧边栏样式
   &.mobile-sider {
     position: fixed !important;
     top: 0;
     left: 0;
     height: 100vh;
     z-index: 100;
-    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    .dark-mode & { box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4); }
   }
 }
 
 .content-layout {
-  background-color: transparent !important;
+  background: transparent !important;
 }
 
 .admin-header {
-  height: 64px;
-  background-color: rgba(17, 17, 17, 0.8) !important;
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e5e5e5 !important;
+  transition: background 0.3s, border-color 0.3s;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32px;
+  padding: 0 24px;
 
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .menu-toggle {
-    color: rgba(255, 255, 255, 0.7);
-    &:hover {
-      color: #fff;
-    }
+  .dark-mode & {
+    background: rgba(18, 18, 26, 0.9) !important;
+    border-bottom-color: rgba(255, 255, 255, 0.06) !important;
   }
 
-  .header-title {
-    font-size: 18px;
-    font-weight: 600;
-  }
-  
-  .user-profile {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 30px;
-    
-    .username {
-      font-size: 14px;
-      font-weight: 500;
-    }
-  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .menu-toggle { color: #71717a; &:hover { color: #18181b; .dark-mode & { color: #e4e4e7; } } }
+  .page-title { font-size: 14px; font-weight: 500; color: #71717a; }
+  .username { font-size: 14px; color: #a1a1aa; }
 }
 
 .admin-content {
-  background-color: #050505 !important;
-  position: relative;
-  
-  .content-wrapper {
-    padding: 32px;
-    max-width: 1600px;
-    margin: 0 auto;
+  background: #f5f5f7 !important;
+  padding: 24px;
+  transition: background 0.3s;
+
+  .dark-mode & {
+    background: #0a0a0f !important;
+  }
+
+  // Naive UI scrollbar 居中
+  :deep(.n-scrollbar),
+  :deep(.n-scrollbar-container),
+  :deep(.n-scrollbar-content) {
+    display: flex;
+    justify-content: center;
+  }
+
+  .content-center {
+    width: 100%;
+    max-width: 1200px;
   }
 }
 
-/* 页面切换动画 */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-/* 移动端适配 */
 @media (max-width: 768px) {
-  .admin-header {
-    padding: 0 16px;
-  }
-
-  .admin-content {
-    .content-wrapper {
-      padding: 16px;
-    }
-  }
+  .admin-header { padding: 0 16px; }
+  .admin-content { padding: 16px; }
 }
 </style>

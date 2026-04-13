@@ -54,6 +54,8 @@ export interface StoreType {
     /** 端口 */
     port: number;
   };
+  /** 是否启用 HTTP/2 下载 */
+  enableDownloadHttp2: boolean;
 }
 
 /**
@@ -86,6 +88,7 @@ export const useStore = () => {
         enabled: false,
         port: 25885,
       },
+      enableDownloadHttp2: true,
     },
   });
 };

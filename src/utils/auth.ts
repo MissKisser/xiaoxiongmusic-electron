@@ -377,12 +377,27 @@ export const updateDailySongsData = async (refresh = false) => {
  * 删除歌曲
  * @param pid 歌单id
  * @param ids 要删除的歌曲id
+ * @param options 回调函数或配置对象
  */
-export const deleteSongs = async (pid: number, ids: number[], callback?: () => void) => {
+export const deleteSongs = async (
+  pid: number,
+  ids: number[],
+  options?: (() => void) | { callback?: () => void; songName?: string },
+) => {
   try {
+    // 解析参数格式（支持旧的回调函数和新的配置对象）
+    const callback = typeof options === "function" ? options : options?.callback;
+    const songName = typeof options === "object" ? options?.songName : undefined;
+
+    const contentText = songName
+      ? `确定从歌单中删除 ${songName}？`
+      : ids?.length > 1
+        ? "确定删除这些选中的歌曲吗？"
+        : "确定删除这个歌曲吗？";
+
     window.$dialog.warning({
       title: "删除歌曲",
-      content: ids?.length > 1 ? "确定删除这些选中的歌曲吗？" : "确定删除这个歌曲吗？",
+      content: contentText,
       positiveText: "删除",
       negativeText: "取消",
       onPositiveClick: async () => {

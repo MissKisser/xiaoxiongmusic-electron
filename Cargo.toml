@@ -1,5 +1,5 @@
 [workspace]
-members = ["native/external-media-integration", "native/ferrous-opencc-wasm"]
+members = ["native/external-media-integration", "native/ferrous-opencc-wasm", "native/tools"]
 
 resolver = "3"
 

@@ -1,110 +1,46 @@
 <template>
-  <div class="admin-dashboard">
+  <div class="admin-dashboard" :class="{ 'dark-mode': isDark }">
     <!-- 统计卡片 -->
-    <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" :item-responsive="true">
-      <n-gi span="4 s:2 m:1">
-        <n-card class="stat-card">
-          <n-statistic label="总授权码" :value="stats.totalCodes">
-            <template #suffix>个</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-      <n-gi span="4 s:2 m:1">
-        <n-card class="stat-card">
-          <n-statistic label="活跃授权码" :value="stats.activeCodes">
-            <template #suffix>个</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-      <n-gi span="4 s:2 m:1">
-        <n-card class="stat-card">
-          <n-statistic label="昨日在线" :value="stats.yesterdayActive">
-            <template #suffix>人</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-      <n-gi span="4 s:2 m:1">
-        <n-card class="stat-card">
-          <n-statistic label="平台数" :value="Object.keys(stats.platformDistribution).length">
-            <template #suffix>个</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-    </n-grid>
+    <div class="stats-grid">
+      <n-card class="stat-card">
+        <div class="stat-value">{{ stats.totalCodes }}</div>
+        <div class="stat-label">授权码总数</div>
+      </n-card>
+      <n-card class="stat-card">
+        <div class="stat-value">{{ stats.activeCodes }}</div>
+        <div class="stat-label">活跃授权码</div>
+      </n-card>
+      <n-card class="stat-card">
+        <div class="stat-value">{{ stats.yesterdayActive }}</div>
+        <div class="stat-label">昨日在线</div>
+      </n-card>
+      <n-card class="stat-card">
+        <div class="stat-value">{{ Object.keys(stats.platformDistribution).length }}</div>
+        <div class="stat-label">平台数量</div>
+      </n-card>
+    </div>
 
-    <n-grid :cols="2" :x-gap="16" :y-gap="16" responsive="screen" :item-responsive="true" style="margin-top: 16px;">
-      <!-- 最近访问 -->
-      <n-gi span="2 m:1">
-        <n-card title="最近访问" class="recent-card">
-          <n-table :bordered="false" :single-line="false" size="small">
-            <thead>
-              <tr>
-                <th>授权码</th>
-                <th>平台</th>
-                <th>设备</th>
-                <th>活跃时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(item, index) in stats.recentActivity" :key="index">
-                <td>
-                  <code class="code-text">{{ formatCode(item.code) }}</code>
-                </td>
-                <td>
-                  <n-tag :type="getPlatformType(item.platform)" size="small" :bordered="false">
-                    {{ getPlatformLabel(item.platform) }}
-                  </n-tag>
-                </td>
-                <td>{{ item.deviceName }}</td>
-                <td>{{ formatTime(item.lastActiveAt) }}</td>
-              </tr>
-              <tr v-if="stats.recentActivity.length === 0">
-                <td colspan="4" style="text-align: center; color: rgba(255,255,255,0.4);">
-                  暂无数据
-                </td>
-              </tr>
-            </tbody>
-          </n-table>
-        </n-card>
-      </n-gi>
-
-      <!-- 平台分布 -->
-      <n-gi span="2 m:1">
-        <n-card title="平台分布">
-          <n-table :bordered="false" :single-line="false" size="small">
-            <thead>
-              <tr>
-                <th>平台</th>
-                <th>设备数量</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(count, platform) in stats.platformDistribution" :key="platform">
-                <td>{{ platform }}</td>
-                <td>{{ count }}</td>
-              </tr>
-              <tr v-if="Object.keys(stats.platformDistribution).length === 0">
-                <td colspan="2" style="text-align: center; color: rgba(255,255,255,0.4);">
-                  暂无数据
-                </td>
-              </tr>
-            </tbody>
-          </n-table>
-        </n-card>
-      </n-gi>
-    </n-grid>
+    <!-- 最近访问 -->
+    <n-card title="最近访问" class="table-card" style="margin-top: 16px;">
+      <n-data-table
+        :columns="activityColumns"
+        :data="stats.recentActivity"
+        :bordered="false"
+        size="small"
+      />
+    </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, h, inject, onMounted } from 'vue';
 import { NTag } from 'naive-ui';
 import axios from 'axios';
 
 interface RecentActivityItem {
   code: string;
   platform: string;
-  deviceName: string;
+  remarks: string;
   lastActiveAt: string;
 }
 
@@ -116,6 +52,7 @@ interface DashboardStats {
   recentActivity: RecentActivityItem[];
 }
 
+const isDark = inject('adminTheme', ref(false));
 const stats = ref<DashboardStats>({
   totalCodes: 0,
   activeCodes: 0,
@@ -132,30 +69,40 @@ const platformLabels: Record<string, string> = {
   web: 'Web',
 };
 
-const platformTypes: Record<string, 'default' | 'success' | 'info' | 'warning' | 'error'> = {
-  android: 'success',
-  ios: 'info',
-  windows: 'warning',
-  macos: 'default',
-  web: 'default',
-};
-
-const getPlatformLabel = (platform: string) => platformLabels[platform] || platform;
-const getPlatformType = (platform: string) => platformTypes[platform] || 'default';
-
-// 授权码截断显示
-const formatCode = (code: string) => {
-  if (code.length > 20) {
-    return `${code.slice(0, 16)}...${code.slice(-4)}`;
-  }
-  return code;
-};
-
-// 时间格式化
-const formatTime = (time: string) => {
-  if (!time) return '-';
-  return new Date(time).toLocaleString();
-};
+const activityColumns = [
+  {
+    title: '授权码',
+    key: 'code',
+    sorter: (a: RecentActivityItem, b: RecentActivityItem) => a.code.localeCompare(b.code),
+    render: (row: RecentActivityItem) => {
+      const code = row.code.length > 20 ? `${row.code.slice(0, 16)}...${row.code.slice(-4)}` : row.code;
+      return h('code', { class: 'code-text' }, code);
+    },
+  },
+  {
+    title: '平台',
+    key: 'platform',
+    width: 100,
+    sorter: (a: RecentActivityItem, b: RecentActivityItem) => a.platform.localeCompare(b.platform),
+    render: (row: RecentActivityItem) =>
+      h(NTag, { type: 'info', size: 'small', bordered: false }, () => platformLabels[row.platform] || row.platform),
+  },
+  {
+    title: '备注',
+    key: 'remarks',
+    sorter: (a: RecentActivityItem, b: RecentActivityItem) => (a.remarks || '').localeCompare(b.remarks || ''),
+    ellipsis: { tooltip: true },
+    render: (row: RecentActivityItem) => row.remarks || '-'
+  },
+  {
+    title: '活跃时间',
+    key: 'lastActiveAt',
+    width: 160,
+    defaultSortOrder: 'descend' as const,
+    sorter: (a: RecentActivityItem, b: RecentActivityItem) => new Date(a.lastActiveAt).getTime() - new Date(b.lastActiveAt).getTime(),
+    render: (row: RecentActivityItem) => row.lastActiveAt ? new Date(row.lastActiveAt).toLocaleString() : '-',
+  },
+];
 
 const fetchDashboard = async () => {
   try {
@@ -163,46 +110,80 @@ const fetchDashboard = async () => {
     const response = await axios.get('/api/admin/dashboard', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    
-    if (response.data.success) {
-      stats.value = response.data.data;
-    }
+    if (response.data.success) stats.value = response.data.data;
   } catch (error) {
     console.error('Fetch dashboard failed:', error);
   }
 };
 
-onMounted(() => {
-  fetchDashboard();
-});
+onMounted(fetchDashboard);
 </script>
 
 <style lang="scss" scoped>
 .admin-dashboard {
+  width: 100%;
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
   .stat-card {
     text-align: center;
+    padding: 20px 16px !important;
+    background: #ffffff !important;
+    border: 1px solid #e5e5e5 !important;
+    transition: background 0.3s, border-color 0.3s;
 
-    :deep(.n-statistic-value) {
-      font-size: 32px;
+    .dark-mode & {
+      background: #12121a !important;
+      border-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 600;
+      color: #18181b;
+      margin-bottom: 4px;
+      .dark-mode & { color: #e4e4e7; }
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: #71717a;
     }
   }
 
-  .recent-card {
-    .code-text {
+  .table-card {
+    background: #ffffff !important;
+    border: 1px solid #e5e5e5 !important;
+    transition: background 0.3s, border-color 0.3s;
+
+    .dark-mode & {
+      background: #12121a !important;
+      border-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    :deep(.code-text) {
       font-size: 12px;
-      color: rgba(255, 255, 255, 0.7);
-      word-break: break-all;
+      color: #a1a1aa;
+      background: rgba(0, 0, 0, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+
+      .dark-mode & {
+        background: rgba(255, 255, 255, 0.06);
+      }
     }
   }
 }
 
-@media (max-width: 768px) {
-  .admin-dashboard {
-    .stat-card {
-      :deep(.n-statistic-value) {
-        font-size: 24px;
-      }
-    }
-  }
+@media (max-width: 900px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 500px) {
+  .stats-grid { grid-template-columns: 1fr; }
 }
 </style>

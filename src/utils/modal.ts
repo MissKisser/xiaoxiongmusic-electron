@@ -25,6 +25,7 @@ import Equalizer from "@/components/Modal/Equalizer.vue";
 import SongUnlockManager from "@/components/Modal/Setting/SongUnlockManager.vue";
 import SidebarHideManager from "@/components/Modal/Setting/SidebarHideManager.vue";
 import HomePageSectionManager from "@/components/Modal/Setting/HomePageSectionManager.vue";
+import ContextMenuManager from "@/components/Modal/Setting/ContextMenuManager.vue";
 import CopyLyrics from "@/components/Modal/CopyLyrics.vue";
 import AMLLServer from "@/components/Modal/Setting/AMLLServer.vue";
 import FontManager from "@/components/Modal/Setting/FontManager.vue";
@@ -494,6 +495,20 @@ export const openStreamingServerConfig = (
         },
         onCancel: () => modal.destroy(),
       });
+    },
+  });
+};
+
+/** 打开右键菜单配置弹窗 */
+export const openContextMenuManager = () => {
+  window.$modal.create({
+    preset: "card",
+    transformOrigin: "center",
+    autoFocus: false,
+    style: { width: "500px" },
+    title: "右键菜单配置",
+    content: () => {
+      return h(ContextMenuManager);
     },
   });
 };

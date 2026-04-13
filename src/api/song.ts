@@ -163,3 +163,47 @@ export const songChorus = (id: number) => {
     params: { id },
   });
 };
+
+/**
+ * 歌曲百科摘要
+ * @param {number} id - 歌曲 id
+ */
+export const songWikiSummary = (id: number) => {
+  return request({
+    url: "/song/wiki/summary",
+    params: { id },
+  });
+};
+
+/**
+ * 乐谱列表
+ * @param {number} id - 歌曲 id
+ */
+export const songSheetList = (id: number) => {
+  return request({
+    url: "/sheet/list",
+    params: { id },
+  });
+};
+
+/**
+ * 乐谱预览
+ * @param {number} id - 乐谱 id
+ */
+export const songSheetPreview = (id: number) => {
+  return request({
+    url: "/sheet/preview",
+    params: { id },
+  });
+};
+
+/**
+ * 歌曲首次收听信息
+ * @param {number} id - 歌曲 id
+ */
+export const songFirstListenInfo = (id: number) => {
+  return request({
+    url: "/song/first/listen/info",
+    params: { id },
+  });
+};

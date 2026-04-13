@@ -1,6 +1,6 @@
 <template>
-  <div class="admin-logs">
-    <n-card title="操作日志">
+  <div class="admin-logs" :class="{ 'dark-mode': isDark }">
+    <n-card title="操作日志" class="table-card">
       <template #header-extra>
         <n-button @click="fetchLogs">刷新</n-button>
       </template>
@@ -9,15 +9,15 @@
         :columns="columns"
         :data="logs"
         :loading="isLoading"
-        :pagination="{ pageSize: 20 }"
-        :scroll-x="700"
+        :pagination="{ pageSize: 15 }"
+        :scroll-x="600"
       />
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, inject, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
 import axios from 'axios';
 
@@ -29,13 +29,12 @@ interface AuditLog {
   created_at: string;
 }
 
+const isDark = inject('adminTheme', ref(false));
 const message = useMessage();
 const logs = ref<AuditLog[]>([]);
 const isLoading = ref(false);
 
-const getAuthHeaders = () => ({
-  Authorization: `Bearer ${localStorage.getItem('admin_token')}`,
-});
+const getAuthHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('admin_token')}` });
 
 const actionLabels: Record<string, string> = {
   LOGIN: '登录',
@@ -50,20 +49,11 @@ const columns = [
   {
     title: '时间',
     key: 'created_at',
-    width: 160,
+    width: 140,
     render: (row: AuditLog) => new Date(row.created_at).toLocaleString(),
   },
-  {
-    title: '管理员',
-    key: 'admin_username',
-    width: 120,
-  },
-  {
-    title: '操作',
-    key: 'action',
-    width: 120,
-    render: (row: AuditLog) => actionLabels[row.action] || row.action,
-  },
+  { title: '管理员', key: 'admin_username', width: 100 },
+  { title: '操作', key: 'action', width: 100, render: (row: AuditLog) => actionLabels[row.action] || row.action },
   {
     title: '详情',
     key: 'details',
@@ -72,24 +62,15 @@ const columns = [
       try {
         const d = JSON.parse(row.details);
         switch (row.action) {
-          case 'LOGIN':
-            return `IP: ${d.ip || '-'}`;
-          case 'GENERATE_CODES':
-            return `生成 ${d.count} 个授权码${d.remarks ? `（备注: ${d.remarks}）` : ''}`;
-          case 'UPDATE_CODE':
-            return `授权码 #${d.id}${d.status ? ` → ${d.status}` : ''}${d.remarks !== undefined ? `（备注: ${d.remarks || '无'}）` : ''}`;
-          case 'DELETE_CODE':
-            return `删除授权码 #${d.id}`;
-          case 'PUBLISH_VERSION':
-            return `发布 ${d.version}（${d.platform}）${d.isForce ? ' [强制更新]' : ''}`;
-          case 'DELETE_VERSION':
-            return `删除版本 #${d.id}`;
-          default:
-            return JSON.stringify(d);
+          case 'LOGIN': return `IP: ${d.ip || '-'}`;
+          case 'GENERATE_CODES': return `生成 ${d.count} 个${d.remarks ? ` (${d.remarks})` : ''}`;
+          case 'UPDATE_CODE': return `#${d.id}${d.status ? ` → ${d.status}` : ''}`;
+          case 'DELETE_CODE': return `#${d.id}`;
+          case 'PUBLISH_VERSION': return `${d.version} (${d.platform})${d.isForce ? ' [强制]' : ''}`;
+          case 'DELETE_VERSION': return `#${d.id}`;
+          default: return JSON.stringify(d);
         }
-      } catch {
-        return row.details;
-      }
+      } catch { return row.details; }
     },
   },
 ];
@@ -97,24 +78,28 @@ const columns = [
 const fetchLogs = async () => {
   isLoading.value = true;
   try {
-    const response = await axios.get('/api/admin/logs', { headers: getAuthHeaders() });
-    if (response.data.success) {
-      logs.value = response.data.data;
-    }
-  } catch (error) {
-    message.error('获取日志失败');
-  } finally {
-    isLoading.value = false;
-  }
+    const res = await axios.get('/api/admin/logs', { headers: getAuthHeaders() });
+    if (res.data.success) logs.value = res.data.data;
+  } catch { message.error('获取失败'); }
+  finally { isLoading.value = false; }
 };
 
-onMounted(() => {
-  fetchLogs();
-});
+onMounted(fetchLogs);
 </script>
 
 <style lang="scss" scoped>
 .admin-logs {
-  /* Styles if needed */
+  width: 100%;
+
+  .table-card {
+    background: #ffffff !important;
+    border: 1px solid #e5e5e5 !important;
+    transition: background 0.3s, border-color 0.3s;
+
+    .dark-mode & {
+      background: #12121a !important;
+      border-color: rgba(255, 255, 255, 0.06) !important;
+    }
+  }
 }
 </style>

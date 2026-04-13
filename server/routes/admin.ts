@@ -60,10 +60,12 @@ export const initAdminAPI: FastifyPluginAsync = async (fastify) => {
 
             const token = jwt.sign({ username: admin.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
+            const clientIp = request.headers['x-real-ip'] as string || request.headers['x-forwarded-for'] as string || request.ip;
+
             // 记录登录日志
             await query(
                 'INSERT INTO audit_logs (admin_username, action, details) VALUES (?, ?, ?)',
-                [username, 'LOGIN', JSON.stringify({ ip: request.ip })]
+                [username, 'LOGIN', JSON.stringify({ ip: clientIp })]
             );
 
             return reply.send({
@@ -112,8 +114,8 @@ export const initAdminAPI: FastifyPluginAsync = async (fastify) => {
 
             // 最近 10 条设备活跃记录
             const recentActivity = await query<any[]>(
-                `SELECT d.platform, d.name as device_name, d.last_active_at,
-                        ac.code as auth_code
+                `SELECT d.platform, d.last_active_at,
+                        ac.code as auth_code, ac.remarks as auth_remarks
                  FROM devices d
                  LEFT JOIN auth_codes ac ON d.auth_code_id = ac.id
                  ORDER BY d.last_active_at DESC
@@ -130,7 +132,7 @@ export const initAdminAPI: FastifyPluginAsync = async (fastify) => {
                     recentActivity: recentActivity.map(r => ({
                         code: r.auth_code || '-',
                         platform: r.platform,
-                        deviceName: r.device_name || '-',
+                        remarks: r.auth_remarks || '-',
                         lastActiveAt: r.last_active_at,
                     })),
                 }

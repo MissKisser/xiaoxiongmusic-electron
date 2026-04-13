@@ -459,3 +459,13 @@ export const handleSongQuality = (
   }
   return undefined;
 };
+
+/**
+ * 获取分享链接
+ * @param type 资源类型 (song, playlist, album, artist, mv, etc.)
+ * @param id 资源 ID
+ * @returns 分享链接
+ */
+export const getShareUrl = (type: string, id: number | string): string => {
+  return `https://music.163.com/#/${type}?id=${id}`;
+};

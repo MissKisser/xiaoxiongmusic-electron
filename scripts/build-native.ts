@@ -33,6 +33,11 @@ try {
     stdio: "inherit",
   });
 
+  console.log("[BuildNative] 构建 tools 模块...");
+  execSync("pnpm --filter tools build", {
+    stdio: "inherit",
+  });
+
   // 有人抱怨编译 wasm 总是有问题，暂时注释掉
   // console.log("[BuildNative] 构建 ferrous-opencc-wasm...");
   // execSync("pnpm --filter ferrous-opencc-wasm build", {

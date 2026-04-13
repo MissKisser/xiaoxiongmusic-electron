@@ -250,6 +250,11 @@ const createLocalStore = () => {
     return { playlist, songs };
   };
 
+  // 判断是否为本地歌单
+  const isLocalPlaylist = (id: number): boolean => {
+    return localPlaylists.value.some((p) => p.id === id);
+  };
+
   // 直接初始化数据
   readLocalSong();
   readLocalPlaylists();
@@ -267,6 +272,7 @@ const createLocalStore = () => {
     addSongsToLocalPlaylist,
     removeSongsFromLocalPlaylist,
     getLocalPlaylistDetail,
+    isLocalPlaylist,
   });
 };
 
