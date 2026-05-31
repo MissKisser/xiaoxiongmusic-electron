@@ -82,7 +82,7 @@ const initAppServer = async () => {
     server.register(initProxyAPI, { prefix: "/api" });
     // 启动端口
     const port = Number(process.env["VITE_SERVER_PORT"] || 25884);
-    await server.listen({ port });
+    await server.listen({ port, host: "127.0.0.1" });
     serverLog.info(`🌐 Starting AppServer on port ${port}`);
     return server;
   } catch (error) {

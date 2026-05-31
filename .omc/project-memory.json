@@ -254,6 +254,12 @@
       "type": "directory"
     },
     {
+      "path": "electron\\main\\windows\\main-window.ts",
+      "accessCount": 9,
+      "lastAccessed": 1780204391448,
+      "type": "file"
+    },
+    {
       "path": "electron\\main\\store\\index.ts",
       "accessCount": 7,
       "lastAccessed": 1780204111186,
@@ -293,6 +299,24 @@
       "path": "src\\api\\streaming\\index.ts",
       "accessCount": 3,
       "lastAccessed": 1780203868148,
+      "type": "file"
+    },
+    {
+      "path": "electron\\main\\windows\\index.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780204203258,
+      "type": "file"
+    },
+    {
+      "path": "electron\\main\\ipc\\index.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780204459468,
+      "type": "file"
+    },
+    {
+      "path": "electron\\server\\index.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780204527001,
       "type": "file"
     },
     {
@@ -374,18 +398,6 @@
       "type": "file"
     },
     {
-      "path": "electron\\main\\windows\\main-window.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202581471,
-      "type": "file"
-    },
-    {
-      "path": "electron\\main\\windows\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202582316,
-      "type": "file"
-    },
-    {
       "path": "src\\components\\Setting\\ThirdSetting.vue",
       "accessCount": 1,
       "lastAccessed": 1780202594574,
@@ -458,12 +470,6 @@
       "type": "file"
     },
     {
-      "path": "electron\\main\\ipc\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202652934,
-      "type": "file"
-    },
-    {
       "path": "electron\\server\\proxy\\index.ts",
       "accessCount": 1,
       "lastAccessed": 1780202653008,
@@ -497,12 +503,6 @@
       "path": "electron\\server\\unblock\\index.ts",
       "accessCount": 1,
       "lastAccessed": 1780202695053,
-      "type": "file"
-    },
-    {
-      "path": "electron\\server\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202695157,
       "type": "file"
     },
     {

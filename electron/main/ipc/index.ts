@@ -1,8 +1,11 @@
+import { isMac } from "../utils/config";
 import initFileIpc from "./ipc-file";
 import initLyricIpc from "./ipc-lyric";
+import { initMacStatusBarIpc } from "./ipc-mac-statusbar";
 import initShortcutIpc from "./ipc-shortcut";
 import initStoreIpc from "./ipc-store";
 import initSystemIpc from "./ipc-system";
+import initTaskbarIpc from "./ipc-taskbar";
 import initThumbarIpc from "./ipc-thumbar";
 import initTrayIpc from "./ipc-tray";
 import initUpdateIpc from "./ipc-update";
@@ -34,6 +37,11 @@ const initIpc = (): void => {
   initMediaIpc();
   initMpvIpc();
   initRendererLogIpc();
+  if (isMac) {
+    initMacStatusBarIpc();
+  } else {
+    initTaskbarIpc();
+  }
 };
 
 export default initIpc;

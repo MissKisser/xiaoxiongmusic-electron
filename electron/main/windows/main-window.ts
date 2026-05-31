@@ -2,7 +2,10 @@ import { BrowserWindow, shell, app } from "electron";
 import { createWindow } from "./index";
 import { mainWinUrl } from "../utils/config";
 import { useStore } from "../store";
-import { isLinux } from "../utils/config";
+import { isLinux, isWin } from "../utils/config";
+import { loadNativeModule } from "../utils/native-loader";
+
+const tools = loadNativeModule("tools.node", "tools");
 
 class MainWindow {
   private win: BrowserWindow | null = null;
@@ -47,6 +50,19 @@ class MainWindow {
         shell.openExternal(url);
       }
       return { action: "deny" };
+    });
+
+    // 拦截页面导航
+    this.win.webContents.on("will-navigate", (event, url) => {
+      // 检查是否为图片文件（通过扩展名简单判断）
+      const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"];
+      const isImage = imageExtensions.some((ext) => url.toLowerCase().split("?")[0].endsWith(ext));
+
+      // 如果是图片，阻止导航并下载
+      if (isImage) {
+        event.preventDefault();
+        this.win?.webContents.downloadURL(url);
+      }
     });
     // 窗口显示时
     this.win?.on("show", () => {
@@ -120,6 +136,22 @@ class MainWindow {
 
     // 窗口事件
     this.event();
+
+    // 监听 Explorer 重启
+    if (isWin && tools && this.win) {
+      try {
+        const msgId = tools.getTaskbarCreatedMessageId();
+        if (msgId > 0) {
+          this.win.hookWindowMessage(msgId, () => {
+            // 监听到资源管理器重启
+            app.emit("explorer-restarted");
+          });
+        }
+      } catch (e) {
+        // 监听资源管理器重启时失败
+      }
+    }
+
     return this.win;
   }
   /**
