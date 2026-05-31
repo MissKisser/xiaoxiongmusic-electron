@@ -42,8 +42,15 @@ export default defineConfig({
       {
         text: "开发指南",
         items: [
-          { text: "原生插件", link: "/native" },
-          { text: "贡献指南", link: "/contributing" },
+          { text: "原生插件", link: "/development/native" },
+          { text: "贡献指南", link: "/development/contributing" },
+          { text: "上游同步指南", link: "/development/upstream-sync" },
+        ],
+      },
+      {
+        text: "部署",
+        items: [
+          { text: "Nginx 部署指南", link: "/deployment/nginx" },
         ],
       },
       {

@@ -85,6 +85,8 @@ export interface SettingState {
   lyricAlignRight: boolean;
   /** 隐藏歌词括号内容和别名 */
   hideLyricBrackets: boolean;
+  /** 隐藏歌曲/艺术家/专辑名中的括号内容 */
+  hideBracketedContent: boolean;
   /** 下载路径 */
   downloadPath: string;
   /** 是否启用缓存 */
@@ -452,6 +454,7 @@ export const useSettingStore = defineStore("setting", {
     lyricHorizontalOffset: 10,
     lyricAlignRight: false,
     hideLyricBrackets: false,
+    hideBracketedContent: false,
     enableExcludeLyrics: true,
     enableExcludeTTML: false,
     enableExcludeLocalLyrics: false,

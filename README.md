@@ -99,7 +99,7 @@
 - **自动踢出**：新设备登录自动踢掉同平台旧设备
 - **管理后台**：`/admin` 路径访问，支持授权码生成、查询、禁用
 
-详细实现请参考 [UPSTREAM_SYNC_GUIDE.md](UPSTREAM_SYNC_GUIDE.md)。
+详细实现请参考 [上游同步指南](docs/development/upstream-sync.md)。
 
 ## 环境要求
 
@@ -204,11 +204,11 @@ JWT_SECRET=your_secret_key
 
 **Q: 如何同步上游更新？**
 
-> 参考 [UPSTREAM_SYNC_GUIDE.md](UPSTREAM_SYNC_GUIDE.md) 中的同步流程
+> 参考 [上游同步指南](docs/development/upstream-sync.md) 中的同步流程
 
 ## 代码同步规范
 
-从 SPlayer 同步代码时，请严格遵守 [UPSTREAM_SYNC_GUIDE.md](UPSTREAM_SYNC_GUIDE.md)：
+从 SPlayer 同步代码时，请严格遵守 [上游同步指南](docs/development/upstream-sync.md)：
 
 - 保留二次开发内容（均衡器、百科、授权系统）
 - 不覆盖授权相关文件

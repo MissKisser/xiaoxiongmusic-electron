@@ -69,7 +69,12 @@
       "Bash(/tmp/gh-cli/bin/gh.exe auth:*)",
       "Bash(export HTTP_PROXY=http://127.0.0.1:10808)",
       "Bash(export HTTPS_PROXY=http://127.0.0.1:10808)",
-      "Bash(git commit -m '新增: Claude Code 代码同步规范文档:*)"
+      "Bash(git commit -m '新增: Claude Code 代码同步规范文档:*)",
+      "Bash(git commit -m '新增: SPlayer 上游代码同步规范文档:*)",
+      "Bash(git commit -m '重构: 重写 README 文档:*)",
+      "Bash(curl.exe -x http://127.0.0.1:10808 \"http://localhost:25884/api/netease/song/url/v1?id=1901371647&level=exhigh&timestamp=$\\(date +%s\\)\")",
+      "Bash(curl.exe *)",
+      "mcp__github__issue_write"
     ]
   }
 }
