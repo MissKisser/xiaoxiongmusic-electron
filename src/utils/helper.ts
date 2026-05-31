@@ -383,7 +383,7 @@ export const handleSongQuality = (
 ): QualityType | undefined => {
   const settingStore = useSettingStore();
   const { disableAiAudio } = settingStore;
-
+  if (!song) return undefined;
   if (type === "local" && typeof song === "number") {
     if (song >= 960000) return QualityType.HiRes;
     if (song >= 441000) return QualityType.SQ;
@@ -393,40 +393,64 @@ export const handleSongQuality = (
   }
 
   const levelQualityMap = {
-    "jymaster": QualityType.Master,
-    "dolby": QualityType.Dolby,
-    "sky": QualityType.Spatial,
-    "jyeffect": QualityType.Surround,
-    "hires": QualityType.HiRes,
-    "lossless": QualityType.SQ,
-    "exhigh": QualityType.HQ,
-    "higher": QualityType.MQ,
-    "standard": QualityType.LQ,
+    jymaster: QualityType.Master,
+    dolby: QualityType.Dolby,
+    sky: QualityType.Spatial,
+    jyeffect: QualityType.Surround,
+    hires: QualityType.HiRes,
+    lossless: QualityType.SQ,
+    exhigh: QualityType.HQ,
+    higher: QualityType.MQ,
+    standard: QualityType.LQ,
   };
 
-  // Fuck AI Filter
-  if (disableAiAudio && typeof song === "object" && song) {
-    if ("level" in song) {
-      if (AI_AUDIO_LEVELS.includes(song.level)) {
-        return QualityType.HiRes;
-      }
-    }
-    if ("privilege" in song) {
-      const p = song.privilege;
-      const level = p?.playMaxBrLevel ?? p?.plLevel;
-      if (AI_AUDIO_LEVELS.includes(level)) {
-        const quality = levelQualityMap["hires"];
-        if (quality) return quality;
-      }
-    }
-  }
+  // Fuck AI Filter: 如果是 AI 音质，跳过 level 属性判断，让后续遍历逻辑来确定真正的最高音质
+  const isAiLevel =
+    disableAiAudio &&
+    typeof song === "object" &&
+    song &&
+    (("level" in song && AI_AUDIO_LEVELS.includes(song.level)) ||
+      ("privilege" in song &&
+        AI_AUDIO_LEVELS.includes(song.privilege?.playMaxBrLevel ?? song.privilege?.plLevel)));
 
-  if (typeof song === "object" && song) {
-    // 含有 level 特殊处理
+  if (typeof song === "object" && song && !isAiLevel) {
+    // 含有 level 特殊处理（仅在非 AI 音质时使用）
     if ("level" in song) {
       const quality = levelQualityMap[song.level];
       if (quality) return quality;
     }
+    // 云盘歌曲适配
+    if ("privilege" in song) {
+      const privilege = song.privilege;
+      const quality =
+        levelQualityMap[privilege?.playMaxBrLevel] ?? levelQualityMap[privilege?.plLevel];
+      if (quality) return quality;
+    }
+  }
+
+  const order = [
+    { key: "jm", type: QualityType.Master },
+    { key: "db", type: QualityType.Dolby },
+    { key: "sk", type: QualityType.Spatial },
+    { key: "je", type: QualityType.Surround },
+    { key: "hr", type: QualityType.HiRes },
+    { key: "sq", type: QualityType.SQ },
+    { key: "h", type: QualityType.HQ },
+    { key: "m", type: QualityType.MQ },
+    { key: "l", type: QualityType.LQ },
+  ];
+
+  for (const itemKey of order) {
+    // 过滤 AI 音质
+    if (disableAiAudio && AI_AUDIO_KEYS.includes(itemKey.key)) {
+      continue;
+    }
+    if (song[itemKey.key] && Number(song[itemKey.key].br) > 0) {
+      return itemKey.type;
+    }
+  }
+  return undefined;
+};
     // 云盘歌曲适配
     if ("privilege" in song) {
       const privilege = song.privilege;
@@ -467,5 +491,12 @@ export const handleSongQuality = (
  * @returns 分享链接
  */
 export const getShareUrl = (type: string, id: number | string): string => {
+  const settingStore = useSettingStore();
+  const { shareUrlFormat } = settingStore;
+
+  if (shareUrlFormat === "mobile") {
+    return `https://y.music.163.com/m/${type}?id=${id}`;
+  }
+
   return `https://music.163.com/#/${type}?id=${id}`;
 };

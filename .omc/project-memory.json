@@ -249,9 +249,15 @@
   "hotPaths": [
     {
       "path": "",
-      "accessCount": 16,
-      "lastAccessed": 1780204954019,
+      "accessCount": 17,
+      "lastAccessed": 1780205030873,
       "type": "directory"
+    },
+    {
+      "path": "src\\utils\\helper.ts",
+      "accessCount": 10,
+      "lastAccessed": 1780205262020,
+      "type": "file"
     },
     {
       "path": "electron\\main\\windows\\main-window.ts",
@@ -515,12 +521,6 @@
       "path": "src\\composables\\useSongMenu.ts",
       "accessCount": 1,
       "lastAccessed": 1780202705363,
-      "type": "file"
-    },
-    {
-      "path": "src\\utils\\helper.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202706008,
       "type": "file"
     },
     {
