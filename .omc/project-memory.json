@@ -338,6 +338,12 @@
       "type": "file"
     },
     {
+      "path": "src\\App.vue",
+      "accessCount": 3,
+      "lastAccessed": 1780205690967,
+      "type": "file"
+    },
+    {
       "path": "docs\\.vitepress\\config.ts",
       "accessCount": 2,
       "lastAccessed": 1780200225471,
@@ -504,12 +510,6 @@
       "accessCount": 1,
       "lastAccessed": 1780202672869,
       "type": "directory"
-    },
-    {
-      "path": "src\\App.vue",
-      "accessCount": 1,
-      "lastAccessed": 1780202680775,
-      "type": "file"
     },
     {
       "path": "electron\\server\\unblock\\index.ts",
