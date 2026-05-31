@@ -249,9 +249,21 @@
   "hotPaths": [
     {
       "path": "",
-      "accessCount": 10,
-      "lastAccessed": 1780202712406,
+      "accessCount": 14,
+      "lastAccessed": 1780203794873,
       "type": "directory"
+    },
+    {
+      "path": "electron\\main\\store\\index.ts",
+      "accessCount": 7,
+      "lastAccessed": 1780204111186,
+      "type": "file"
+    },
+    {
+      "path": "src\\api\\song.ts",
+      "accessCount": 5,
+      "lastAccessed": 1780203960585,
+      "type": "file"
     },
     {
       "path": "README.md",
@@ -269,6 +281,18 @@
       "path": "electron\\preload\\index.d.ts",
       "accessCount": 3,
       "lastAccessed": 1780203602453,
+      "type": "file"
+    },
+    {
+      "path": "src\\core\\player\\PlayerIpc.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780203827413,
+      "type": "file"
+    },
+    {
+      "path": "src\\api\\streaming\\index.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780203868148,
       "type": "file"
     },
     {
@@ -302,15 +326,21 @@
       "type": "file"
     },
     {
-      "path": "docs\\development\\upstream-sync.md",
-      "accessCount": 1,
-      "lastAccessed": 1780201910633,
+      "path": "src\\stores\\music.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780203636807,
       "type": "file"
     },
     {
-      "path": "electron\\main\\store\\index.ts",
+      "path": "src\\core\\player\\PlayerController.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780203773029,
+      "type": "file"
+    },
+    {
+      "path": "docs\\development\\upstream-sync.md",
       "accessCount": 1,
-      "lastAccessed": 1780202544872,
+      "lastAccessed": 1780201910633,
       "type": "file"
     },
     {
@@ -410,12 +440,6 @@
       "type": "directory"
     },
     {
-      "path": "src\\stores\\music.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202645056,
-      "type": "file"
-    },
-    {
       "path": "src\\stores\\auth.ts",
       "accessCount": 1,
       "lastAccessed": 1780202645296,
@@ -458,21 +482,9 @@
       "type": "directory"
     },
     {
-      "path": "src\\api\\song.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202680242,
-      "type": "file"
-    },
-    {
       "path": "src\\App.vue",
       "accessCount": 1,
       "lastAccessed": 1780202680775,
-      "type": "file"
-    },
-    {
-      "path": "src\\api\\streaming\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202680852,
       "type": "file"
     },
     {
@@ -518,12 +530,6 @@
       "type": "file"
     },
     {
-      "path": "src\\core\\player\\PlayerController.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202730157,
-      "type": "file"
-    },
-    {
       "path": "src\\stores\\migrations\\settingMigrations.ts",
       "accessCount": 1,
       "lastAccessed": 1780202730386,
@@ -533,6 +539,12 @@
       "path": ".claude\\settings.local.json",
       "accessCount": 1,
       "lastAccessed": 1780203217547,
+      "type": "file"
+    },
+    {
+      "path": "src\\types\\shared\\taskbar-ipc.ts",
+      "accessCount": 1,
+      "lastAccessed": 1780203727020,
       "type": "file"
     }
   ],

@@ -7,3 +7,4 @@ export * as jellyfinApi from "./jellyfin";
 
 export { default as subsonic } from "./subsonic";
 export { default as jellyfin } from "./jellyfin";
+export { default as emby } from "./emby";

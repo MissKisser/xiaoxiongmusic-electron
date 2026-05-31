@@ -1,10 +1,11 @@
+import { DEFAULT_TASKBAR_CONFIG, type TaskbarConfig } from "@shared";
 import { app, screen } from "electron";
-import { storeLog } from "../logger";
-import type { LyricConfig } from "../../../src/types/desktop-lyric";
-import { defaultAMLLDbServer } from "../utils/config";
+import Store from "electron-store";
 import { join } from "path";
 import defaultLyricConfig from "../../../src/assets/data/lyricConfig";
-import Store from "electron-store";
+import type { LyricConfig } from "../../../src/types/desktop-lyric";
+import { storeLog } from "../logger";
+import { defaultAMLLDbServer } from "../utils/config";
 
 storeLog.info("🌱 Store init");
 
@@ -39,6 +40,11 @@ export interface StoreType {
     /** 配置 */
     config?: LyricConfig;
   };
+  /** 任务栏歌词 */
+  taskbar: TaskbarConfig & {
+    floatingX?: number;
+    floatingY?: number;
+  };
   /** 代理 */
   proxy: string;
   /** amll-db-server */
@@ -54,8 +60,20 @@ export interface StoreType {
     /** 端口 */
     port: number;
   };
-  /** 是否启用 HTTP/2 下载 */
-  enableDownloadHttp2: boolean;
+  /** 下载线程数 */
+  downloadThreadCount?: number;
+  /** 启用HTTP2下载 */
+  enableDownloadHttp2?: boolean;
+  /** macOS 专属设置 */
+  macos: {
+    /** 状态栏歌词 */
+    statusBarLyric: {
+      /** 是否启用 */
+      enabled: boolean;
+    };
+  };
+  /** 更新通道 */
+  updateChannel?: "stable" | "nightly";
 }
 
 /**
@@ -79,6 +97,16 @@ export const useStore = () => {
         height: 136,
         config: defaultLyricConfig,
       },
+      taskbar: {
+        ...DEFAULT_TASKBAR_CONFIG,
+        floatingX: screenData.workArea.x + screenData.workArea.width / 2 - 150,
+        floatingY: screenData.workArea.y + screenData.workArea.height - 120,
+      },
+      macos: {
+        statusBarLyric: {
+          enabled: false,
+        },
+      },
       proxy: "",
       amllDbServer: defaultAMLLDbServer,
       cachePath: join(app.getPath("userData"), "DataCache"),
@@ -88,7 +116,9 @@ export const useStore = () => {
         enabled: false,
         port: 25885,
       },
+      downloadThreadCount: 8,
       enableDownloadHttp2: true,
+      updateChannel: "stable",
     },
   });
 };
