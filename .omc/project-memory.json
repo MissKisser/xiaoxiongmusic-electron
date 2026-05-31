@@ -249,14 +249,20 @@
   "hotPaths": [
     {
       "path": "",
-      "accessCount": 14,
-      "lastAccessed": 1780203794873,
+      "accessCount": 16,
+      "lastAccessed": 1780204954019,
       "type": "directory"
     },
     {
       "path": "electron\\main\\windows\\main-window.ts",
       "accessCount": 9,
       "lastAccessed": 1780204391448,
+      "type": "file"
+    },
+    {
+      "path": "src\\stores\\setting.ts",
+      "accessCount": 9,
+      "lastAccessed": 1780204920021,
       "type": "file"
     },
     {
@@ -362,6 +368,12 @@
       "type": "file"
     },
     {
+      "path": "src\\stores\\migrations\\settingMigrations.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780204843845,
+      "type": "file"
+    },
+    {
       "path": "docs\\development\\upstream-sync.md",
       "accessCount": 1,
       "lastAccessed": 1780201910633,
@@ -458,12 +470,6 @@
       "type": "file"
     },
     {
-      "path": "src\\stores\\setting.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202645515,
-      "type": "file"
-    },
-    {
       "path": "src\\stores\\local.ts",
       "accessCount": 1,
       "lastAccessed": 1780202645873,
@@ -527,12 +533,6 @@
       "path": "src\\utils\\modal.ts",
       "accessCount": 1,
       "lastAccessed": 1780202706930,
-      "type": "file"
-    },
-    {
-      "path": "src\\stores\\migrations\\settingMigrations.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202730386,
       "type": "file"
     },
     {
