@@ -260,6 +260,12 @@
       "type": "file"
     },
     {
+      "path": "src\\router\\routes.ts",
+      "accessCount": 10,
+      "lastAccessed": 1780205597153,
+      "type": "file"
+    },
+    {
       "path": "electron\\main\\windows\\main-window.ts",
       "accessCount": 9,
       "lastAccessed": 1780204391448,
@@ -503,12 +509,6 @@
       "path": "src\\App.vue",
       "accessCount": 1,
       "lastAccessed": 1780202680775,
-      "type": "file"
-    },
-    {
-      "path": "src\\router\\routes.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202681273,
       "type": "file"
     },
     {

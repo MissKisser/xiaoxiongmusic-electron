@@ -134,13 +134,23 @@ const appRoutes: Array<RouteRecordRaw> = [
   },
   // 歌曲百科
   {
-    path: "/wiki",
-    name: "wiki",
+    path: "/song/wiki",
+    name: "song-wiki",
     beforeEnter: (to, _, next) => {
       if (!to.query.id) next({ path: "/403" });
       else next();
     },
     component: () => import("@/views/Song/wiki.vue"),
+  },
+  // 评论
+  {
+    path: "/comment",
+    name: "comment",
+    beforeEnter: (to, _, next) => {
+      if (!to.query.id) next({ path: "/403" });
+      else next();
+    },
+    component: () => import("@/views/Comment.vue"),
   },
   // 歌单
   {
@@ -335,13 +345,6 @@ const appRoutes: Array<RouteRecordRaw> = [
     name: "history",
     component: () => import("@/views/History.vue"),
   },
-  // 评论页
-  {
-    path: "/comment/:id",
-    name: "comment",
-    component: () => import("@/views/Comment.vue"),
-    props: true,
-  },
   // 状态
   {
     path: "/403",
@@ -375,7 +378,14 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: "/desktop-lyric",
     name: "desktop-lyric",
+    meta: { needApp: true },
     component: () => import("@/views/DesktopLyric/index.vue"),
+  },
+  // 任务栏歌词
+  {
+    path: "/taskbar-lyric",
+    name: "taskbar-lyric",
+    component: () => import("@/views/TaskbarLyric/index.vue"),
   },
   // 管理后台 (隐藏入口)
   {
