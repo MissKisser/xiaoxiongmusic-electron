@@ -260,6 +260,18 @@
       "type": "directory"
     },
     {
+      "path": "electron\\preload\\index.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780203548011,
+      "type": "file"
+    },
+    {
+      "path": "electron\\preload\\index.d.ts",
+      "accessCount": 3,
+      "lastAccessed": 1780203602453,
+      "type": "file"
+    },
+    {
       "path": "docs\\.vitepress\\config.ts",
       "accessCount": 2,
       "lastAccessed": 1780200225471,
@@ -270,6 +282,24 @@
       "accessCount": 2,
       "lastAccessed": 1780202615259,
       "type": "directory"
+    },
+    {
+      "path": "src\\stores\\index.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780203428347,
+      "type": "file"
+    },
+    {
+      "path": "electron\\server\\unblock\\match.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780203486248,
+      "type": "file"
+    },
+    {
+      "path": "electron\\server\\unblock\\unblock.d.ts",
+      "accessCount": 2,
+      "lastAccessed": 1780203518649,
+      "type": "file"
     },
     {
       "path": "docs\\development\\upstream-sync.md",
@@ -287,18 +317,6 @@
       "path": "electron\\main\\index.ts",
       "accessCount": 1,
       "lastAccessed": 1780202545350,
-      "type": "file"
-    },
-    {
-      "path": "electron\\preload\\index.d.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202545543,
-      "type": "file"
-    },
-    {
-      "path": "electron\\preload\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202546147,
       "type": "file"
     },
     {
@@ -329,18 +347,6 @@
       "path": "electron\\main\\windows\\main-window.ts",
       "accessCount": 1,
       "lastAccessed": 1780202581471,
-      "type": "file"
-    },
-    {
-      "path": "electron\\server\\unblock\\match.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202582007,
-      "type": "file"
-    },
-    {
-      "path": "electron\\server\\unblock\\unblock.d.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202582132,
       "type": "file"
     },
     {
@@ -402,12 +408,6 @@
       "accessCount": 1,
       "lastAccessed": 1780202641195,
       "type": "directory"
-    },
-    {
-      "path": "src\\stores\\index.ts",
-      "accessCount": 1,
-      "lastAccessed": 1780202644809,
-      "type": "file"
     },
     {
       "path": "src\\stores\\music.ts",
