@@ -298,6 +298,7 @@ export type SongLevelType = keyof typeof songLevelData;
 /** 歌曲元素音质数据 */
 export type SongLevelDataType = {
   name: string;
+  shortName?: string;
   level: string;
   value: SongLevelType;
   size?: number;

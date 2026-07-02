@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, screen } from "electron";
+import type { LyricConfig } from "../../../src/types/desktop-lyric";
 import { useStore } from "../store";
 import { isLinux } from "../utils/config";
 import lyricWindow from "../windows/lyric-window";
@@ -13,7 +14,7 @@ const initLyricIpc = (): void => {
   // 歌词窗口
   let lyricWin: BrowserWindow | null = null;
   // 是否锁定（从配置读取）
-  let isLocked = store.get("lyric.config")?.isLock ?? false;
+  let isLocked = ((store.get("lyric.config") ?? {}) as Partial<LyricConfig>).isLock ?? false;
   // 恢复 forward 的定时器
   let restoreTimer: NodeJS.Timeout | null = null;
 
@@ -135,23 +136,26 @@ const initLyricIpc = (): void => {
   });
 
   // 更新歌词窗口配置
-  ipcMain.on("update-desktop-lyric-option", (_, option, callback: boolean = false) => {
-    const mainWin = mainWindow.getWin();
-    if (!option || !isWinAlive(lyricWin)) return;
-    // 增量更新
-    const prevOption = store.get("lyric.config");
-    if (prevOption) {
-      option = { ...prevOption, ...option };
-    }
-    store.set("lyric.config", option);
-    // 触发窗口更新
-    if (callback && isWinAlive(lyricWin)) {
-      lyricWin.webContents.send("update-desktop-lyric-option", option);
-    }
-    if (isWinAlive(mainWin)) {
-      mainWin?.webContents.send("update-desktop-lyric-option", option);
-    }
-  });
+  ipcMain.on(
+    "update-desktop-lyric-option",
+    (_, option: Partial<LyricConfig>, callback: boolean = false) => {
+      const mainWin = mainWindow.getWin();
+      if (!option || !isWinAlive(lyricWin)) return;
+      // 增量更新
+      const prevOption = store.get("lyric.config") as LyricConfig | undefined;
+      if (prevOption) {
+        option = { ...prevOption, ...option };
+      }
+      store.set("lyric.config", option);
+      // 触发窗口更新
+      if (callback && isWinAlive(lyricWin)) {
+        lyricWin.webContents.send("update-desktop-lyric-option", option);
+      }
+      if (isWinAlive(mainWin)) {
+        mainWin?.webContents.send("update-desktop-lyric-option", option);
+      }
+    },
+  );
 
   // 播放状态更改
   ipcMain.on("play-status-change", (_, status) => {
@@ -269,7 +273,8 @@ const initLyricIpc = (): void => {
     }
 
     if (isTemp) return;
-    store.set("lyric.config", { ...store.get("lyric.config"), isLock });
+    const prevConfig = (store.get("lyric.config") ?? {}) as Partial<LyricConfig>;
+    store.set("lyric.config", { ...prevConfig, isLock });
     // 触发窗口更新
     const config = store.get("lyric.config");
     mainWin?.webContents.send("update-desktop-lyric-option", config);

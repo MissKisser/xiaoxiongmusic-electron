@@ -1,4 +1,4 @@
-import type { ColorScheme, RGB } from "@/types/main";
+import type { ColorScheme, RGB, SongLevelDataType } from "@/types/main";
 import { QualityType, type SortField, type SortOrder } from "@/types/main";
 import { RepeatModeType, ShuffleModeType } from "@/types/shared";
 import { isDevBuild } from "@/utils/env";
@@ -84,8 +84,34 @@ interface StatusState {
   listSortOrder: SortOrder;
   /** 桌面歌词 */
   showDesktopLyric: boolean;
+  /** 任务栏歌词 */
+  showTaskbarLyric: boolean;
   /** 播放器评论 */
   showPlayerComment: boolean;
+  /** AB 循环 */
+  abLoop: {
+    enable: boolean;
+    pointA: number | null;
+    pointB: number | null;
+  };
+  /** 当前可切换音质列表 */
+  availableQualities: SongLevelDataType[];
+  /** 自定义背景地址 */
+  backgroundImageUrl: string | null;
+  /** 背景模式 */
+  themeBackgroundMode: "color" | "image" | "video";
+  /** 自定义背景配置 */
+  backgroundConfig: {
+    scale: number;
+    maskOpacity: number;
+    blur: number;
+    themeColor: string | null;
+    useCustomColor: boolean;
+    isSolid: boolean;
+    customColor: string;
+  };
+  /** 自动混音动效状态 */
+  automixFxActive: boolean;
   /** 私人FM模式 */
   personalFmMode: boolean;
   /** 更新检查 */
@@ -148,7 +174,26 @@ export const useStatusStore = defineStore("status", {
     listSortField: "default",
     listSortOrder: "default",
     showDesktopLyric: false,
+    showTaskbarLyric: false,
     showPlayerComment: false,
+    abLoop: {
+      enable: false,
+      pointA: null,
+      pointB: null,
+    },
+    availableQualities: [],
+    backgroundImageUrl: null,
+    themeBackgroundMode: "color",
+    backgroundConfig: {
+      scale: 1,
+      maskOpacity: 70,
+      blur: 8,
+      themeColor: null,
+      useCustomColor: false,
+      isSolid: false,
+      customColor: "#fe7971",
+    },
+    automixFxActive: false,
     updateCheck: false,
     eqEnabled: false,
     eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -200,8 +245,22 @@ export const useStatusStore = defineStore("status", {
     isDeveloperMode(state) {
       return state.developerMode || isDevBuild;
     },
+    /** 是否正在使用解锁音源 */
+    isUnlocked(state) {
+      return state.playUblock;
+    },
+    /** 是否为自定义背景模式 */
+    isCustomBackground(state) {
+      return state.themeBackgroundMode !== "color" && Boolean(state.backgroundImageUrl);
+    },
   },
   actions: {
+    triggerAutomixFx() {
+      this.automixFxActive = true;
+    },
+    endAutomixFx() {
+      this.automixFxActive = false;
+    },
     /**
      * 获取指定歌曲的偏移
      * 单位：毫秒
@@ -343,7 +402,12 @@ export const useStatusStore = defineStore("status", {
       "listSortField",
       "listSortOrder",
       "showDesktopLyric",
+      "showTaskbarLyric",
       "personalFmMode",
+      "abLoop",
+      "backgroundImageUrl",
+      "themeBackgroundMode",
+      "backgroundConfig",
       "autoClose",
       "eqEnabled",
       "eqBands",

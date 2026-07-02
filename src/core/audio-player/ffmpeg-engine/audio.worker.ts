@@ -109,7 +109,7 @@ class DecoderSession {
       }
 
       if (result.samples.length > 0) {
-        const chunkData = result.samples.slice();
+        const chunkData = (result.samples as Float32Array).slice();
         this.post(
           {
             type: "CHUNK",

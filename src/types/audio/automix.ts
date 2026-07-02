@@ -1,5 +1,11 @@
-import type { AutomationPoint } from "@/core/audio-player/IPlaybackEngine";
 import type { SongType } from "@/types/main";
+
+export interface AutomationPoint {
+  timeOffset: number;
+  volume: number;
+  lowCut: number;
+  highCut: number;
+}
 
 /** 音频分析结果 */
 export interface AudioAnalysis {

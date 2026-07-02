@@ -75,6 +75,7 @@ class PlayerController {
     const requestToken = this.currentRequestToken;
 
     const { autoPlay = true, seek = 0 } = options;
+    const startSeek = seek;
     // 要播放的歌曲对象
     const playSongData = getPlaySongData();
     if (!playSongData) {
@@ -97,7 +98,7 @@ class PlayerController {
       audioManager.stop();
       musicStore.playSong = playSongData;
 
-      statusStore.currentTime = options.seek ?? 0;
+      statusStore.currentTime = startSeek;
       const duration = this.getDuration() || statusStore.duration;
       if (duration > 0) {
         statusStore.progress = calculateProgress(statusStore.currentTime, duration);
@@ -116,7 +117,13 @@ class PlayerController {
       // 通知桌面歌词
       if (isElectron) {
         window.electron.ipcRenderer.send("update-desktop-lyric-data", {
+          currentTime: startSeek,
           lyricLoading: true,
+          songId: sid,
+          songOffset: statusStore.getSongOffset(sid),
+          lrcData: [],
+          yrcData: [],
+          lyricIndex: -1,
         });
       }
       // 获取歌词
@@ -156,7 +163,7 @@ class PlayerController {
         console.log(`📊 [${playSongData.id}] 当前音频源: 未知`);
       }
       // 执行底层播放
-      await this.loadAndPlay(audioSource.url, autoPlay, seek);
+      await this.loadAndPlay(audioSource.url, autoPlay, startSeek);
       if (requestToken !== this.currentRequestToken) return;
       // 后置处理
       await this.afterPlaySetup(playSongData);
@@ -729,6 +736,17 @@ class PlayerController {
     audioManager.seek(safeTime / 1000);
     statusStore.currentTime = safeTime;
     mediaSessionManager.updateState(this.getDuration(), safeTime, true);
+  }
+
+  public seekBy(delta: number) {
+    this.setSeek(this.getSeek() + delta);
+  }
+
+  public applyReplayGain() {
+    const audioManager = useAudioManager() as unknown as {
+      applyReplayGain?: () => void;
+    };
+    audioManager.applyReplayGain?.();
   }
 
   /**

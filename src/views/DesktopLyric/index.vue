@@ -158,6 +158,15 @@ const lyricData = reactive<LyricData>({
   lyricIndex: -1,
 });
 
+const hasLyricLines = (data: Pick<LyricData, "lrcData" | "yrcData">) =>
+  Boolean(data.lrcData?.length || data.yrcData?.length);
+
+const shouldIgnoreLoadingUpdate = (data: LyricData) => {
+  if (data.lyricLoading !== true) return false;
+  if (hasLyricLines(data) || !hasLyricLines(lyricData)) return false;
+  return data.songId === undefined || data.songId === lyricData.songId;
+};
+
 // 锚点时间（毫秒）与锚点帧时间，用于插值推进
 let baseMs = 0;
 let anchorTick = 0;
@@ -284,7 +293,7 @@ const renderLyricLines = computed<RenderLine[]>(() => {
     return placeholder("SPlayer Desktop Lyric");
   }
   // 加载中
-  if (lyricData.lyricLoading) return placeholder("歌词加载中...");
+  if (lyricData.lyricLoading && !lyrics?.length) return placeholder("歌词加载中...");
   // 纯音乐
   if (!lyrics?.length) return placeholder("纯音乐，请欣赏");
   // 获取当前歌词索引
@@ -713,6 +722,12 @@ onMounted(() => {
   window.electron.ipcRenderer.on(
     "update-desktop-lyric-data",
     (_event, data: LyricData & { sendTimestamp?: number }) => {
+      if (shouldIgnoreLoadingUpdate(data)) {
+        if (isInitializing.value) {
+          isInitializing.value = false;
+        }
+        return;
+      }
       Object.assign(lyricData, data);
       // 更新锚点：以传入的 currentTime + songOffset 建立毫秒级基准，并重置帧时间
       if (typeof lyricData.currentTime === "number") {

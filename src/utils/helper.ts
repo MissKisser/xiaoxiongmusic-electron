@@ -451,38 +451,6 @@ export const handleSongQuality = (
   }
   return undefined;
 };
-    // 云盘歌曲适配
-    if ("privilege" in song) {
-      const privilege = song.privilege;
-      const quality = levelQualityMap[privilege?.playMaxBrLevel]
-        ?? levelQualityMap[privilege?.plLevel];
-      if (quality) return quality;
-    }
-  }
-
-  const order = [
-    { key: "jm", type: QualityType.Master },
-    { key: "db", type: QualityType.Dolby },
-    { key: "sk", type: QualityType.Spatial },
-    { key: "je", type: QualityType.Surround },
-    { key: "hr", type: QualityType.HiRes },
-    { key: "sq", type: QualityType.SQ },
-    { key: "h", type: QualityType.HQ },
-    { key: "m", type: QualityType.MQ },
-    { key: "l", type: QualityType.LQ },
-  ];
-
-  for (const itemKey of order) {
-    // 过滤 AI 音质
-    if (disableAiAudio && AI_AUDIO_KEYS.includes(itemKey.key)) {
-      continue;
-    }
-    if (song[itemKey.key] && Number(song[itemKey.key].br) > 0) {
-      return itemKey.type;
-    }
-  }
-  return undefined;
-};
 
 /**
  * 获取分享链接

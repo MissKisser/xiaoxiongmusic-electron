@@ -19,12 +19,23 @@ export interface AudioMetadata {
 
 export type WorkerRequest =
   | { type: "INIT"; id: number; file: File; chunkSize: number }
+  | {
+      type: "INIT_STREAM";
+      id: number;
+      sab: SharedArrayBuffer;
+      fileSize: number;
+      chunkSize: number;
+    }
   | { type: "PAUSE"; id: number }
   | { type: "RESUME"; id: number }
-  | { type: "SEEK"; id: number; seekTime: number };
+  | { type: "SEEK"; id: number; seekTime: number }
+  | { type: "SET_TEMPO"; id: number; value: number }
+  | { type: "SET_PITCH"; id: number; value: number }
+  | { type: "EXPORT_WAV"; id: number; file: File };
 
 export type WorkerResponse =
   | { type: "ERROR"; id: number; error: string }
+  | { type: "ACK"; id: number }
   | {
       type: "METADATA";
       id: number;
@@ -44,7 +55,9 @@ export type WorkerResponse =
       startTime: number;
     }
   | { type: "EOF"; id: number }
-  | { type: "SEEK_DONE"; id: number; time: number };
+  | { type: "SEEK_DONE"; id: number; time: number }
+  | { type: "SEEK_NET"; id: number; seekOffset: number }
+  | { type: "EXPORT_WAV_DONE"; id: number; blob: Blob };
 
 // FFmpeg WASM Engine Types
 
@@ -88,15 +101,26 @@ export interface AudioProperties {
 
 export interface ChunkResult {
   status: DecoderStatus;
-  samples: Float32Array;
+  samples: Float32Array | Int16Array;
   isEOF: boolean;
   startTime: number;
 }
 
+export interface SampleFormat {
+  PlanarF32: number;
+  InterleavedS16: number;
+}
+
 export interface AudioStreamDecoder extends EmbindObject {
   init(path: string): AudioProperties;
-  readChunk(chunkSize: number): ChunkResult;
+  initStream(
+    readCallback: (ptr: number, size: number) => number,
+    seekCallback: (offset: number, whence: number) => number,
+  ): AudioProperties;
+  readChunk(chunkSize: number, sampleFormat?: number): ChunkResult;
   seek(timestamp: number): DecoderStatus;
+  setTempo(tempo: number): void;
+  setPitch(pitch: number): void;
   close(): void;
 }
 
@@ -109,4 +133,5 @@ export interface AudioDecoderModule extends EmscriptenModule {
   AudioStreamDecoder: {
     new (): AudioStreamDecoder;
   };
+  SampleFormat: SampleFormat;
 }

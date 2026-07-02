@@ -30,6 +30,8 @@ export interface SettingState {
   fontSettingStyle: "single" | "multi" | "custom";
   /** 全局字体 */
   globalFont: "default" | string;
+  /** 是否启用自定义字体设置 */
+  useCustomFont: boolean;
   /** 歌词区域字体 */
   LyricFont: "follow" | string;
   /** 日语歌词字体 */
@@ -66,6 +68,8 @@ export interface SettingState {
   lyricFontWeight: number;
   /** 显示逐字歌词 */
   showWordLyrics: boolean;
+  /** 兼容旧设置：显示逐字歌词 */
+  showYrc: boolean;
   /** 显示歌词翻译 */
   showTran: boolean;
   /** 显示歌词音译 */
@@ -86,6 +90,8 @@ export interface SettingState {
   lyricAlignRight: boolean;
   /** 隐藏歌词括号内容和别名 */
   hideBracketedContent: boolean;
+  /** 兼容旧设置：隐藏歌词括号内容和别名 */
+  hideLyricBrackets: boolean;
   /** 替换歌词括号内容 */
   replaceLyricBrackets: boolean;
   /** 把歌词里的屏蔽词还原为原词 **/
@@ -230,6 +236,8 @@ export interface SettingState {
   enableOnlineTTMLLyric: boolean;
   /** 启用 QM 歌词 */
   enableQQMusicLyric: boolean;
+  /** 兼容旧设置：QM 歌词优先 */
+  preferQQMusicLyric: boolean;
   /** 歌词源优先级 */
   /** 歌词源优先级 */
   lyricPriority: LyricPriority;
@@ -304,12 +312,20 @@ export interface SettingState {
   enableExcludeLyrics: boolean;
   /** 「排除歌词」是否适用于 TTML */
   enableExcludeLyricsTTML: boolean;
+  /** 兼容旧设置：「排除歌词」是否适用于 TTML */
+  enableExcludeTTML: boolean;
   /** 「排除歌词」是否适用于本地歌词 */
   enableExcludeLyricsLocal: boolean;
+  /** 兼容旧设置：「排除歌词」是否适用于本地歌词 */
+  enableExcludeLocalLyrics: boolean;
   /** 用户自定义的排除歌词关键字 */
   excludeLyricsUserKeywords: string[];
+  /** 兼容旧设置：用户自定义的排除歌词关键字 */
+  excludeUserKeywords: string[];
   /** 用户自定义的排除歌词正则表达式 */
   excludeLyricsUserRegexes: string[];
+  /** 兼容旧设置：用户自定义的排除歌词正则表达式 */
+  excludeUserRegexes: string[];
   /** 是否启用评论排除 */
   enableExcludeComments: boolean;
   /** 排除评论关键词 */
@@ -414,6 +430,10 @@ export interface SettingState {
   showHotSearch: boolean;
   /** 搜索框行为 */
   searchInputBehavior: "normal" | "clear" | "sync";
+  /** 兼容旧设置：失焦时清空搜索框 */
+  clearSearchOnBlur: boolean;
+  /** 兼容旧设置：全局背景图 */
+  globalBackgroundImage: string | null;
   /** 显示主页问好 */
   showHomeGreeting: boolean;
   /** 首页栏目顺序和显示配置 */
@@ -497,6 +517,7 @@ export const useSettingStore = defineStore("setting", {
     themeVariant: "secondary",
     fontSettingStyle: "single",
     globalFont: "default",
+    useCustomFont: false,
     LyricFont: "follow",
     japaneseLyricFont: "follow",
     englishLyricFont: "follow",
@@ -566,10 +587,12 @@ export const useSettingStore = defineStore("setting", {
     audioDelayCompensation: 0,
     enableOnlineTTMLLyric: false,
     enableQQMusicLyric: false,
+    preferQQMusicLyric: false,
     lyricPriority: "auto",
     localLyricQQMusicMatch: false,
     amllDbServer: defaultAMLLDbServer,
     showWordLyrics: true,
+    showYrc: true,
     showTran: true,
     showRoma: true,
     swapTranRoma: false,
@@ -582,15 +605,20 @@ export const useSettingStore = defineStore("setting", {
     lyricHorizontalOffset: 10,
     lyricAlignRight: false,
     hideBracketedContent: false,
+    hideLyricBrackets: false,
     replaceLyricBrackets: false,
     uncensorMaskedProfanity: false,
     bracketReplacementPreset: "dash",
     customBracketReplacement: "-",
     enableExcludeLyrics: true,
     enableExcludeLyricsTTML: false,
+    enableExcludeTTML: false,
     enableExcludeLyricsLocal: false,
+    enableExcludeLocalLyrics: false,
     excludeLyricsUserKeywords: [],
+    excludeUserKeywords: [],
     excludeLyricsUserRegexes: [],
+    excludeUserRegexes: [],
     enableExcludeComments: false,
     excludeCommentKeywords: [],
     excludeCommentRegexes: [],
@@ -707,6 +735,8 @@ export const useSettingStore = defineStore("setting", {
     showSearchHistory: true,
     showHotSearch: true,
     searchInputBehavior: "normal",
+    clearSearchOnBlur: false,
+    globalBackgroundImage: null,
     showHomeGreeting: true,
     homePageSections: [
       { key: "playlist", name: "专属歌单", visible: true, order: 0 },

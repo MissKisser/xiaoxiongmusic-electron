@@ -8,6 +8,7 @@
     "electron/preload/index.d.ts",
     "dist/lastfm.ts"
   ],
+  "exclude": ["src/core/automix/AutomixManager.ts"],
   "compilerOptions": {
     "composite": true,
     "esModuleInterop": true,
@@ -17,7 +18,8 @@
     "paths": {
       "@/*": ["src/*"],
       "@emi": ["native/external-media-integration"],
-      "@opencc": ["native/ferrous-opencc-wasm/pkg"]
+      "@opencc": ["native/ferrous-opencc-wasm/pkg"],
+      "@shared": ["./src/types/shared.ts"]
     },
     "types": ["node", "electron", "electron-vite/node", "./auto-imports.d.ts", "./components.d.ts"],
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],

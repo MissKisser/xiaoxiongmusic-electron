@@ -124,6 +124,17 @@ export const useDataStore = defineStore("data", {
     isLikeSong: (state) => (id: number) => state.userLikeData.songs.includes(id),
   },
   actions: {
+    async saveBackgroundImage(file: File): Promise<void> {
+      await musicDB.setItem("backgroundImage", {
+        data: await file.arrayBuffer(),
+        type: file.type,
+        name: file.name,
+        updatedAt: Date.now(),
+      });
+    },
+    async clearBackgroundImage(): Promise<void> {
+      await musicDB.removeItem("backgroundImage");
+    },
     /**
      * 加载数据
      */

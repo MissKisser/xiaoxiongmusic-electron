@@ -35,6 +35,8 @@ export interface MainTray {
   setPlayName(name: string): void;
   setDesktopLyricShow(show: boolean): void;
   setDesktopLyricLock(lock: boolean): void;
+  setTaskbarLyricShow(show: boolean): void;
+  initTrayMenu(): void;
   destroyTray(): void;
 }
 
@@ -233,7 +235,7 @@ class CreateTray implements MainTray {
     this.setTitle(appName);
   }
   // 托盘菜单
-  private initTrayMenu() {
+  initTrayMenu() {
     this._menu = createTrayMenu(this._win);
     this._contextMenu = Menu.buildFromTemplate(this._menu);
     this._tray.setContextMenu(this._contextMenu);
@@ -313,6 +315,13 @@ class CreateTray implements MainTray {
   setDesktopLyricLock(lock: boolean) {
     desktopLyricLock = lock;
     // 更新菜单
+    this.initTrayMenu();
+  }
+  /**
+   * 任务栏歌词开关
+   * @param _show 任务栏歌词开关状态
+   */
+  setTaskbarLyricShow(_show: boolean) {
     this.initTrayMenu();
   }
   /**

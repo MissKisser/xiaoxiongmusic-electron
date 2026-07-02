@@ -7,38 +7,47 @@ export const songLevelData = {
   l: {
     level: "standard",
     name: "标准音质",
+    shortName: "标准",
   },
   m: {
     level: "higher",
     name: "较高音质",
+    shortName: "较高",
   },
   h: {
     level: "exhigh",
     name: "极高音质",
+    shortName: "极高",
   },
   sq: {
     level: "lossless",
     name: "无损音质",
+    shortName: "无损",
   },
   hr: {
     level: "hires",
     name: "Hi-Res",
+    shortName: "Hi-Res",
   },
   je: {
     level: "jyeffect",
     name: "高清环绕声",
+    shortName: "环绕",
   },
   sk: {
     level: "sky",
     name: "沉浸环绕声",
+    shortName: "沉浸",
   },
   db: {
     level: "dolby",
     name: "杜比全景声",
+    shortName: "杜比",
   },
   jm: {
     level: "jymaster",
     name: "超清母带",
+    shortName: "母带",
   },
 };
 
@@ -80,6 +89,7 @@ export const getSongLevelsData = (
   quality?: Record<string, any>,
 ): {
   name: string;
+  shortName: string;
   level: string;
   value: SongLevelType;
   br?: number;
@@ -91,6 +101,7 @@ export const getSongLevelsData = (
     (
       result: {
         name: string;
+        shortName: string;
         level: string;
         value: SongLevelType;
         br?: number;
@@ -104,6 +115,7 @@ export const getSongLevelsData = (
       if (value && (!quality || quality[key])) {
         result.push({
           name: value.name,
+          shortName: value.shortName,
           level: value.level,
           value: key as SongLevelType,
           br: quality?.[key]?.br,

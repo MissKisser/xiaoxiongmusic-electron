@@ -11,11 +11,12 @@ export const calculateLyricIndex = (
   currentTime: number,
   lyrics: LyricLine[],
   offset: number = 0,
+  leadTime: number = 300,
 ): number => {
   // 边界检查
   if (!lyrics || !lyrics.length) return -1;
   // 预处理时间
-  const playSeek = currentTime + offset + 300;
+  const playSeek = currentTime + offset + leadTime;
   const getStart = (v: LyricLine) => v.startTime || 0;
   // 直接返回最后一句
   const lastLine = lyrics[lyrics.length - 1];
@@ -50,4 +51,15 @@ export const calculateLyricIndex = (
   const keepCount = activeCandidates.length >= 3 ? 3 : 2;
   const concurrent = activeCandidates.slice(-keepCount);
   return concurrent[0];
+};
+
+export const getSafeEndTime = (lyrics: LyricLine[], idx: number): number => {
+  const cur = lyrics?.[idx];
+  const next = lyrics?.[idx + 1];
+  const curEnd = Number(cur?.endTime);
+  const curStart = Number(cur?.startTime);
+  if (Number.isFinite(curEnd) && curEnd > curStart) return curEnd;
+  const nextStart = Number(next?.startTime);
+  if (Number.isFinite(nextStart) && nextStart > curStart) return nextStart;
+  return 0;
 };

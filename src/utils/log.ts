@@ -1,3 +1,5 @@
+import packageJson from "@/../package.json";
+
 /**
  * 美化打印实现方法
  * https://juejin.cn/post/7371716384847364147
@@ -94,4 +96,11 @@ const log = () => {
   };
 };
 
-export default log();
+const logger = log();
+
+export const printVersion = () => {
+  logger.success(`🚀 ${packageJson.version}`, packageJson.productName);
+  logger.info(`👤 ${packageJson.author}`, packageJson.github);
+};
+
+export default logger;

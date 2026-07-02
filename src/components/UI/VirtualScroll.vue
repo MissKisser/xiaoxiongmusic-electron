@@ -322,11 +322,33 @@ const getScrollTop = () => {
   return scrollTop.value;
 };
 
+const getDropInfoByOffset = (offset: number): { index: number; position: "top" | "bottom" } => {
+  if (props.items.length === 0) return { index: 0, position: "top" };
+  if (props.itemFixed) {
+    const rawIndex = Math.floor(offset / props.itemHeight);
+    const index = Math.max(0, Math.min(rawIndex, props.items.length - 1));
+    const itemOffset = offset - index * props.itemHeight;
+    return { index, position: itemOffset > props.itemHeight / 2 ? "bottom" : "top" };
+  }
+
+  if (itemTops.value.length === 0) initializeHeights();
+  for (let index = 0; index < props.items.length; index++) {
+    const top = itemTops.value[index] ?? index * props.itemHeight;
+    const height = itemHeights.value[index] ?? props.itemHeight;
+    if (offset <= top + height) {
+      return { index, position: offset - top > height / 2 ? "bottom" : "top" };
+    }
+  }
+  return { index: props.items.length - 1, position: "bottom" };
+};
+
 // 暴露方法给父组件
 defineExpose({
+  wrapperRef,
   scrollTo: scrollToPosition,
   scrollToIndex,
   getScrollTop,
+  getDropInfoByOffset,
 });
 
 // 防抖高度测量

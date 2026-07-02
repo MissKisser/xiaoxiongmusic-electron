@@ -1,12 +1,15 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { pathCase } from "change-case";
 import NeteaseCloudMusicApi from "@neteasecloudmusicapienhanced/api";
+import { ensureNcmConfig, NON_API_EXPORTS } from "./ncm-config.js";
 import { serverLog } from "../logger.js";
 import { useStore } from "../store.js";
 import { defaultAMLLDbServer } from "../config.js";
 
 // 初始化 NcmAPI
 export const initNcmAPI = async (fastify: FastifyInstance) => {
+  void ensureNcmConfig();
+
   // 主信息
   fastify.get("/netease", (_, reply) => {
     reply.send({
@@ -40,6 +43,8 @@ export const initNcmAPI = async (fastify: FastifyInstance) => {
 
     // 将 path-case 转回 camelCase 或直接匹配下划线路由
     const routerName = Object.keys(NeteaseCloudMusicApi).find((key) => {
+      // 排除包的服务层导出
+      if (NON_API_EXPORTS.has(key)) return false;
       // 跳过非函数属性
       if (typeof (NeteaseCloudMusicApi as any)[key] !== "function") return false;
       // 匹配 path-case 格式
@@ -83,6 +88,7 @@ export const initNcmAPI = async (fastify: FastifyInstance) => {
     }
 
     try {
+      await ensureNcmConfig();
       const result = await neteaseApi({
         ...queryParams,
         ...bodyParams,

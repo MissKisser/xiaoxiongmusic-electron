@@ -4,6 +4,10 @@ import { getMainTray } from "../tray";
 import { appName } from "../utils/config";
 import lyricWindow from "../windows/lyric-window";
 
+let currentSongTitle = appName;
+
+export const getCurrentSongTitle = () => currentSongTitle;
+
 /**
  * 托盘 IPC
  */
@@ -22,6 +26,7 @@ const initTrayIpc = (): void => {
   ipcMain.on("play-song-change", (_, options) => {
     let title = options?.title;
     if (!title) title = appName;
+    currentSongTitle = title;
     // 更改标题
     tray?.setTitle(title);
     tray?.setPlayName(title);

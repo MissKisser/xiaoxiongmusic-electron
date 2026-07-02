@@ -23,3 +23,10 @@ export interface PlayModePayload {
   repeatMode: RepeatModeType;
   shuffleMode: ShuffleModeType;
 }
+
+export { DEFAULT_TASKBAR_CONFIG, TASKBAR_IPC_CHANNELS } from "./shared/taskbar-ipc";
+export type {
+  SyncStatePayload,
+  SyncTickPayload,
+  TaskbarConfig,
+} from "./shared/taskbar-ipc";
