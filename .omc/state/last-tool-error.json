@@ -1,7 +1,0 @@
-{
-  "tool_name": "Read",
-  "tool_input_preview": "{\"file_path\":\"D:\\\\document\\\\Projects\\\\xiaoxiongmusic\\\\xiaoxiongmusic\\\\electron\\\\server\\\\unblock\\\\kuwo_desktop.ts\"}",
-  "error": "File does not exist. Note: your current working directory is D:\\document\\Projects\\xiaoxiongmusic\\xiaoxiongmusic.",
-  "timestamp": "2026-05-31T04:43:41.475Z",
-  "retry_count": 1
-}

@@ -31,6 +31,9 @@ target
 .env.development
 .env.production
 
+# ZCode agent state
+.omc
+
 # Docs
 docs/.vitepress/cache
 docs/.vitepress/dist
