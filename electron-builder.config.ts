@@ -182,6 +182,9 @@ const config: Configuration = {
         MimeType: "x-scheme-handler/orpheus;",
       },
     },
+    // 让 .desktop 文件名与 package.json 的 desktopName 保持一致，
+    // 使 Linux 桌面项 WMClass 与 MPRIS desktop_entry 匹配
+    syncDesktopName: true,
   },
   // AppImage 特定配置
   appImage: {

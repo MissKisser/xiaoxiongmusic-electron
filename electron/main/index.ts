@@ -136,6 +136,12 @@ class MainProcess {
 
     // 应用被激活
     app.on("activate", () => {
+      // macOS：点击 dock 图标时恢复主窗口（窗口可能已被关闭但应用仍在运行）
+      if (isMac) {
+        mainWindow.showWindow();
+        return;
+      }
+
       const allWindows = BrowserWindow.getAllWindows();
       if (allWindows.length) {
         allWindows[0].focus();

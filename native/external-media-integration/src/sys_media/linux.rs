@@ -338,7 +338,10 @@ async fn run_mpris_loop(mut rx: UnboundedReceiver<MprisCommand>) -> Result<()> {
         .can_seek(true)
         .can_control(true)
         .playback_status(MprisPlaybackStatus::Stopped)
-        .identity("SPlayer")
+        .identity("XiaoxiongMusic")
+        // 必须与 package.json 的 desktopName 完全一致，
+        // 否则 Linux 桌面环境无法把 MPRIS 实例与 .desktop 项关联（WMClass 不匹配）
+        .desktop_entry("top.misskisser.XiaoxiongMusic")
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("MPRIS Player 初始化失败: {e}"))?;
