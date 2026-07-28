@@ -60,6 +60,7 @@ pnpm server:verify    # 验证服务器配置
 ### 后端服务
 
 - `server/` - 独立后端服务，提供授权系统 API
+  > ⚠️ **`server/` 是 git submodule**,指向独立仓库 [xiaoxiongmusic-server](https://github.com/MissKisser/xiaoxiongmusic-server)。**不要直接在 `server/` 目录里改代码**——submodule 内容应视为只读引用。后端改动请到 xiaoxiongmusic-server 仓库进行,然后执行 `git submodule update --remote server` 同步。server 与移动端(xiaoxiongmusic_capacitor)共享同一份代码。首次克隆本仓库后需执行 `git submodule update --init --recursive` 初始化 server。
   - `routes/auth.ts` - 授权验证 API
   - `routes/admin.ts` - 管理后台 API
 

@@ -132,6 +132,8 @@ git status src/views/Admin/
 git status src/components/Modal/Setting/Equalizer.vue
 git status server/routes/auth.ts server/routes/admin.ts
 
+> **注意(2026-07-28 更新)**:`server/` 已抽取为独立仓库 [xiaoxiongmusic-server](https://github.com/MissKisser/xiaoxiongmusic-server),作为 git submodule 引用。上列 server 相关条目(`server/routes/*.ts`、`server/db.ts` 等)**已不在本仓库**,后续 server 改动请在 server 仓库进行。SPlayer 上游同步不再涉及 server/。
+
 # 2. 确认无未提交更改（或先暂存）
 git stash  # 如果有未完成工作
 
