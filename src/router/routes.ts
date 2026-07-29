@@ -387,6 +387,48 @@ const routes: Array<RouteRecordRaw> = [
     name: "taskbar-lyric",
     component: () => import("@/views/TaskbarLyric/index.vue"),
   },
+  // 管理后台 (隐藏入口)
+  {
+    path: "/bamger/login",
+    name: "admin-login",
+    component: () => import("@/views/Admin/Login.vue"),
+  },
+  {
+    path: "/bamger",
+    component: () => import("@/views/Admin/Layout.vue"),
+    redirect: "/bamger/dashboard",
+    beforeEnter: (to, _, next) => {
+      // 检查是否有管理员 Token
+      if (!localStorage.getItem("admin_token")) {
+        // 如果没有 Token，重定向到登录页，并记录来源页面以便登录后跳转回
+        next({ name: "admin-login", query: { redirect: to.fullPath } });
+      } else {
+        next();
+      }
+    },
+    children: [
+      {
+        path: "dashboard",
+        name: "admin-dashboard",
+        component: () => import("@/views/Admin/Dashboard.vue"),
+      },
+      {
+        path: "codes",
+        name: "admin-codes",
+        component: () => import("@/views/Admin/Codes.vue"),
+      },
+      {
+        path: "versions",
+        name: "admin-versions",
+        component: () => import("@/views/Admin/Versions.vue"),
+      },
+      {
+        path: "logs",
+        name: "admin-logs",
+        component: () => import("@/views/Admin/Logs.vue"),
+      },
+    ],
+  },
   // 404
   {
     path: "/:pathMatch(.*)*",

@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # 开发
 pnpm dev              # 启动 Electron 开发模式（包含热重载）
+pnpm web:dev          # 仅启动 Web 开发服务器（渲染进程）
 pnpm docs:dev         # 启动 VitePress 文档服务器
 
 # 构建
@@ -18,6 +19,7 @@ pnpm build            # 构建生产包（包含类型检查）
 pnpm build:win        # 构建 Windows 客户端 (x64/arm64)
 pnpm build:mac        # 构建 macOS 客户端
 pnpm build:linux      # 构建 Linux 客户端
+pnpm build:web        # 构建 Web 前端（PWA）
 pnpm build:native     # 构建 Rust 原生模块
 
 # 代码质量
