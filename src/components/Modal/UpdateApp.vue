@@ -10,9 +10,11 @@
       </n-tag>
     </n-flex>
     <n-scrollbar style="max-height: 500px">
-      <div v-if="data?.description" class="markdown-body update-desc">
-        {{ data.description }}
-      </div>
+      <div
+        v-if="data?.description"
+        class="markdown-body update-desc"
+        v-html="renderedDescription"
+      />
       <div v-else class="markdown-body">暂无更新说明</div>
     </n-scrollbar>
     <n-flex class="menu" justify="end">
@@ -23,6 +25,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
+import { marked } from "marked";
 import type { UpdateInfoType } from "@/types/main";
 import { isElectron } from "@/utils/env";
 import packageJson from "@/../package.json";
@@ -30,6 +34,12 @@ import packageJson from "@/../package.json";
 const props = defineProps<{ data: UpdateInfoType }>();
 
 const emit = defineEmits<{ close: [] }>();
+
+// 渲染 Markdown 更新说明
+const renderedDescription = computed(() => {
+  if (!props.data?.description) return "";
+  return marked.parse(props.data.description, { async: false }) as string;
+});
 
 // 前往下载
 const goDownload = () => {
@@ -64,10 +74,49 @@ const goDownload = () => {
   }
   .update-desc {
     margin-top: 0 !important;
-    white-space: pre-wrap;
   }
   .markdown-body {
     margin-top: 0 !important;
+    font-size: 14px;
+    line-height: 1.7;
+
+    :deep(h1),
+    :deep(h2),
+    :deep(h3),
+    :deep(h4) {
+      margin-top: 12px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    :deep(ul),
+    :deep(ol) {
+      padding-left: 20px;
+      margin: 8px 0;
+    }
+
+    :deep(li) {
+      margin: 4px 0;
+    }
+
+    :deep(p) {
+      margin: 8px 0;
+    }
+
+    :deep(a) {
+      color: var(--n-color-primary, #ff5a5f);
+      text-decoration: none;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    :deep(code) {
+      background: rgba(125, 125, 125, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
   }
 }
 </style>
