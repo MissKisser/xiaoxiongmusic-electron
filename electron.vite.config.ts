@@ -25,6 +25,13 @@ export default defineConfig(({ mode }) => {
   return {
     // 主进程
     main: {
+      resolve: {
+        alias: {
+          // 主进程文件（如 ipc-mac-statusbar）也引用了 @shared 类型，需与 renderer 保持一致
+          "@shared": resolve(__dirname, "src/types/shared.ts"),
+          "@emi": resolve(__dirname, "native/external-media-integration"),
+        },
+      },
       build: {
         publicDir: resolve(__dirname, "public"),
         rollupOptions: {
@@ -36,6 +43,12 @@ export default defineConfig(({ mode }) => {
     },
     // 预加载
     preload: {
+      resolve: {
+        alias: {
+          "@shared": resolve(__dirname, "src/types/shared.ts"),
+          "@emi": resolve(__dirname, "native/external-media-integration"),
+        },
+      },
       build: {
         rollupOptions: {
           input: {

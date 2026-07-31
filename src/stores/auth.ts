@@ -57,7 +57,7 @@ export const useAuthStore = defineStore("auth", {
 
             try {
                 const response = await axios.get(`${SERVER_URL}/api/auth/check`, {
-                    params: { deviceId: this.deviceId },
+                    params: { deviceId: this.deviceId, platform: getPlatform() },
                 });
 
                 if (response.data.success && response.data.authorized) {

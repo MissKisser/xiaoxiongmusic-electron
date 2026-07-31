@@ -194,8 +194,10 @@ const config: Configuration = {
   // 是否在构建之前重新编译原生模块
   npmRebuild: false,
   // Electron 下载镜像配置
+  // 注:npmmirror.com 在当前网络不可达(ETIMEDOUT),临时切换到 GitHub 官方源
+  // 本地缓存已有 electron-v38.2.2-win32-x64.zip,优先走缓存
   electronDownload: {
-    mirror: "https://npmmirror.com/mirrors/electron/",
+    mirror: "https://github.com/electron/electron/releases/download/",
   },
   // 发布配置
   // 先留空，不自动上传
