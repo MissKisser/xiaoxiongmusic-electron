@@ -2,7 +2,7 @@ import { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
 import { windowsLog } from "../logger";
 import { appName } from "../utils/config";
 import { join } from "path";
-import icon from "../../../public/icons/favicon.png?asset";
+import icon from "../../../public/icons/logo.ico?asset";
 
 export const createWindow = (
   options: BrowserWindowConstructorOptions = {},

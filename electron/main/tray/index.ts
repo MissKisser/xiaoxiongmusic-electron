@@ -43,21 +43,18 @@ export interface MainTray {
 // 托盘单例
 let mainTrayInstance: MainTray | null = null;
 
-// 托盘图标
+// 托盘图标加载器
+// - filename 相对于 public/icons/ 解析，例如 "logo.ico" 或 "tray/music-light.png"
 const trayIcon = (filename: string) => {
-  // const rootPath = isDev
-  //   ? join(__dirname, "../../public/icons/tray")
-  //   : join(app.getAppPath(), "../../public/icons/tray");
-  // return nativeImage.createFromPath(join(rootPath, filename));
-  return nativeImage.createFromPath(join(__dirname, `../../public/icons/tray/${filename}`));
+  return nativeImage.createFromPath(join(__dirname, `../../public/icons/${filename}`));
 };
 
 // 托盘菜单
 const createTrayMenu = (win: BrowserWindow): MenuItemConstructorOptions[] => {
-  // 区分明暗图标
+  // 区分明暗图标，固定从 tray/ 子目录读取
   const showIcon = (iconName: string) => {
     const isDark = nativeTheme.shouldUseDarkColors;
-    return trayIcon(`${iconName}${isDark ? "-dark" : "-light"}.png`).resize({
+    return trayIcon(`tray/${iconName}${isDark ? "-dark" : "-light"}.png`).resize({
       width: 16,
       height: 16,
     });
@@ -219,8 +216,9 @@ class CreateTray implements MainTray {
   private _contextMenu: Menu;
 
   constructor(win: BrowserWindow) {
-    // 托盘图标
-    const icon = trayIcon(isWin ? "tray.ico" : "tray@32.png").resize({
+    // 托盘图标（与窗口图标/EXE 图标同源）
+    // Windows 使用多尺寸 logo.ico；macOS/Linux 使用 32×32 PNG
+    const icon = trayIcon(isWin ? "logo.ico" : "tray/tray@32.png").resize({
       height: 32,
       width: 32,
     });

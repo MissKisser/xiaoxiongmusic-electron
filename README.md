@@ -3,13 +3,13 @@
 <h2> 小熊音乐 </h2>
 <p> 一个简约的音乐播放器 </p>
 
-[Releases](https://github.com/MissKisser/xiaoxiongmusic/releases) | [上游项目 SPlayer](https://github.com/imsyy/SPlayer)
+[Releases](https://github.com/MissKisser/xiaoxiongmusic-electron/releases) | [上游项目 SPlayer](https://github.com/imsyy/SPlayer)
 
 <br />
 
-![Version](https://img.shields.io/github/v/release/MissKisser/xiaoxiongmusic)
-![License](https://img.shields.io/github/license/MissKisser/xiaoxiongmusic)
-![Stars](https://img.shields.io/github/stars/MissKisser/xiaoxiongmusic?style=flat)
+![Version](https://img.shields.io/github/v/release/MissKisser/xiaoxiongmusic-electron)
+![License](https://img.shields.io/github/license/MissKisser/xiaoxiongmusic-electron)
+![Stars](https://img.shields.io/github/stars/MissKisser/xiaoxiongmusic-electron?style=flat)
 
 </div>
 
@@ -117,10 +117,10 @@
 npm install pnpm -g
 
 # 克隆项目
-git clone https://github.com/MissKisser/xiaoxiongmusic.git
+git clone https://github.com/MissKisser/xiaoxiongmusic-electron.git
 
 # 安装依赖
-cd xiaoxiongmusic && pnpm install
+cd xiaoxiongmusic-electron && pnpm install
 ```
 
 ### 开发
@@ -180,7 +180,7 @@ JWT_SECRET=your_secret_key
 
 ## 获取客户端
 
-前往 [Releases](https://github.com/MissKisser/xiaoxiongmusic/releases) 页面下载最新版本：
+前往 [Releases](https://github.com/MissKisser/xiaoxiongmusic-electron/releases) 页面下载最新版本：
 
 | 文件 | 说明 |
 |------|------|
@@ -228,4 +228,4 @@ JWT_SECRET=your_secret_key
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=MissKisser/xiaoxiongmusic&type=Date)](https://star-history.com/#MissKisser/xiaoxiongmusic&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=MissKisser/xiaoxiongmusic-electron&type=Date)](https://star-history.com/#MissKisser/xiaoxiongmusic-electron&Date)
