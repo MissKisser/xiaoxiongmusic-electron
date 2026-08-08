@@ -1,3 +1,8 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
 import { TimeFormat } from "@/composables/useTimeFormat";
 import { SongUnlockServer } from "@/core/player/SongManager";
 import type { SongLevelType } from "@/types/main";
@@ -212,6 +217,8 @@ export interface SettingState {
   showPlaylistCount: boolean;
   /** 是否显示音乐频谱 */
   showSpectrums: boolean;
+  /** 是否反转频谱方向（启用后低频位于频谱两端） */
+  reverseSpectrum: boolean;
   /** 是否开启系统音频集成 */
   smtcOpen: boolean;
   /** 歌词模糊 */
@@ -570,6 +577,7 @@ export const useSettingStore = defineStore("setting", {
     progressAdjustLyric: false,
     showPlaylistCount: true,
     showSpectrums: false,
+    reverseSpectrum: false,
     smtcOpen: true,
     playSongDemo: false,
     scrobbleSong: false,
