@@ -155,7 +155,6 @@ const handleCopyTranslatedLyric = async () => {
   }
   await copy(content, "歌词（含翻译）已复制到剪贴板");
 };
-};
 
 // Fullscreen
 const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();

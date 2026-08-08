@@ -28,7 +28,7 @@ declare global {
           name: string;
           webdav: WebDavPlaylistInput;
         }): Promise<boolean>;
-        remove(playlistId: string) => Promise<boolean>;
+        remove(playlistId: string): Promise<boolean>;
         clear(): Promise<boolean>;
       };
     };
