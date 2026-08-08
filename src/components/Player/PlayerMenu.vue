@@ -3,6 +3,32 @@
     <Transition name="fade" mode="out-in">
       <div v-show="statusStore.playerMetaShow" class="menu-content">
         <n-flex class="left">
+          <!-- 复制歌词原文 -->
+          <div
+            v-if="
+              settingStore.fullscreenPlayerElements.copyLyric &&
+              musicStore.isHasLrc &&
+              musicStore.playSong.type !== 'radio'
+            "
+            class="menu-icon"
+            title="复制歌词原文"
+            @click.stop="handleCopyLyric"
+          >
+            <SvgIcon name="Copy" />
+          </div>
+          <!-- 复制歌词含翻译 -->
+          <div
+            v-if="
+              settingStore.fullscreenPlayerElements.copyLyric &&
+              musicStore.isHasLrc &&
+              musicStore.playSong.type !== 'radio'
+            "
+            class="menu-icon"
+            title="复制歌词含翻译"
+            @click.stop="handleCopyTranslatedLyric"
+          >
+            <SvgIcon name="Lyrics" />
+          </div>
           <!-- 导出歌词图片 -->
           <div
             v-if="
@@ -40,15 +66,18 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-// Based on SPlayer-Next — 导出歌词图片按钮
+// Based on SPlayer-Next — 导出歌词图片 + 复制歌词按钮
 import { useStatusStore, useMusicStore, useSettingStore } from "@/stores";
 import { createLyricPoster, type LyricPosterLine } from "@/utils/lyric/poster";
+import { useCopyText } from "@/composables/useCopyText";
+import { lyricLinesToRawText, lyricLinesToTranslatedText } from "@/utils/lyric/lyricCopy";
 import type { LyricLine } from "@applemusic-like-lyrics/lyric";
 
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
 
+const { copy } = useCopyText();
 /** 当前使用的歌词数据（优先逐字） */
 const activeLyricData = computed(() => {
   const isYrc = musicStore.songLyric.yrcData?.length && settingStore.showYrc;
@@ -103,6 +132,29 @@ const handleExportLyricPoster = async (): Promise<void> => {
   } finally {
     exporting.value = false;
   }
+};
+
+/** 复制歌词原文（不包含翻译 / 音译） */
+const handleCopyLyric = async () => {
+  // Based on SPlayer-Next — handleCopyRaw
+  const content = lyricLinesToRawText(activeLyricData.value);
+  if (!content) {
+    window.$message?.warning?.("暂无可复制的歌词");
+    return;
+  }
+  await copy(content, "歌词已复制到剪贴板");
+};
+
+/** 复制歌词含翻译 / 音译 */
+const handleCopyTranslatedLyric = async () => {
+  // Based on SPlayer-Next — handleCopy
+  const content = lyricLinesToTranslatedText(activeLyricData.value);
+  if (!content) {
+    window.$message?.warning?.("暂无可复制的歌词");
+    return;
+  }
+  await copy(content, "歌词（含翻译）已复制到剪贴板");
+};
 };
 
 // Fullscreen
