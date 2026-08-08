@@ -741,6 +741,53 @@ const initFileIpc = (): void => {
       }
     },
   );
+
+  // 获取远程资源字节（渲染层避免 CORS 污染画布） // Based on SPlayer-Next — fetchRemoteBytes
+  ipcMain.handle(
+    "fetch-remote-bytes",
+    async (
+      _event,
+      url: string,
+    ): Promise<{ success: boolean; data?: number[]; message?: string }> => {
+      try {
+        const buffer = await got(url, { timeout: { request: 15000 } }).buffer();
+        return { success: true, data: Array.from(buffer) };
+      } catch (error) {
+        ipcLog.error("❌ Error fetching remote bytes:", error);
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+  );
+
+  // 保存歌词海报图片 // Based on SPlayer-Next — system.saveFile
+  ipcMain.handle(
+    "save-lyric-poster",
+    async (
+      _event,
+      data: number[],
+      fileName: string,
+    ): Promise<{ success: boolean; path?: string; message?: string }> => {
+      try {
+        const { canceled, filePath } = await dialog.showSaveDialog({
+          title: "导出歌词图片",
+          defaultPath: fileName,
+          filters: [{ name: "图片", extensions: ["png"] }],
+        });
+        if (canceled || !filePath) return { success: false, message: "cancelled" };
+        await writeFile(filePath, Buffer.from(data));
+        return { success: true, path: filePath };
+      } catch (error) {
+        ipcLog.error("❌ Error saving lyric poster:", error);
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+  );
 };
 
 export default initFileIpc;

@@ -1,3 +1,11 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ *
+ * Source: splayer-next-upstream @ f6bcdba (feat: 新增外部 API 局域网开关与任务栏歌词边距设置)
+ *         shared/types/settings.ts (ExternalApiSettings.allowLan) / shared/defaults/settings.ts
+ */
 import { TimeFormat } from "@/composables/useTimeFormat";
 import { SongUnlockServer } from "@/core/player/SongManager";
 import type { SongLevelType } from "@/types/main";
@@ -212,6 +220,8 @@ export interface SettingState {
   showPlaylistCount: boolean;
   /** 是否显示音乐频谱 */
   showSpectrums: boolean;
+  /** 是否反转频谱方向（启用后低频位于频谱两端） */
+  reverseSpectrum: boolean;
   /** 是否开启系统音频集成 */
   smtcOpen: boolean;
   /** 歌词模糊 */
@@ -302,6 +312,10 @@ export interface SettingState {
   useRealIP: boolean;
   /** 真实 IP 地址 */
   realIP: string;
+  /** 启用自定义外部 API（局域网地址） */
+  enableCustomApi: boolean;
+  /** 自定义外部 API base URL（如局域网内自建 API 服务） */
+  customApiBaseUrl: string;
   /** 是否打卡歌曲 */
   scrobbleSong: boolean;
   /** 动态封面 */
@@ -570,6 +584,7 @@ export const useSettingStore = defineStore("setting", {
     progressAdjustLyric: false,
     showPlaylistCount: true,
     showSpectrums: false,
+    reverseSpectrum: false,
     smtcOpen: true,
     playSongDemo: false,
     scrobbleSong: false,
@@ -671,6 +686,8 @@ export const useSettingStore = defineStore("setting", {
     proxyPort: 80,
     useRealIP: false,
     realIP: "",
+    enableCustomApi: false,
+    customApiBaseUrl: "",
     showPlayMeta: true,
     showSongQuality: true,
     showPlayerQuality: true,

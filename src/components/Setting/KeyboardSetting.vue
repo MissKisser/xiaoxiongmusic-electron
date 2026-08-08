@@ -118,7 +118,7 @@ const shortcutList = ref(cloneDeep(shortcutStore.shortcutList));
 
 // 全局快捷键列表（排除页面内快捷键）
 const globalShortcutList = computed(() => {
-  const pageShortcutKeys = ["openPlayer", "openPlayList", "closePlayer"];
+  const pageShortcutKeys = ["openPlayer", "openPlayList", "closePlayer", "searchInPage"];
   return Object.entries(shortcutList.value)
     .filter(([key]) => !pageShortcutKeys.includes(key))
     .reduce(
@@ -132,7 +132,7 @@ const globalShortcutList = computed(() => {
 
 // 页面内快捷键列表
 const pageShortcutList = computed(() => {
-  const pageShortcutKeys = ["openPlayer", "openPlayList", "closePlayer"];
+  const pageShortcutKeys = ["openPlayer", "openPlayList", "closePlayer", "searchInPage"];
   return Object.entries(shortcutList.value)
     .filter(([key]) => pageShortcutKeys.includes(key))
     .reduce(
@@ -205,6 +205,8 @@ const getShortcut = (e: KeyboardEvent): string => {
     "ArrowDown",
     // Escape 键
     "Escape",
+    // 斜杠（页内搜索，参考 SPlayer-Next PR #129）
+    "Slash",
   ];
   if (!allowedCodes.includes(e.code)) return "";
   return e.code;

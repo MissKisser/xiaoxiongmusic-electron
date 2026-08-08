@@ -27,13 +27,33 @@
         <n-h1>{{ currentTitle }}</n-h1>
         <n-text :depth="3">{{ currentSubtitle }}</n-text>
       </n-flex>
+      <!-- 页内搜索框（F3，借鉴 SPlayer-Next PR #129：可由 "/" 快捷键聚焦） -->
+      <div class="set-search" data-search-input>
+        <n-input
+          ref="searchInputRef"
+          v-model:value="searchKeyword"
+          :input-props="{ autocomplete: 'off' }"
+          placeholder="搜索设置项（按 / 聚焦）"
+          clearable
+          round
+          @keydown.esc="clearSearch"
+        >
+          <template #prefix>
+            <SvgIcon name="Search" />
+          </template>
+        </n-input>
+      </div>
       <n-scrollbar
         ref="setScrollbar"
         class="set-content"
         :content-style="{ overflow: 'hidden', padding: '40px 0' }"
       >
         <Transition name="fade" mode="out-in">
-          <component :is="currentComponent" :scroll-to="props.scrollTo" />
+          <component
+            :is="currentComponent"
+            :scroll-to="props.scrollTo"
+            :search-keyword="searchKeyword"
+          />
         </Transition>
       </n-scrollbar>
     </div>
@@ -41,7 +61,12 @@
 </template>
 
 <script setup lang="ts">
-import type { NScrollbar } from "naive-ui";
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
+import type { InputInst, NScrollbar } from "naive-ui";
 import type { MenuOption /* , MenuInst */ } from "naive-ui";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
@@ -50,14 +75,16 @@ import { isElectron } from "@/utils/env";
 // import { useStatusStore } from "@/stores";
 // import packageJson from "@/../package.json";
 import GeneralSetting from "./GeneralSetting.vue";
+import AppearanceSetting from "./AppearanceSetting.vue";
 import PlaySetting from "./PlaySetting.vue";
 import LyricsSetting from "./LyricsSetting.vue";
 import KeyboardSetting from "./KeyboardSetting.vue";
 import LocalSetting from "./LocalSetting.vue";
 import ThirdSetting from "./ThirdSetting.vue";
 import StreamingSetting from "./StreamingSetting.vue";
+import DownloadSetting from "./DownloadSetting.vue";
 import OtherSetting from "./OtherSetting.vue";
-// import AboutSetting from "./AboutSetting.vue";
+import AboutSetting from "./AboutSetting.vue";
 
 const props = defineProps<{ type: SettingType; scrollTo?: string }>();
 
@@ -69,6 +96,13 @@ const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
 
 // 移动端菜单显示状态
 const showLeftMenu = ref(true);
+
+// 页内搜索（F3，借鉴 SPlayer-Next PR #129）
+const searchKeyword = ref<string>("");
+const searchInputRef = ref<InputInst | null>(null);
+const clearSearch = () => {
+  searchKeyword.value = "";
+};
 
 // 监听屏幕大小变化，非小屏时自动显示侧边栏
 watch(isSmallScreen, (small) => {
@@ -89,43 +123,49 @@ const onMenuSelect = () => {
   }
 };
 
-// 菜单内容
+// 菜单内容（分类架构，对齐上游 SPlayer-Next 分类顺序）
 const menuOptions: MenuOption[] = [
   { key: "general", label: "常规设置", icon: renderIcon("SettingsLine") },
+  { key: "appearance", label: "外观主题", icon: renderIcon("Palette") },
   { key: "play", label: "播放设置", icon: renderIcon("Music") },
   { key: "lyrics", label: "歌词设置", icon: renderIcon("Lyrics") },
   { key: "keyboard", label: "快捷键设置", show: isElectron, icon: renderIcon("Keyboard") },
   { key: "local", label: "本地与缓存", show: isElectron, icon: renderIcon("Storage") },
   { key: "third", label: "连接与集成", icon: renderIcon("Extension") },
   { key: "streaming", label: "流媒体设置", icon: renderIcon("Stream") },
+  { key: "download", label: "下载设置", icon: renderIcon("Download") },
   { key: "other", label: "其他设置", icon: renderIcon("SettingsOther") },
-  // { key: "about", label: "关于", icon: renderIcon("Info") },
+  { key: "about", label: "关于", icon: renderIcon("Info") },
 ];
 
 // 当前组件映射
 const componentMap: Record<SettingType, any> = {
   general: GeneralSetting,
+  appearance: AppearanceSetting,
   play: PlaySetting,
   lyrics: LyricsSetting,
   keyboard: KeyboardSetting,
   local: LocalSetting,
   third: ThirdSetting,
   streaming: StreamingSetting,
+  download: DownloadSetting,
   other: OtherSetting,
-  // about: AboutSetting,
+  about: AboutSetting,
 };
 
 // 当前标题映射
 const titleMap: Record<SettingType, { title: string; subtitle: string }> = {
   general: { title: "常规设置", subtitle: "主题、外观与全局设置" },
+  appearance: { title: "外观主题", subtitle: "主题、字体与外观设置" },
   play: { title: "播放设置", subtitle: "播放行为与音质设置" },
   lyrics: { title: "歌词设置", subtitle: "个性化歌词显示设置" },
   keyboard: { title: "快捷键设置", subtitle: "自定义键盘快捷键" },
   local: { title: "本地与缓存", subtitle: "本地音乐与缓存管理" },
   third: { title: "连接与集成", subtitle: "第三方服务连接设置" },
   streaming: { title: "流媒体设置", subtitle: "流媒体服务器配置" },
+  download: { title: "下载设置", subtitle: "下载目录与下载选项" },
   other: { title: "其他设置", subtitle: "代理、数据与高级选项" },
-  // about: { title: "关于", subtitle: "应用信息与版本" },
+  about: { title: "关于", subtitle: "应用信息与版本" },
 };
 
 // 当前组件
@@ -217,6 +257,13 @@ const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || ""
         margin-bottom: 6px;
       }
     }
+    .set-search {
+      padding: 12px 40px 0;
+      :deep(.n-input) {
+        width: 320px;
+        max-width: 100%;
+      }
+    }
     .mobile-title {
       display: none !important;
     }
@@ -243,6 +290,9 @@ const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || ""
       width: 100%;
       display: flex;
       flex-direction: column;
+      .set-search {
+        padding: 12px 16px 0;
+      }
       .mobile-title {
         display: flex !important;
         padding: 20px 12px 16px;

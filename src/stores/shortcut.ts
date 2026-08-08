@@ -1,3 +1,8 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
 import { cloneDeep } from "lodash-es";
 import { defineStore } from "pinia";
 
@@ -21,6 +26,8 @@ interface ShortcutStore {
     openPlayer: ShortcutType;
     openPlayList: ShortcutType;
     closePlayer: ShortcutType;
+    // 页内搜索快捷键（F3，借鉴 SPlayer-Next PR #129）
+    searchInPage: ShortcutType;
   };
 }
 
@@ -80,6 +87,12 @@ export const useShortcutStore = defineStore("shortcut", {
       closePlayer: {
         name: "关闭播放界面",
         shortcut: "Escape",
+        globalShortcut: "",
+      },
+      // 页内搜索快捷键（参考 SPlayer-Next PR #129：默认 `/` 键聚焦页内首个标记的搜索框）
+      searchInPage: {
+        name: "页内搜索",
+        shortcut: "Slash",
         globalShortcut: "",
       },
     },

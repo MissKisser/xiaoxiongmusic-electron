@@ -14,6 +14,7 @@ import PlaylistAdd from "@/components/Modal/PlaylistAdd.vue";
 import BatchList from "@/components/Modal/BatchList.vue";
 import CloudMatch from "@/components/Modal/CloudMatch.vue";
 import CreatePlaylist from "@/components/Modal/CreatePlaylist.vue";
+import CreateRemotePlaylist from "@/components/Modal/CreateRemotePlaylist.vue";
 import UpdatePlaylist from "@/components/Modal/UpdatePlaylist.vue";
 import DownloadModal from "@/components/Modal/DownloadModal.vue";
 import MainSetting from "@/components/Setting/MainSetting.vue";
@@ -179,6 +180,20 @@ export const openCreatePlaylist = (isLocal: boolean = false) => {
     title: isLocal ? "新建本地歌单" : "新建歌单",
     content: () => {
       return h(CreatePlaylist, { isLocal, onClose: () => modal.destroy() });
+    },
+  });
+};
+
+// 新建远程歌单（WebDAV）
+export const openCreateRemotePlaylist = () => {
+  const modal = window.$modal.create({
+    preset: "card",
+    transformOrigin: "center",
+    autoFocus: false,
+    style: { width: "600px" },
+    title: "新建远程歌单",
+    content: () => {
+      return h(CreateRemotePlaylist, { onClose: () => modal.destroy() });
     },
   });
 };

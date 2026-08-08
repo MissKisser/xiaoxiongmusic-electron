@@ -1,3 +1,8 @@
+<!--
+Based on SPlayer-Next
+Copyright (C) 2024 SPlayer-Dev
+Licensed under AGPL-3.0
+-->
 <!-- 播放设置 -->
 <template>
   <div class="setting-type">
@@ -390,6 +395,24 @@
           :round="false"
           :disabled="settingStore.playbackEngine === 'mpv'"
           @update:value="showSpectrumsChange"
+        />
+      </n-card>
+      <n-card v-if="isElectron" class="set-item">
+        <div class="label">
+          <n-text class="name">频谱反向</n-text>
+          <n-text class="tip" :depth="3">
+            {{
+              settingStore.playbackEngine === "mpv"
+                ? "MPV 引擎暂不支持显示音乐频谱"
+                : "启用后频率从中间向两侧递减，否则递增"
+            }}
+          </n-text>
+        </div>
+        <n-switch
+          v-model:value="settingStore.reverseSpectrum"
+          class="set"
+          :round="false"
+          :disabled="settingStore.playbackEngine === 'mpv' || !showSpectrums"
         />
       </n-card>
     </div>

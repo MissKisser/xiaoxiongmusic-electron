@@ -1,3 +1,8 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
 <template>
   <div :style="{ opacity: show ? '0.6' : '0.1' }" class="player-spectrum">
     <canvas ref="canvasRef" :style="{ height: height + 'px' }" class="spectrum-line" />
@@ -6,6 +11,7 @@
 
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
+import { useSettingStore } from "@/stores";
 
 const props = defineProps<{
   show: boolean;
@@ -15,6 +21,7 @@ const props = defineProps<{
 }>();
 
 const player = usePlayerController();
+const settingStore = useSettingStore();
 
 // canvas
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -41,6 +48,8 @@ const drawSpectrum = () => {
   const canvasHeight = canvasRef.value.height;
   // 频谱数量
   const numBars = data.length / 2.5;
+  // 是否反转频谱方向（启用后低频位于频谱两端，频率从中间向两侧递减）
+  const reverse = settingStore.reverseSpectrum;
   // 圆角半径
   const cornerRadius = props.radius || 2.5;
   // 柱形宽度
@@ -50,8 +59,10 @@ const drawSpectrum = () => {
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
   // 遍历音频频谱数据
   for (let i = 0; i < numBars; i++) {
+    // 反转时交换左右频谱数据（最高频位于中间），否则低频位于中间
+    const dataIndex = reverse ? numBars - 1 - i : i;
     // 计算柱形高度
-    const barHeight = (data[i] / 255) * canvasHeight;
+    const barHeight = (data[dataIndex] / 255) * canvasHeight;
     // 计算柱形的 x 和 y 坐标
     const x1 = i * barWidth + canvasWidth / 2;
     const x2 = canvasWidth / 2 - (i + 1) * barWidth;

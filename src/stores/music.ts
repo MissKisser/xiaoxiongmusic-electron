@@ -8,6 +8,8 @@ interface MusicState {
   playSong: SongType;
   playPlaylistId: number;
   songLyric: SongLyric;
+  /** 当前歌词文件的作者/制作者（来自 LRC [by:]/[au:] 或 TTML amll 元数据） */
+  lyricAuthors: string[];
   personalFM: {
     playIndex: number;
     list: SongType[];
@@ -42,6 +44,8 @@ export const useMusicStore = defineStore("music", {
       lrcData: [], // 普通歌词
       yrcData: [], // 逐字歌词
     },
+    // 当前歌词文件的作者/制作者
+    lyricAuthors: [],
     // 私人FM数据
     personalFM: {
       playIndex: 0,
@@ -82,6 +86,7 @@ export const useMusicStore = defineStore("music", {
     resetMusicData() {
       this.playSong = { ...defaultMusicData };
       this.playPlaylistId = 0;
+      this.lyricAuthors = [];
       this.setSongLyric({ lrcData: [], yrcData: [] }, true);
       if (isElectron) {
         window.electron.ipcRenderer.send("play-song-change", null);
@@ -117,6 +122,13 @@ export const useMusicStore = defineStore("music", {
         );
       }
     },
+    /**
+     * 设置当前歌词文件的作者/制作者
+     * @param authors 作者数组
+     */
+    setLyricAuthors(authors: string[]) {
+      this.lyricAuthors = authors;
+    },
     // 获取歌曲封面
     getSongCover(size: "s" | "m" | "l" | "xl" | "cover" = "s") {
       return this.playSong.path
@@ -130,5 +142,7 @@ export const useMusicStore = defineStore("music", {
   persist: {
     key: "music-store",
     storage: localStorage,
+    // 歌词作者为动态数据，随歌词加载实时更新，不做持久化
+    omit: ["lyricAuthors"],
   },
 });

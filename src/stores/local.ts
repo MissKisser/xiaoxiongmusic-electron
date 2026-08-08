@@ -1,4 +1,5 @@
-import type { SongType, LocalPlaylistType } from "@/types/main";
+import type { SongType, LocalPlaylistType, RemotePlaylistType } from "@/types/main";
+import type { WebDavPlaylistInput } from "@/types/shared";
 import { cloneDeep } from "lodash-es";
 import localforage from "localforage";
 
@@ -30,6 +31,8 @@ const createLocalStore = () => {
   const localSongs = ref<SongType[]>([]);
   // 本地歌单
   const localPlaylists = ref<LocalPlaylistType[]>([]);
+  // 远程歌单（WebDAV）
+  const remotePlaylists = ref<RemotePlaylistType[]>([]);
 
   // 读取本地歌曲
   const readLocalSong = async (): Promise<SongType[]> => {
@@ -160,6 +163,72 @@ const createLocalStore = () => {
     return newPlaylist;
   };
 
+  // 读取远程歌单列表
+  const readRemotePlaylists = async (): Promise<RemotePlaylistType[]> => {
+    try {
+      const result = await localDB.getItem("remote-playlists");
+      remotePlaylists.value = (result as RemotePlaylistType[]) || [];
+      return remotePlaylists.value;
+    } catch (error) {
+      console.error("Error reading remote playlists:", error);
+      throw error;
+    }
+  };
+
+  // 保存远程歌单列表到存储
+  const saveRemotePlaylists = async () => {
+    try {
+      await localDB.setItem("remote-playlists", cloneDeep(remotePlaylists.value));
+    } catch (error) {
+      console.error("Error saving remote playlists:", error);
+      throw error;
+    }
+  };
+
+  /**
+   * 创建远程歌单（WebDAV）
+   * 凭据由主进程校验并加密存储，失败时不落本地记录
+   * @param name 歌单名称
+   * @param webdav WebDAV 配置
+   * @returns 创建的远程歌单
+   */
+  const createRemotePlaylist = async (
+    name: string,
+    webdav: WebDavPlaylistInput,
+  ): Promise<RemotePlaylistType> => {
+    const now = Date.now();
+    const newPlaylist: RemotePlaylistType = {
+      id: generateLocalPlaylistId().toString(),
+      name,
+      url: webdav.url.trim(),
+      username: webdav.username,
+      rootPath: webdav.rootPath,
+      scanDepth: webdav.scanDepth,
+      createTime: now,
+      updateTime: now,
+    };
+    // 先由主进程校验并保存 WebDAV 配置，失败则中止
+    await window.api.remotePlaylist.save({ playlistId: newPlaylist.id, name, webdav });
+    remotePlaylists.value.push(newPlaylist);
+    await saveRemotePlaylists();
+    return newPlaylist;
+  };
+
+  // 删除远程歌单
+  const deleteRemotePlaylist = async (id: string): Promise<boolean> => {
+    const index = remotePlaylists.value.findIndex((p) => p.id === id);
+    if (index === -1) return false;
+    // 同步删除主进程中的 WebDAV 配置
+    try {
+      await window.api.remotePlaylist.remove(id);
+    } catch (error) {
+      console.error("Error removing remote playlist config:", error);
+    }
+    remotePlaylists.value.splice(index, 1);
+    await saveRemotePlaylists();
+    return true;
+  };
+
   // 更新本地歌单信息
   const updateLocalPlaylist = async (
     id: number,
@@ -258,10 +327,12 @@ const createLocalStore = () => {
   // 直接初始化数据
   readLocalSong();
   readLocalPlaylists();
+  readRemotePlaylists();
 
   return reactive({
     localSongs,
     localPlaylists,
+    remotePlaylists,
     readLocalSong,
     updateLocalSong,
     deleteLocalSong,
@@ -273,6 +344,9 @@ const createLocalStore = () => {
     removeSongsFromLocalPlaylist,
     getLocalPlaylistDetail,
     isLocalPlaylist,
+    readRemotePlaylists,
+    createRemotePlaylist,
+    deleteRemotePlaylist,
   });
 };
 

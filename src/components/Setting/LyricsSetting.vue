@@ -1,3 +1,8 @@
+<!--
+Based on SPlayer-Next
+Copyright (C) 2024 SPlayer-Dev
+Licensed under AGPL-3.0
+-->
 <template>
   <div class="setting-type">
     <div class="set-list">
@@ -532,6 +537,37 @@
             { label: '右对齐', value: 'right' },
             { label: '左右分离', value: 'both' },
           ]"
+          class="set"
+          @update:value="saveDesktopLyricConfig"
+        />
+      </n-card>
+      <!-- margin -->
+      <n-card class="set-item">
+        <div class="label">
+          <n-text class="name">左右边距</n-text>
+          <n-text class="tip" :depth="3">桌面歌词文本距窗口左右边缘的距离</n-text>
+        </div>
+        <n-slider
+          v-model:value="desktopLyricConfig.marginHorizontal"
+          :min="0"
+          :max="60"
+          :step="1"
+          :format-tooltip="(value: number) => `${value}px`"
+          class="set"
+          @update:value="saveDesktopLyricConfig"
+        />
+      </n-card>
+      <n-card class="set-item">
+        <div class="label">
+          <n-text class="name">上下边距</n-text>
+          <n-text class="tip" :depth="3">桌面歌词文本距窗口上下边缘的距离</n-text>
+        </div>
+        <n-slider
+          v-model:value="desktopLyricConfig.marginVertical"
+          :min="0"
+          :max="60"
+          :step="1"
+          :format-tooltip="(value: number) => `${value}px`"
           class="set"
           @update:value="saveDesktopLyricConfig"
         />
