@@ -370,3 +370,32 @@ export function stripLyricMetadata(
 
   return lines.slice(startIdx, endIdx);
 }
+
+/**
+ * 占位符歌词识别正则
+ *
+ * 前两条借鉴 SPlayer-Next excludeRules.ts（feat: 排除占位符歌词），
+ * 后两条覆盖 music://placeholder、{placeholder} 等通用占位符概念。
+ *
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ *
+ * Source: splayer-next-upstream @ 0989d5a (feat: 排除占位符歌词)
+ *         src/utils/lyric/excludeRules.ts
+ */
+const PLACEHOLDER_LYRIC_PATTERNS: RegExp[] = [
+  /^纯音乐，请欣赏$/,
+  /^此歌曲为没有填词的纯音乐，请您欣赏$/,
+  /music:\/\/placeholder/,
+  /\{placeholder\}/i,
+];
+
+/**
+ * 判断一行歌词是否为占位符内容（如「纯音乐，请欣赏」「music://placeholder」）
+ * @param text 歌词行文本
+ */
+export const isPlaceholderLyric = (text: string): boolean => {
+  const trimmed = text.trim();
+  return PLACEHOLDER_LYRIC_PATTERNS.some((pattern) => pattern.test(trimmed));
+};

@@ -1,5 +1,12 @@
 /**
  * @fileoverview 跟元数据清理器有关的配置内容
+ *
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ *
+ * Source: splayer-next-upstream @ 0989d5a (feat: 排除占位符歌词)
+ *         src/utils/lyric/excludeRules.ts
  */
 
 /**
@@ -306,4 +313,7 @@ export const keywords = [
 export const regexes = [
   "(?:【.*?音乐人.*?】|\\(.*?音乐人.*?\\)|「.*?音乐人.*?」|（.*?音乐人.*?）|『.*?音乐人.*?』)",
   ".*?未经.*?不得.*?",
+  // 占位符歌词行（借鉴 SPlayer-Next）
+  "^纯音乐，请欣赏$",
+  "^此歌曲为没有填词的纯音乐，请您欣赏$",
 ];

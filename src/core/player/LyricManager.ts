@@ -7,7 +7,7 @@ import { type SongLyric } from "@/types/lyric";
 import { SongType } from "@/types/main";
 import { isElectron } from "@/utils/env";
 import { isWordLevelFormat, parseSmartLrc } from "@/utils/lyricParser";
-import { stripLyricMetadata } from "@/utils/lyricStripper";
+import { isPlaceholderLyric, stripLyricMetadata } from "@/utils/lyricStripper";
 import { getConverter } from "@/utils/opencc";
 import { type LyricLine, parseLrc, parseTTML, parseYrc } from "@applemusic-like-lyrics/lyric";
 import { cloneDeep, escapeRegExp, isEmpty } from "lodash-es";
@@ -738,12 +738,20 @@ class LyricManager {
       softMatchRegexes: songMetadataRegexes,
     };
 
-    const lrcData = stripLyricMetadata(lyricData.lrcData || [], options);
+    // 过滤占位符歌词行（如「纯音乐，请欣赏」「music://placeholder」等）
+    // Based on SPlayer-Next — 排除占位符歌词
+    const dropPlaceholderLines = (lines: LyricLine[]): LyricLine[] =>
+      lines.filter((line) => {
+        const text = line.words?.map((w) => w.word).join("").trim();
+        return !text || !isPlaceholderLyric(text);
+      });
+
+    const lrcData = dropPlaceholderLines(stripLyricMetadata(lyricData.lrcData || [], options));
 
     let yrcData = lyricData.yrcData || [];
 
     if (!statusStore.usingTTMLLyric || settingStore.enableExcludeTTML) {
-      yrcData = stripLyricMetadata(yrcData, options);
+      yrcData = dropPlaceholderLines(stripLyricMetadata(yrcData, options));
     }
 
     return {
