@@ -8,6 +8,7 @@ import { SongType } from "@/types/main";
 import { isElectron } from "@/utils/env";
 import { isWordLevelFormat, parseSmartLrc } from "@/utils/lyricParser";
 import { isPlaceholderLyric, stripLyricMetadata } from "@/utils/lyricStripper";
+import { extractLyricAuthors } from "@/utils/lyric/lyricAuthor";
 import { getConverter } from "@/utils/opencc";
 import { type LyricLine, parseLrc, parseTTML, parseYrc } from "@applemusic-like-lyrics/lyric";
 import { cloneDeep, escapeRegExp, isEmpty } from "lodash-es";
@@ -24,7 +25,35 @@ class LyricManager {
    */
   private activeLyricReq = 0;
 
+  /**
+   * 当前歌词文件的作者/制作者列表
+   * 从歌词原始内容（LRC [by:]/[au:] 或 TTML amll 元数据）中提取
+   */
+  private lyricAuthors: string[] = [];
+  /**
+   * 当前歌词来源优先级（数值越大越优先）
+   * TTML(4) > 本地歌词(3) > QQ 音乐(2) > 网易云/流媒体(1)
+   * 用于多个歌词来源并存时确定作者归属
+   */
+  private lyricAuthorPriority = 0;
+
   constructor() {}
+
+  /**
+   * 更新歌词作者（仅在来源优先级不低于当前值时生效）
+   * @param content 歌词原始内容
+   * @param format 歌词格式
+   * @param priority 来源优先级
+   */
+  private updateLyricAuthors(
+    content: string | null | undefined,
+    format: "lrc" | "ttml",
+    priority: number,
+  ) {
+    if (!content || priority < this.lyricAuthorPriority) return;
+    this.lyricAuthorPriority = priority;
+    this.lyricAuthors = extractLyricAuthors(content, format);
+  }
 
   /**
    * 重置当前歌曲的歌词数据
@@ -35,6 +64,10 @@ class LyricManager {
     const statusStore = useStatusStore();
     // 重置歌词数据
     musicStore.setSongLyric({}, true);
+    // 重置歌词作者
+    this.lyricAuthors = [];
+    this.lyricAuthorPriority = 0;
+    musicStore.setLyricAuthors([]);
     statusStore.usingTTMLLyric = false;
     // 重置歌词索引
     statusStore.lyricIndex = -1;
@@ -197,6 +230,8 @@ class LyricManager {
         return null;
       }
     }
+    // 提取歌词作者（QQ 音乐 LRC 元数据）
+    this.updateLyricAuthors(data.lrc, "lrc", 2);
     // 保存到缓存
     if (data.code === 200) {
       try {
@@ -437,6 +472,8 @@ class LyricManager {
       }
       if (isStale()) return;
       if (!ttmlContent || typeof ttmlContent !== "string") return;
+      // 提取歌词作者（TTML amll 元数据，最高优先级）
+      this.updateLyricAuthors(ttmlContent, "ttml", 4);
       const sorted = this.cleanTTMLTranslations(ttmlContent);
       const parsed = parseTTML(sorted);
       const lines = parsed?.lines || [];
@@ -470,6 +507,8 @@ class LyricManager {
       let yrcLines: LyricLine[] = [];
       // 普通歌词
       if (data?.lrc?.lyric) {
+        // 提取歌词作者（网易云 LRC 元数据）
+        this.updateLyricAuthors(data.lrc.lyric, "lrc", 1);
         lrcLines = parseLrc(data.lrc.lyric) || [];
         // 普通歌词翻译
         if (data?.tlyric?.lyric)
@@ -521,6 +560,12 @@ class LyricManager {
       const { lyric, format }: { lyric?: string; format?: "lrc" | "ttml" | "yrc" } =
         await window.electron.ipcRenderer.invoke("get-music-lyric", path);
       if (!lyric) return { lrcData: [], yrcData: [] };
+      // 提取歌词作者（本地文件，TTML 优先）
+      if (format === "ttml") {
+        this.updateLyricAuthors(lyric, "ttml", 4);
+      } else if (format === "lrc") {
+        this.updateLyricAuthors(lyric, "lrc", 3);
+      }
       // YRC 直接解析
       if (format === "yrc") {
         const lines = parseYrc(lyric) || [];
@@ -653,6 +698,12 @@ class LyricManager {
         id,
       );
       statusStore.usingTTMLLyric = Boolean(ttml);
+      // 提取歌词作者（本地覆盖歌词，TTML 优先）
+      if (typeof ttml === "string" && ttml) {
+        this.updateLyricAuthors(ttml, "ttml", 4);
+      } else if (typeof lrc === "string" && lrc) {
+        this.updateLyricAuthors(lrc, "lrc", 3);
+      }
       // 安全解析 LRC
       let lrcLines: LyricLine[] = [];
       let lrcIsWordLevel = false;
@@ -849,6 +900,8 @@ class LyricManager {
     const statusStore = useStatusStore();
     // 若非本次
     if (this.activeLyricReq !== req) return;
+    // 同步歌词作者到 store（无论歌词数据是否变化都需更新）
+    musicStore.setLyricAuthors(this.lyricAuthors);
     // 如果只有逐字歌词
     if (lyricData.lrcData.length === 0 && lyricData.yrcData.length > 0) {
       // 构成普通歌词
@@ -897,6 +950,8 @@ class LyricManager {
       const lyricContent = await streamingStore.fetchLyrics(song);
       if (lyricContent) {
         const { format, lines } = parseSmartLrc(lyricContent);
+        // 提取歌词作者（流媒体 LRC 元数据）
+        this.updateLyricAuthors(lyricContent, "lrc", 1);
         if (lines.length > 0) {
           if (isWordLevelFormat(format)) {
             result.yrcData = lines;
@@ -924,6 +979,9 @@ class LyricManager {
     // 标记当前歌词请求（避免旧请求覆盖新请求）
     const req = ++this.lyricReqSeq;
     this.activeLyricReq = req;
+    // 重置歌词作者（新歌曲从零开始提取）
+    this.lyricAuthors = [];
+    this.lyricAuthorPriority = 0;
     const isStreaming = song?.type === "streaming";
     try {
       let lyricData: SongLyric = { lrcData: [], yrcData: [] };

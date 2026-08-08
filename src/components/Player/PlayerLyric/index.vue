@@ -1,8 +1,10 @@
 <template>
   <div class="player-lyric">
-    <!-- 歌词内容 -->
-    <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" />
-    <DefaultLyric v-else :currentTime="playSeek" />
+    <!-- 歌词内容（边缘渐变遮罩作用于歌词本身，避免遮住底部署名） -->
+    <div class="player-lyric-mask">
+      <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" />
+      <DefaultLyric v-else :currentTime="playSeek" />
+    </div>
     <!-- 移动端全屏歌词：放大、复制、缩小（屏幕右侧） -->
     <div v-if="isMobile" class="lyric-quick-actions">
       <div class="action-item" @click="adjustFontSize(2)">
@@ -63,6 +65,14 @@
         <SvgIcon name="Settings" />
       </div>
     </n-flex>
+    <!-- 歌词作者/来源署名 -->
+    <div v-if="musicStore.lyricAuthors.length > 0" class="lyric-credit-line">
+      <span class="lyric-credit-prefix">歌词制作</span>
+      <template v-for="(author, idx) in musicStore.lyricAuthors" :key="author">
+        <span v-if="idx > 0" class="lyric-credit-sep">、</span>
+        <span class="lyric-credit">{{ author }}</span>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -155,16 +165,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.2));
-  mask: linear-gradient(
-    180deg,
-    hsla(0, 0%, 100%, 0) 0,
-    hsla(0, 0%, 100%, 0.6) 5%,
-    #fff 10%,
-    #fff 75%,
-    hsla(0, 0%, 100%, 0.6) 85%,
-    hsla(0, 0%, 100%, 0)
-  );
   @media (hover: hover) and (pointer: fine) {
     &:hover {
       .lyric-menu {
@@ -175,6 +175,21 @@ onBeforeUnmount(() => {
       }
     }
   }
+}
+.player-lyric-mask {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.2));
+  mask: linear-gradient(
+    180deg,
+    hsla(0, 0%, 100%, 0) 0,
+    hsla(0, 0%, 100%, 0.6) 5%,
+    #fff 10%,
+    #fff 75%,
+    hsla(0, 0%, 100%, 0.6) 85%,
+    hsla(0, 0%, 100%, 0)
+  );
 }
 .lyric-menu {
   position: absolute;
@@ -301,6 +316,43 @@ onBeforeUnmount(() => {
     }
     .n-button {
       --n-text-color: rgb(var(--main-cover-color));
+    }
+  }
+}
+
+/* 歌词作者/来源署名（底部） */
+.lyric-credit-line {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: calc(100% - 100px);
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgb(var(--main-cover-color));
+  background-color: rgba(var(--main-cover-color), 0.1);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  opacity: 0.6;
+  transition: opacity 0.3s;
+  pointer-events: none;
+
+  .lyric-credit-prefix {
+    opacity: 0.6;
+    margin-right: 2px;
+  }
+  .lyric-credit-sep {
+    margin: 0 2px;
+    opacity: 0.6;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .player-lyric:hover & {
+      opacity: 0.9;
     }
   }
 }
