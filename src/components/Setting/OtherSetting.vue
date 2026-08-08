@@ -1,4 +1,12 @@
 <!-- 本地设置 -->
+<!--
+  Based on SPlayer-Next
+  Copyright (C) 2024 SPlayer-Dev
+  Licensed under AGPL-3.0
+
+  Source: splayer-next-upstream @ f6bcdba (feat: 新增外部 API 局域网开关与任务栏歌词边距设置)
+          src/settings/categories/services.ts (externalApiAllowLan) / src/components/settings/custom/ExternalApiPanel.vue
+-->
 <template>
   <div class="setting-type">
     <div class="set-list">
@@ -25,6 +33,26 @@
             <n-text depth="3">IP</n-text>
           </template>
         </n-input>
+      </n-card>
+    </div>
+    <div class="set-list">
+      <n-h3 prefix="bar"> 外部 API </n-h3>
+      <n-card class="external-api-card">
+        <n-form label-placement="left" label-width="auto" :show-feedback="false">
+          <n-form-item label="启用外部 API">
+            <n-switch v-model:value="settingStore.enableCustomApi" :round="false" />
+          </n-form-item>
+          <n-form-item label="API 地址">
+            <n-input
+              v-model:value="settingStore.customApiBaseUrl"
+              :disabled="!settingStore.enableCustomApi"
+              placeholder="http://192.168.1.100:3000"
+            />
+          </n-form-item>
+        </n-form>
+        <n-text class="tip" :depth="3">
+          开启后所有 API 请求将发送至自定义地址（如局域网内自建的 API 服务），适用于手机/车机联控同一数据源
+        </n-text>
       </n-card>
     </div>
     <div v-if="isElectron" class="set-list">
@@ -284,3 +312,15 @@ const clearAllData = () => {
   });
 };
 </script>
+
+<style lang="scss" scoped>
+.external-api-card {
+  width: 100%;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  .tip {
+    display: block;
+    margin-top: 12px;
+  }
+}
+</style>

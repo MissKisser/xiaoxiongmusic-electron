@@ -1,3 +1,11 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ *
+ * Source: splayer-next-upstream @ f6bcdba (feat: 新增外部 API 局域网开关与任务栏歌词边距设置)
+ *         electron/main/server/index.ts (外部 API 局域网开关)
+ */
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError, AxiosResponse } from "axios";
 import { isDev } from "./env";
 import { useSettingStore } from "@/stores";
@@ -29,6 +37,10 @@ server.interceptors.request.use(
     // pinia
     const settingStore = useSettingStore();
     if (!request.params) request.params = {};
+    // 自定义外部 API baseURL（局域网开关）
+    if (settingStore.enableCustomApi && settingStore.customApiBaseUrl) {
+      request.baseURL = settingStore.customApiBaseUrl.replace(/\/+$/, "");
+    }
     // Cookie
     if (!request.params.noCookie && (isLogin() || getCookie("MUSIC_U") !== null)) {
       const cookie = `MUSIC_U=${getCookie("MUSIC_U")};`;
