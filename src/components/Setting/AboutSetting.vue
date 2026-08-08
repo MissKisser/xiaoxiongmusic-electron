@@ -110,14 +110,42 @@
         </n-card>
       </n-flex>
     </div>
+    <!-- 环境信息 -->
+    <div v-if="isElectron && envInfo" class="set-list">
+      <n-h3 prefix="bar"> 环境信息 </n-h3>
+      <n-card class="set-item">
+        <n-descriptions label-placement="left" :column="1" size="small" bordered>
+          <n-descriptions-item label="应用版本"> {{ envInfo.appVersion }} </n-descriptions-item>
+          <n-descriptions-item label="平台">
+            {{ envInfo.platform }} {{ envInfo.arch }}
+          </n-descriptions-item>
+          <n-descriptions-item label="操作系统">
+            {{ envInfo.osType }} {{ envInfo.osRelease }}
+          </n-descriptions-item>
+          <n-descriptions-item label="Electron"> {{ envInfo.electronVersion }} </n-descriptions-item>
+          <n-descriptions-item label="Chromium"> {{ envInfo.chromeVersion }} </n-descriptions-item>
+          <n-descriptions-item label="Node.js"> {{ envInfo.nodeVersion }} </n-descriptions-item>
+          <n-descriptions-item label="V8"> {{ envInfo.v8Version }} </n-descriptions-item>
+          <n-descriptions-item label="磁盘占用"> {{ formatBytes(envInfo.diskUsage) }} </n-descriptions-item>
+          <n-descriptions-item label="缓存大小"> {{ formatBytes(envInfo.cacheSize) }} </n-descriptions-item>
+        </n-descriptions>
+        <n-flex justify="end" style="margin-top: 12px">
+          <n-button size="small" secondary type="primary" @click="copyEnvInfo">
+            复制环境信息
+          </n-button>
+        </n-flex>
+      </n-card>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { openLink } from "@/utils/helper";
+import { copyData, openLink } from "@/utils/helper";
 import { debounce } from "lodash-es";
 import { useStatusStore } from "@/stores";
 import { isElectron } from "@/utils/env";
+// Based on SPlayer-Next
+import type { EnvironmentInfo } from "@shared";
 import packageJson from "@/../package.json";
 
 const statusStore = useStatusStore();
@@ -239,8 +267,62 @@ const openDeveloperMode = useThrottleFn(() => {
   }
 }, 100);
 
+// Based on SPlayer-Next
+
+// 环境信息
+const envInfo = ref<EnvironmentInfo | null>(null);
+
+// 获取环境信息
+const getEnvInfo = async () => {
+  if (!isElectron) return;
+  try {
+    envInfo.value = await window.api.system.getEnvironmentInfo();
+  } catch (error) {
+    console.error("获取环境信息失败:", error);
+  }
+};
+
+// 字节大小格式化
+const formatBytes = (bytes: number): string => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+};
+
+// 复制环境信息
+const copyEnvInfo = () => {
+  if (!envInfo.value) return;
+  const {
+    appVersion,
+    platform,
+    arch,
+    osType,
+    osRelease,
+    electronVersion,
+    chromeVersion,
+    nodeVersion,
+    v8Version,
+    diskUsage,
+    cacheSize,
+  } = envInfo.value;
+  const lines = [
+    `应用版本: ${appVersion}`,
+    `平台: ${platform} ${arch}`,
+    `操作系统: ${osType} ${osRelease}`,
+    `Electron: ${electronVersion}`,
+    `Chromium: ${chromeVersion}`,
+    `Node.js: ${nodeVersion}`,
+    `V8: ${v8Version}`,
+    `磁盘占用: ${formatBytes(diskUsage)}`,
+    `缓存大小: ${formatBytes(cacheSize)}`,
+  ];
+  copyData(lines.join("\n"));
+};
+
 onMounted(() => {
   getContributors();
+  getEnvInfo();
 });
 </script>
 

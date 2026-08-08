@@ -29,6 +29,11 @@ if (process.contextIsolated) {
         debug: (message: string, ...args: unknown[]) =>
           ipcRenderer.send("renderer-log", "debug", message, args),
       },
+      // Based on SPlayer-Next
+      // Environment info API
+      system: {
+        getEnvironmentInfo: () => ipcRenderer.invoke("get-environment-info"),
+      },
     });
   } catch (error) {
     console.error(error);

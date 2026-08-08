@@ -16,6 +16,8 @@ import initSocketIpc from "./ipc-socket";
 import initMediaIpc from "./ipc-media";
 import initMpvIpc from "./ipc-mpv";
 import initRendererLogIpc from "./ipc-renderer-log";
+// Based on SPlayer-Next
+import initEnvIpc from "./ipc-env";
 
 /**
  * 初始化全部 IPC 通信
@@ -37,6 +39,7 @@ const initIpc = (): void => {
   initMediaIpc();
   initMpvIpc();
   initRendererLogIpc();
+  initEnvIpc();
   if (isMac) {
     initMacStatusBarIpc();
   } else {

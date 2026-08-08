@@ -1,4 +1,5 @@
 import { DialogApi, LoadingBarApi, MessageApi, ModalApi, NotificationApi } from "naive-ui";
+import type { EnvironmentInfo } from "./shared";
 
 declare global {
   interface Window {
@@ -18,6 +19,10 @@ declare global {
         reset: (keys?: string[]) => Promise<boolean>;
         export: (data: any) => Promise<boolean>;
         import: () => Promise<any>;
+      };
+      // Based on SPlayer-Next
+      system: {
+        getEnvironmentInfo: () => Promise<EnvironmentInfo>;
       };
     };
   }
