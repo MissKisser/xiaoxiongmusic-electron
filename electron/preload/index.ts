@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import type { WebDavPlaylistInput } from "@shared";
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
@@ -29,10 +30,20 @@ if (process.contextIsolated) {
         debug: (message: string, ...args: unknown[]) =>
           ipcRenderer.send("renderer-log", "debug", message, args),
       },
-      // Based on SPlayer-Next
+// Based on SPlayer-Next
       // Environment info API
       system: {
         getEnvironmentInfo: () => ipcRenderer.invoke("get-environment-info"),
+      },
+      // Remote playlist API (WebDAV remote media)
+      remotePlaylist: {
+        save: (input: {
+          playlistId: string;
+          name: string;
+          webdav: WebDavPlaylistInput;
+        }) => ipcRenderer.invoke("remote-playlist:save", input),
+        remove: (playlistId: string) => ipcRenderer.invoke("remote-playlist:remove", playlistId),
+        clear: () => ipcRenderer.invoke("remote-playlist:clear"),
       },
     });
   } catch (error) {

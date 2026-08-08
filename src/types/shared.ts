@@ -56,6 +56,26 @@ export interface EnvironmentInfo {
   cacheSize: number;
 }
 
+/**
+ * WebDAV 远程歌单配置（创建远程歌单时由渲染进程提交给主进程）
+ *
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
+export interface WebDavPlaylistInput {
+  /** WebDAV 服务地址，如 https://dav.example.com */
+  url: string;
+  /** WebDAV 用户名 */
+  username: string;
+  /** WebDAV 密码（由主进程加密存储，不落盘明文） */
+  password: string;
+  /** WebDAV 挂载目录，如 /music */
+  rootPath: string;
+  /** WebDAV 扫描深度（0-10） */
+  scanDepth: number;
+}
+
 export { DEFAULT_TASKBAR_CONFIG, TASKBAR_IPC_CHANNELS } from "./shared/taskbar-ipc";
 export type {
   SyncStatePayload,

@@ -18,6 +18,7 @@ import initMpvIpc from "./ipc-mpv";
 import initRendererLogIpc from "./ipc-renderer-log";
 // Based on SPlayer-Next
 import initEnvIpc from "./ipc-env";
+import initRemotePlaylistIpc from "./ipc-remote-playlist";
 
 /**
  * 初始化全部 IPC 通信
@@ -39,7 +40,8 @@ const initIpc = (): void => {
   initMediaIpc();
   initMpvIpc();
   initRendererLogIpc();
-  initEnvIpc();
+initEnvIpc();
+  initRemotePlaylistIpc();
   if (isMac) {
     initMacStatusBarIpc();
   } else {

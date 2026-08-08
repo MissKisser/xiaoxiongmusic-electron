@@ -31,7 +31,7 @@ import type { CoverType } from "@/types/main";
 import { isLogin } from "@/utils/auth";
 import { isElectron } from "@/utils/env";
 import { renderIcon } from "@/utils/helper";
-import { openCreatePlaylist } from "@/utils/modal";
+import { openCreatePlaylist, openCreateRemotePlaylist } from "@/utils/modal";
 import { debounce } from "lodash-es";
 import {
   type MenuGroupOption,
@@ -40,6 +40,7 @@ import {
   NAvatar,
   NBadge,
   NButton,
+  NDropdown,
   NEllipsis,
   NText,
   NPopselect,
@@ -62,7 +63,7 @@ const { isDesktop } = useMobile();
 // 菜单数据
 const menuRef = ref<MenuInst | null>(null);
 const menuActiveKey = ref<string | number>((router.currentRoute.value.name as string) || "home");
-const playlistMode = ref<"online" | "local">("online");
+const playlistMode = ref<"online" | "local" | "remote">("online");
 
 // 刷新私人漫游
 const handleRefreshFM = async (e: Event) => {
@@ -217,7 +218,11 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
           label: () =>
             h("div", { class: "user-list" }, [
               h(NText, { depth: 3 }, () =>
-                playlistMode.value === "online" ? "创建的歌单" : "本地歌单",
+                playlistMode.value === "online"
+                  ? "创建的歌单"
+                  : playlistMode.value === "remote"
+                    ? "远程歌单"
+                    : "本地歌单",
               ),
               h(
                 NPopselect,
@@ -225,10 +230,11 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
                   options: [
                     { label: "在线歌单", value: "online" },
                     { label: "本地歌单", value: "local" },
+                    { label: "远程歌单", value: "remote" },
                   ],
                   value: playlistMode.value,
                   trigger: "click",
-                  onUpdateValue: (value: "online" | "local") => {
+                  onUpdateValue: (value: "online" | "local" | "remote") => {
                     playlistMode.value = value;
                   },
                 },
@@ -250,14 +256,20 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
                 renderIcon: renderIcon("Add"),
                 onclick: (event: Event) => {
                   event.stopPropagation();
-                  openCreatePlaylist(playlistMode.value === "local");
+                  if (playlistMode.value === "remote") {
+                    openCreateRemotePlaylist();
+                  } else {
+                    openCreatePlaylist(playlistMode.value === "local");
+                  }
                 },
               }),
             ]),
           children:
             playlistMode.value === "online"
               ? [...createPlaylist.value]
-              : [...localPlaylistMenu.value],
+              : playlistMode.value === "remote"
+                ? [...remotePlaylistMenu.value]
+                : [...localPlaylistMenu.value],
         },
         // 收藏的歌单
         {
@@ -386,6 +398,43 @@ const localPlaylistMenu = computed<MenuOption[]>(() => {
   }));
 });
 
+// 删除远程歌单
+const handleDeleteRemotePlaylist = async (id: string) => {
+  try {
+    await localStore.deleteRemotePlaylist(id);
+    window.$message.success("删除远程歌单成功");
+  } catch (error) {
+    console.error("删除远程歌单失败:", error);
+    window.$message.error("删除远程歌单失败，请重试");
+  }
+};
+
+// 远程歌单菜单（WebDAV）
+const remotePlaylistMenu = computed<MenuOption[]>(() => {
+  const playlists = localStore.remotePlaylists;
+  if (!playlists || playlists.length === 0) return [];
+  return playlists.map((playlist) => ({
+    key: `remote-${playlist.id}`,
+    label: () =>
+      h(
+        NDropdown,
+        {
+          trigger: "click",
+          options: [
+            {
+              label: "删除远程歌单",
+              key: "delete",
+              icon: renderIcon("DeleteSweep"),
+            },
+          ],
+          onSelect: () => handleDeleteRemotePlaylist(playlist.id),
+        },
+        { default: () => h(NEllipsis, null, () => playlist.name) },
+      ),
+    icon: renderIcon("Storage"),
+  }));
+});
+
 // 渲染菜单路由
 const renderMenuLabel = (option: MenuOption) => {
   // 路由链接
@@ -431,6 +480,9 @@ const menuUpdate = (key: string, item: MenuOption) => {
         query: { id: localId },
       });
     }
+  } else if (typeof key === "string" && key.startsWith("remote-")) {
+    // 远程歌单（WebDAV）：点击由项内 NDropdown 处理（删除），暂不导航
+    return;
   } else {
     switch (key) {
       case "like-songs":

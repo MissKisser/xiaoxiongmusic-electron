@@ -1,5 +1,5 @@
 import { DialogApi, LoadingBarApi, MessageApi, ModalApi, NotificationApi } from "naive-ui";
-import type { EnvironmentInfo } from "./shared";
+import type { EnvironmentInfo, WebDavPlaylistInput } from "./shared";
 
 declare global {
   interface Window {
@@ -23,6 +23,16 @@ declare global {
       // Based on SPlayer-Next
       system: {
         getEnvironmentInfo: () => Promise<EnvironmentInfo>;
+      };
+      // 远程歌单（WebDAV）
+      remotePlaylist: {
+        save(input: {
+          playlistId: string;
+          name: string;
+          webdav: WebDavPlaylistInput;
+        }): Promise<boolean>;
+        remove(playlistId: string) => Promise<boolean>;
+        clear(): Promise<boolean>;
       };
     };
   }

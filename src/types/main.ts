@@ -160,6 +160,29 @@ export interface LocalPlaylistType {
   updateTime: number;
 }
 
+/**
+ * 远程歌单类型（WebDAV）
+ * 仅保存非敏感信息，密码等凭据由主进程加密存储（remote-media.json）
+ */
+export interface RemotePlaylistType {
+  /** 歌单ID（与本地歌单同格式，16位数字字符串） */
+  id: string;
+  /** 歌单名称 */
+  name: string;
+  /** WebDAV 服务地址 */
+  url: string;
+  /** WebDAV 用户名 */
+  username: string;
+  /** WebDAV 挂载目录 */
+  rootPath: string;
+  /** WebDAV 扫描深度 */
+  scanDepth: number;
+  /** 创建时间 */
+  createTime: number;
+  /** 更新时间 */
+  updateTime: number;
+}
+
 // Artist
 export type ArtistType = {
   id: number;
