@@ -27,13 +27,33 @@
         <n-h1>{{ currentTitle }}</n-h1>
         <n-text :depth="3">{{ currentSubtitle }}</n-text>
       </n-flex>
+      <!-- 页内搜索框（F3，借鉴 SPlayer-Next PR #129：可由 "/" 快捷键聚焦） -->
+      <div class="set-search" data-search-input>
+        <n-input
+          ref="searchInputRef"
+          v-model:value="searchKeyword"
+          :input-props="{ autocomplete: 'off' }"
+          placeholder="搜索设置项（按 / 聚焦）"
+          clearable
+          round
+          @keydown.esc="clearSearch"
+        >
+          <template #prefix>
+            <SvgIcon name="Search" />
+          </template>
+        </n-input>
+      </div>
       <n-scrollbar
         ref="setScrollbar"
         class="set-content"
         :content-style="{ overflow: 'hidden', padding: '40px 0' }"
       >
         <Transition name="fade" mode="out-in">
-          <component :is="currentComponent" :scroll-to="props.scrollTo" />
+          <component
+            :is="currentComponent"
+            :scroll-to="props.scrollTo"
+            :search-keyword="searchKeyword"
+          />
         </Transition>
       </n-scrollbar>
     </div>
@@ -41,7 +61,12 @@
 </template>
 
 <script setup lang="ts">
-import type { NScrollbar } from "naive-ui";
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
+import type { InputInst, NScrollbar } from "naive-ui";
 import type { MenuOption /* , MenuInst */ } from "naive-ui";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
@@ -69,6 +94,13 @@ const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
 
 // 移动端菜单显示状态
 const showLeftMenu = ref(true);
+
+// 页内搜索（F3，借鉴 SPlayer-Next PR #129）
+const searchKeyword = ref<string>("");
+const searchInputRef = ref<InputInst | null>(null);
+const clearSearch = () => {
+  searchKeyword.value = "";
+};
 
 // 监听屏幕大小变化，非小屏时自动显示侧边栏
 watch(isSmallScreen, (small) => {
@@ -217,6 +249,13 @@ const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || ""
         margin-bottom: 6px;
       }
     }
+    .set-search {
+      padding: 12px 40px 0;
+      :deep(.n-input) {
+        width: 320px;
+        max-width: 100%;
+      }
+    }
     .mobile-title {
       display: none !important;
     }
@@ -243,6 +282,9 @@ const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || ""
       width: 100%;
       display: flex;
       flex-direction: column;
+      .set-search {
+        padding: 12px 16px 0;
+      }
       .mobile-title {
         display: flex !important;
         padding: 20px 12px 16px;

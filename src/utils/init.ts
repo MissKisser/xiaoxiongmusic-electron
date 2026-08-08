@@ -182,6 +182,15 @@ const keyDownEvent = debounce((event: KeyboardEvent) => {
           // 打开播放列表（任意界面）
           statusStore.playListShow = !statusStore.playListShow;
           break;
+        case "searchInPage": {
+          // 页内搜索（参考 SPlayer-Next PR #129）：聚焦当前页内首个 data-search-input 标记的输入框
+          const el = document.querySelector<HTMLInputElement>("[data-search-input] input");
+          if (!el || el.disabled) break;
+          el.focus();
+          if (document.activeElement !== el) break;
+          el.select();
+          break;
+        }
         default:
           break;
       }
