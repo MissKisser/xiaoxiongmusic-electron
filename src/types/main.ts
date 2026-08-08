@@ -306,15 +306,25 @@ export type SongLevelDataType = {
 };
 
 // setting
+/**
+ * 设置分类架构（F1，借鉴 SPlayer-Next）
+ * 对齐上游分类：general / appearance / player / lyric / hotkeys / services / streaming / download / localCache / other / about
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
 export type SettingType =
   | "general"
+  | "appearance"
   | "play"
   | "lyrics"
   | "keyboard"
   | "local"
   | "third"
   | "streaming"
-  | "other";
+  | "download"
+  | "other"
+  | "about";
 
 // 更新信息
 export interface UpdateInfoType {
