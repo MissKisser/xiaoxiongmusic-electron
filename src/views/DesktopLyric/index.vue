@@ -1,8 +1,16 @@
+<!--
+Based on SPlayer-Next
+Copyright (C) 2024 SPlayer-Dev
+Licensed under AGPL-3.0
+-->
 <template>
   <n-config-provider :theme="null">
     <div
       :class="['desktop-lyric', { locked: lyricConfig.isLock, hovered: isHovered }]"
-      :style="{ '--mask-bg-color': lyricConfig.backgroundMaskColor }"
+      :style="{
+        '--mask-bg-color': lyricConfig.backgroundMaskColor,
+        padding: `${lyricConfig.marginVertical}px ${lyricConfig.marginHorizontal}px`,
+      }"
     >
       <div class="header" align="center" justify="space-between">
         <n-flex :wrap="false" align="center" justify="flex-start" size="small" @pointerdown.stop>
@@ -819,7 +827,6 @@ onBeforeUnmount(() => {
   height: 100%;
   color: #fff;
   background-color: transparent;
-  padding: 12px;
   border-radius: 12px;
   overflow: hidden;
   transition: background-color 0.3s;

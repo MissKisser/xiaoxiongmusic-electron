@@ -1,3 +1,8 @@
+/**
+ * Based on SPlayer-Next
+ * Copyright (C) 2024 SPlayer-Dev
+ * Licensed under AGPL-3.0
+ */
 import { type LyricLine } from "@applemusic-like-lyrics/lyric";
 
 /** 桌面歌词数据 */
@@ -55,6 +60,10 @@ export interface LyricConfig {
   backgroundMaskColor: string;
   /** 始终展示播放信息 */
   alwaysShowPlayInfo: boolean;
+  /** 水平边距（px），歌词内容距窗口左右边缘的距离 */
+  marginHorizontal: number;
+  /** 垂直边距（px），歌词内容距窗口上下边缘的距离 */
+  marginVertical: number;
 }
 
 /**
