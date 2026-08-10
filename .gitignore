@@ -34,6 +34,16 @@ target
 # ZCode agent state
 .omc
 
-# Docs
-docs/.vitepress/cache
-docs/.vitepress/dist
+# 文档与 agent 工作文件（仅保留 README.md，不提交）
+*.md
+!README.md
+docs/
+CHANGELOG.md
+AGENTS.md
+CLAUDE.md
+.claude/
+.superpowers/
+.zcode/
+.agents/
+.omx/
+.playwright-mcp/

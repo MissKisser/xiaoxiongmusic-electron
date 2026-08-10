@@ -1,6 +1,7 @@
 // 一次性图标重新生成脚本
 // 从 public/icons/icon-1024.png（1024×1024）出发，生成：
 //   - public/icons/logo.ico           多尺寸 ICO（用于窗口图标 + electron-builder win.icon）
+//   - public/icons/favicon.ico        多尺寸 ICO（用于网页 favicon + Windows NSIS 安装/卸载器图标）
 //   - public/icons/tray/tray@32.png   32×32 PNG（用于 macOS/Linux 托盘主图标）
 //
 // 运行：node scripts/generate-icons.mjs
@@ -24,6 +25,7 @@ const { createICO } = require2(png2iconsPkg);
 
 const srcPngPath = join(projectRoot, "public/icons/icon-1024.png");
 const outIcoPath = join(projectRoot, "public/icons/logo.ico");
+const outFavIcoPath = join(projectRoot, "public/icons/favicon.ico");
 const outTrayPngPath = join(projectRoot, "public/icons/tray/tray@32.png");
 
 const input = readFileSync(srcPngPath);
@@ -35,6 +37,13 @@ const icoBuf = createICO(input, /* scaling */ 4 /*HERMITE*/, /* colors */ 0, /* 
 if (!icoBuf) throw new Error("createICO 失败");
 writeFileSync(outIcoPath, icoBuf);
 console.log(`✔ 写入 ${outIcoPath} (${icoBuf.length} bytes)`);
+
+// -- 多尺寸 ICO（覆盖 favicon.ico） ---------------------------------------
+// 与 logo.ico 同源同参数：网页 favicon + Windows NSIS 安装/卸载器图标
+const favIcoBuf = createICO(input, /* scaling */ 4 /*HERMITE*/, /* colors */ 0, /* PNG */ true, /* forWinExe */ true);
+if (!favIcoBuf) throw new Error("createICO(favicon) 失败");
+writeFileSync(outFavIcoPath, favIcoBuf);
+console.log(`✔ 写入 ${outFavIcoPath} (${favIcoBuf.length} bytes)`);
 
 // -- 32×32 PNG（覆盖 tray@32.png）---------------------------------------
 // 用 sharp 做精确缩放（通过 pnpm store 加载）
