@@ -42,7 +42,6 @@ export class SharedRingBuffer {
 
     while (left > 0) {
       if (this.writeGen !== myGen) {
-        // console.warn("Zombie write detected and dropped.");
         return;
       }
       const writePos = Atomics.load(this.header, IDX_WRITE);

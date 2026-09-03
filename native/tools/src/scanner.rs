@@ -133,7 +133,6 @@ fn process_cover(tag: &TaggedFile, file_id: &str, cover_dir: &Path) -> Option<St
         Ok(img) => {
             let resized = img.resize(256, 256, image::imageops::FilterType::Lanczos3);
             if let Err(e) = resized.save_with_format(&save_path, image::ImageFormat::Jpeg) {
-                // TODO: 添加一个通用的日志模块给所有其他原生模块用？
                 eprintln!("为 {file_id} 保存封面时失败: {e}");
                 return None;
             }
@@ -266,8 +265,6 @@ fn process_single_track(
             }
         }
     }
-
-    // TODO: 返回打不开的文件列表给前端？
     let tagged_file = Probe::open(path_buf).ok()?.read().ok()?;
     let tag = tagged_file
         .primary_tag()

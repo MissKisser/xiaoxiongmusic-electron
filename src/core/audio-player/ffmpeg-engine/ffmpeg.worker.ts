@@ -89,12 +89,8 @@ class DecoderSession {
 
       // 防止 FFmpeg 估算的 offset 超过文件实际大小导致 HTTP 416 或立即 EOF
       if (targetPos >= fileSize) {
-        // 回退到文件末尾前 128KB，确保有数据可读，让 FFmpeg 能找到帧头 resync
         const SAFE_MARGIN = 128 * 1024;
         const newPos = Math.max(0, fileSize - SAFE_MARGIN);
-        // console.warn(
-        // 	`[Worker] Seek target ${targetPos} > fileSize ${fileSize}. Smart clamping to ${newPos}`,
-        // );
         targetPos = newPos;
       }
 

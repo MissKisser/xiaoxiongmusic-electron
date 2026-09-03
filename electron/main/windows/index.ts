@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
+import { BrowserWindow, BrowserWindowConstructorOptions, nativeTheme } from "electron";
 import { windowsLog } from "../logger";
 import { appName } from "../utils/config";
 import { join } from "path";
@@ -14,6 +14,8 @@ export const createWindow = (
       height: 720,
       frame: false, // 是否显示窗口边框
       center: true, // 窗口居中
+      // 窗口底色：与渲染端明暗主题保持一致，避免加载或丢帧期间呈现纯白
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#101014" : "#f6f6f6",
       icon, // 窗口图标
       autoHideMenuBar: true, // 隐藏菜单栏
       webPreferences: {

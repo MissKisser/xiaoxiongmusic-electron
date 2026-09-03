@@ -195,7 +195,7 @@ export const copyData = async (text: any, message?: string) => {
   }
 };
 
-/*
+/**
  * 获取剪贴板内容
  * @returns 剪贴板内容字符串或 null
  */

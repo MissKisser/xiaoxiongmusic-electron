@@ -195,7 +195,7 @@ export const extractTtmlBgWithOwner = (ttml: string): TtmlBgExtractResult[] => {
  * @param ttmlContent 原始 TTML 内容
  * @returns 清洗后的 TTML 内容
  */
-// TODO: 当支持 i18n 之后，需要对其中的部分函数进行修改，使其优选逻辑能够根据用户界面语言变化
+// 注：翻译优选逻辑当前按默认规则，未来可根据界面语言扩展
 export const cleanTTMLTranslations = (ttmlContent: string): string => {
   /**
    * 统计 TTML 中的语言

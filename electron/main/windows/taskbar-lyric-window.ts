@@ -347,9 +347,6 @@ class TaskbarLyricWindow {
         height: Math.round(targetBounds.height / scaleFactor),
       };
 
-      // processLog.info(JSON.stringify(finalBounds));
-
-      // 空间恢复后自动重新显示
       if (this.shouldBeVisible && !this.win.isVisible()) {
         this.win.show();
       }

@@ -7,7 +7,6 @@ import Components from "unplugin-vue-components/vite";
 import viteCompression from "vite-plugin-compression";
 import { VitePWA } from "vite-plugin-pwa";
 import { MainEnv } from "./env";
-// import VueDevTools from "vite-plugin-vue-devtools";
 import wasm from "vite-plugin-wasm";
 
 // 是否构建 Web 版本（启用 PWA）

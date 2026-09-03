@@ -67,13 +67,11 @@
  * Licensed under AGPL-3.0
  */
 import type { InputInst, NScrollbar } from "naive-ui";
-import type { MenuOption /* , MenuInst */ } from "naive-ui";
+import type { MenuOption } from "naive-ui";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
 import { renderIcon } from "@/utils/helper";
 import { isElectron } from "@/utils/env";
-// import { useStatusStore } from "@/stores";
-// import packageJson from "@/../package.json";
 import GeneralSetting from "./GeneralSetting.vue";
 import AppearanceSetting from "./AppearanceSetting.vue";
 import PlaySetting from "./PlaySetting.vue";
@@ -89,11 +87,9 @@ import AboutSetting from "./AboutSetting.vue";
 const props = defineProps<{ type: SettingType; scrollTo?: string }>();
 
 const { isSmallScreen } = useMobile();
-// const statusStore = useStatusStore();
 
 // 设置内容
 const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
-
 // 移动端菜单显示状态
 const showLeftMenu = ref(true);
 
@@ -176,10 +172,6 @@ const currentTitle = computed(() => titleMap[activeKey.value]?.title || "设置"
 
 // 当前副标题
 const currentSubtitle = computed(() => titleMap[activeKey.value]?.subtitle || "");
-
-// const toGithub = () => {
-//   window.open(packageJson.github);
-// };
 </script>
 
 <style lang="scss" scoped>

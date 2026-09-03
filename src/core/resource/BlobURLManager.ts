@@ -51,10 +51,8 @@ class BlobURLManager {
    */
   private enforceCacheLimit(): void {
     if (this.blobURLs.size >= this.maxCacheSize) {
-      // 获取 Map 中的第一个键（即最老的数据）
       const oldestKey = this.blobURLs.keys().next().value;
       if (oldestKey) {
-        // console.log("🗑️ LRU Eviction (Cache Full):", oldestKey);
         this.revokeBlobURL(oldestKey);
       }
     }

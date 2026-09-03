@@ -10,7 +10,6 @@ if (!fs.existsSync(TARGET_FILE)) {
 
 const fileContent = fs.readFileSync(TARGET_FILE, "utf-8");
 
-// export const keywords = [ ... ];
 const keywordsMatch = fileContent.match(/(export\s+const\s+keywords\s*=\s*\[)([\s\S]*?)(\];)/);
 
 if (!keywordsMatch) {

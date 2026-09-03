@@ -235,8 +235,6 @@ const onlineMatch = debounce(
         return;
       } else {
         const songData = formatSongsList([song])[0];
-        // console.log(songData);
-        // 更新数据
         infoFormData.value = {
           ...infoFormData.value,
           name: songData.name,
