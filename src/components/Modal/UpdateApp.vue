@@ -8,6 +8,9 @@
       <n-tag :bordered="false" type="warning">
         {{ data?.version || "v0.0.0" }}
       </n-tag>
+      <n-tag v-if="installType" :bordered="false" type="info" class="install-type">
+        当前为{{ installType === "setup" ? "安装版" : "便携版" }}
+      </n-tag>
     </n-flex>
     <n-scrollbar style="max-height: 500px">
       <div
@@ -19,13 +22,28 @@
     </n-scrollbar>
     <n-flex class="menu" justify="end">
       <n-button v-if="!data?.isForce" strong secondary @click="emit('close')"> 取消 </n-button>
-      <n-button type="primary" strong secondary @click="goDownload"> 前往下载 </n-button>
+      <n-button
+        strong
+        type="primary"
+        :secondary="installType !== 'portable'"
+        @click="goDownload(portableUrl)"
+      >
+        下载便携版
+      </n-button>
+      <n-button
+        strong
+        type="primary"
+        :secondary="installType === 'portable'"
+        @click="goDownload(setupUrl)"
+      >
+        下载安装版
+      </n-button>
     </n-flex>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { marked } from "marked";
 import type { UpdateInfoType } from "@/types/main";
 import { isElectron } from "@/utils/env";
@@ -35,23 +53,49 @@ const props = defineProps<{ data: UpdateInfoType }>();
 
 const emit = defineEmits<{ close: [] }>();
 
+// 当前安装类型，null 表示非 Electron 环境（Web）无法检测
+const installType = ref<"setup" | "portable" | null>(null);
+
+onMounted(async () => {
+  if (isElectron) {
+    try {
+      installType.value = await window.api.system.getInstallType();
+    } catch {
+      installType.value = null;
+    }
+  }
+});
+
 // 渲染 Markdown 更新说明
 const renderedDescription = computed(() => {
   if (!props.data?.description) return "";
   return marked.parse(props.data.description, { async: false }) as string;
 });
 
-// 前往下载
-const goDownload = () => {
-  const downloadUrl = props.data?.downloadUrl;
-  if (downloadUrl) {
-    if (isElectron) {
-      // Electron 环境：通过 IPC 打开系统浏览器
-      window.electron.ipcRenderer.send("open-download-url", downloadUrl);
-    } else {
-      // Web 环境：直接打开新窗口
-      window.open(downloadUrl, "_blank");
-    }
+// 依据构建产物命名规则推导两个版本的下发地址：安装版文件名在便携版基础上多 -setup 后缀
+const isSetupUrl = (url: string): boolean => /-setup\.exe$/i.test(url);
+
+const portableUrl = computed(() => {
+  const url = props.data?.downloadUrl || "";
+  if (!/\.exe$/i.test(url)) return url;
+  return isSetupUrl(url) ? url.replace(/-setup(\.exe)$/i, "$1") : url;
+});
+
+const setupUrl = computed(() => {
+  const url = props.data?.downloadUrl || "";
+  if (!/\.exe$/i.test(url)) return url;
+  return isSetupUrl(url) ? url : url.replace(/\.exe$/i, "-setup.exe");
+});
+
+// 前往下载指定版本
+const goDownload = (url: string) => {
+  if (!url) return;
+  if (isElectron) {
+    // Electron 环境：通过 IPC 打开系统浏览器
+    window.electron.ipcRenderer.send("open-download-url", url);
+  } else {
+    // Web 环境：直接打开新窗口
+    window.open(url, "_blank");
   }
   emit("close");
 };
@@ -63,6 +107,9 @@ const goDownload = () => {
     margin-bottom: 20px;
     .n-tag {
       border-radius: 6px;
+    }
+    .install-type {
+      margin-left: auto;
     }
     .time {
       margin-left: auto;

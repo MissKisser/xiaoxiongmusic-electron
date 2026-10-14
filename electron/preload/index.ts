@@ -34,6 +34,7 @@ if (process.contextIsolated) {
       // Environment info API
       system: {
         getEnvironmentInfo: () => ipcRenderer.invoke("get-environment-info"),
+        getInstallType: () => ipcRenderer.invoke("get-install-type"),
       },
       // Remote playlist API (WebDAV remote media)
       remotePlaylist: {

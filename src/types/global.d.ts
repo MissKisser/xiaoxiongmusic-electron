@@ -23,6 +23,8 @@ declare global {
       // Based on SPlayer-Next
       system: {
         getEnvironmentInfo: () => Promise<EnvironmentInfo>;
+        /** 获取当前安装类型：setup 安装版 / portable 便携版 */
+        getInstallType: () => Promise<"setup" | "portable">;
       };
       // 远程歌单（WebDAV）
       remotePlaylist: {

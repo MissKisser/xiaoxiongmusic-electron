@@ -20,6 +20,8 @@ declare global {
       system: {
         /** 获取环境信息（应用版本、Electron/Chrome/Node 版本、磁盘占用、缓存大小等） */
         getEnvironmentInfo: () => Promise<EnvironmentInfo>;
+        /** 获取当前安装类型：setup 安装版 / portable 便携版 */
+        getInstallType: () => Promise<"setup" | "portable">;
       };
       // 远程歌单（WebDAV）
       remotePlaylist: {
