@@ -33,6 +33,12 @@ interface AuthState {
     deviceId: string;
     isChecking: boolean;
     errorMessage: string | null;
+    // 服务端是否要求授权（对应后台授权开关：false=该端免授权）
+    // 会话级状态，不持久化。开关关闭时 GlobalAuthModal 永不弹窗。
+    authRequired: boolean;
+    // 本次检查是否为网络/服务器错误（区别于"确实未授权"）
+    // 会话级状态，不持久化。true 时弹"网络重试"而非授权码输入框。
+    networkError: boolean;
 }
 
 export const useAuthStore = defineStore("auth", {
@@ -42,6 +48,9 @@ export const useAuthStore = defineStore("auth", {
         deviceId: getDeviceId(),
         isChecking: false,
         errorMessage: null,
+        // 默认 true（保守策略：未知服务端行为时按需授权处理）
+        authRequired: true,
+        networkError: false,
     }),
 
     persist: {
@@ -54,23 +63,41 @@ export const useAuthStore = defineStore("auth", {
         async checkAuth(): Promise<boolean> {
             this.isChecking = true;
             this.errorMessage = null;
+            // 进入新一轮检查，重置会话级标志（由本次结果重新判定）
+            this.networkError = false;
 
             try {
                 const response = await axios.get(`${SERVER_URL}/api/auth/check`, {
                     params: { deviceId: this.deviceId, platform: getPlatform() },
                 });
 
+                // 兼容旧版服务端（无 authRequired 字段时默认 true）
+                this.authRequired = response.data.authRequired !== false;
+
                 if (response.data.success && response.data.authorized) {
                     this.isAuthorized = true;
                     return true;
                 } else {
+                    // 确实未授权（服务端明确返回未通过），清空授权态
                     this.isAuthorized = false;
                     this.errorMessage = response.data.message || "授权验证失败";
                     return false;
                 }
             } catch (error: any) {
                 console.error("CheckAuth Error:", error);
-                this.isAuthorized = false;
+                // 服务端明确拒绝（401 未授权 / 403 封禁）：属业务性拒绝，不是网络错误
+                // 此时应展示授权码输入框，而非"网络异常"重试视图
+                const status = error.response?.status;
+                if (status === 401 || status === 403) {
+                    this.networkError = false;
+                    this.isAuthorized = false;
+                    this.errorMessage = error.response.data?.message || "授权验证失败";
+                    return false;
+                }
+                // 网络/服务器错误不应等同于"未授权"
+                // 保留持久化的 isAuthorized（上次成功状态作为兜底），
+                // 避免瞬态错误触发 GlobalAuthModal 弹窗
+                this.networkError = true;
                 if (error.response) {
                     this.errorMessage = error.response.data?.message || "授权验证失败";
                 } else {
@@ -86,6 +113,7 @@ export const useAuthStore = defineStore("auth", {
         async verifyCode(code: string): Promise<{ success: boolean; message: string }> {
             this.isChecking = true;
             this.errorMessage = null;
+            this.networkError = false;
 
             try {
                 const response = await axios.post(`${SERVER_URL}/api/auth/verify`, {
@@ -104,6 +132,15 @@ export const useAuthStore = defineStore("auth", {
                 }
             } catch (error: any) {
                 console.error("Auth verify error:", error);
+                // 服务端明确拒绝（401 授权码无效 / 403 封禁）：展示输入框内联错误，可重新输入
+                const status = error.response?.status;
+                if (status === 401 || status === 403) {
+                    this.networkError = false;
+                    this.errorMessage = error.response.data?.message || "授权码验证失败";
+                    return { success: false, message: this.errorMessage || "未知错误" };
+                }
+                // 网络错误不改变 isAuthorized，仅标记 networkError 让 UI 切换到重试视图
+                this.networkError = true;
                 if (error.response) {
                     this.errorMessage = error.response.data?.message || "授权码验证失败";
                 } else {
