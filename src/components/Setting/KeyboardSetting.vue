@@ -375,7 +375,7 @@ onMounted(async () => {
 #shortcut-list,
 #page-shortcut-list {
   overflow: hidden;
-  :deep(.n-card__content) {
+  :deep(.n-card-content) {
     padding: 0;
     flex-direction: column;
     overflow: hidden;

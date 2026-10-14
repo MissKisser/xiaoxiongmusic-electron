@@ -75,7 +75,7 @@ const songList = computed(() => sampleSize(props.data, 3));
 .song-data-card {
   border-radius: 12px;
   cursor: pointer;
-  :deep(.n-card__content) {
+  :deep(.n-card-content) {
     display: flex;
     height: 100%;
     padding: 16px;
@@ -144,7 +144,7 @@ const songList = computed(() => sampleSize(props.data, 3));
     }
   }
   &.normal {
-    :deep(.n-card__content) {
+    :deep(.n-card-content) {
       flex-direction: column;
     }
     .title {

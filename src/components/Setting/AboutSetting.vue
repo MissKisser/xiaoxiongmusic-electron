@@ -336,7 +336,7 @@ onMounted(() => {
   }
 }
 .update-data {
-  :deep(.n-card__content) {
+  :deep(.n-card-content) {
     flex-direction: column !important;
     align-items: normal !important;
   }
@@ -360,7 +360,7 @@ onMounted(() => {
 .link-item {
   border-radius: 8px;
   cursor: pointer;
-  :deep(.n-card__content) {
+  :deep(.n-card-content) {
     display: flex;
     align-items: center;
     padding: 12px;

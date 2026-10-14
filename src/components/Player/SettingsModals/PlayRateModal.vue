@@ -138,7 +138,7 @@ watch(
     background-color: rgba(var(--n-color-rgb), 0.85);
   }
 
-  :deep(.n-card__content) {
+  :deep(.n-card-content) {
     padding: 20px;
   }
 
