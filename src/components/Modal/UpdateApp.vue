@@ -72,19 +72,20 @@ const renderedDescription = computed(() => {
   return marked.parse(props.data.description, { async: false }) as string;
 });
 
-// 依据构建产物命名规则推导两个版本的下发地址：安装版文件名在便携版基础上多 -setup 后缀
+// 依据构建产物命名规则推导两个版本的下发地址：
+// 安装版 `小熊音乐-{版本}-{架构}-setup.exe`，便携版 `小熊音乐-{版本}-{架构}-portable.exe`
 const isSetupUrl = (url: string): boolean => /-setup\.exe$/i.test(url);
 
 const portableUrl = computed(() => {
   const url = props.data?.downloadUrl || "";
-  if (!/\.exe$/i.test(url)) return url;
-  return isSetupUrl(url) ? url.replace(/-setup(\.exe)$/i, "$1") : url;
+  if (isSetupUrl(url)) return url.replace(/-setup(\.exe)$/i, "-portable$1");
+  return url;
 });
 
 const setupUrl = computed(() => {
   const url = props.data?.downloadUrl || "";
-  if (!/\.exe$/i.test(url)) return url;
-  return isSetupUrl(url) ? url : url.replace(/\.exe$/i, "-setup.exe");
+  if (/-portable\.exe$/i.test(url)) return url.replace(/-portable(\.exe)$/i, "-setup$1");
+  return url;
 });
 
 // 前往下载指定版本
