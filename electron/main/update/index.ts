@@ -22,23 +22,25 @@ const getPlatform = (): string => {
 // 是否提示
 let isShowTip: boolean = false;
 
-// HTTP GET 请求
-const httpGet = (url: string): Promise<any> => {
+// HTTP GET 请求，超时后中止请求并视为失败
+const httpGet = (url: string, timeout: number = 10000): Promise<any> => {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
-    client
-      .get(url, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try {
-            resolve(JSON.parse(data));
-          } catch {
-            reject(new Error("Failed to parse response"));
-          }
-        });
-      })
-      .on("error", reject);
+    const req = client.get(url, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          reject(new Error("Failed to parse response"));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(timeout, () => {
+      req.destroy(new Error("Request timeout"));
+    });
   });
 };
 
@@ -69,7 +71,10 @@ export const checkUpdate = async (win: BrowserWindow, showTip: boolean = false) 
       updateLog.info(`✅ No new version available, current: ${currentVersion}`);
     }
   } catch (err: any) {
-    win.webContents.send("update-error", err);
+    // 启动时的静默检查失败不打扰用户，仅在手动检查时提示
+    if (isShowTip) {
+      win.webContents.send("update-error", err);
+    }
     updateLog.error(`❌ Update check error: ${err.message}`);
   }
 };
