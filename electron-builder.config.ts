@@ -35,6 +35,13 @@ const config: Configuration = {
       to: "native",
       filter: ["*.node"],
     },
+    // electron-builder 的依赖收集会排除 @electron-toolkit，主/预加载进程运行时
+    // 以外置形式引用它，ESM 解析会沿 asar 真实父目录向上查找 resources/node_modules
+    {
+      from: "node_modules/@electron-toolkit",
+      to: "node_modules/@electron-toolkit",
+      filter: ["**", "!**/*.md", "!**/*.map"],
+    },
   ],
   win: {
     // 可执行文件名
