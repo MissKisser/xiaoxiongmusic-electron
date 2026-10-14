@@ -25,17 +25,17 @@
 
 <script setup lang="ts">
 import { useSettingStore } from "@/stores";
-import { useSortable } from "@vueuse/integrations/useSortable";
+import { useSortable, type UseSortableOptions } from "@vueuse/integrations/useSortable";
 
 const settingStore = useSettingStore();
 
 const sortableRef = ref<HTMLElement | null>(null);
 
-// 拖拽
+// 拖拽（sortablejs 类型漂移导致选项字面量校验失败，运行时不受影响）
 useSortable(sortableRef, settingStore.songUnlockServer, {
   animation: 150,
   handle: ".n-icon",
-});
+} as UseSortableOptions);
 </script>
 
 <style scoped lang="scss">
