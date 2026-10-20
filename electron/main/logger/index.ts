@@ -55,6 +55,8 @@ console.error = defaultLog.error;
 // 分作用域导出
 export { defaultLog };
 export const ipcLog = log.scope("ipc");
+// 第三方音源平台模块（QQ 音乐 / 酷狗）沿用上游的 coreLog 作用域名
+export const coreLog = log.scope("core");
 export const trayLog = log.scope("tray");
 export const thumbarLog = log.scope("thumbar");
 export const storeLog = log.scope("store");

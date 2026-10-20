@@ -74,6 +74,17 @@ export interface StoreType {
   };
   /** 更新通道 */
   updateChannel?: "stable" | "nightly";
+  /** 第三方音源平台相关设置 */
+  system: {
+    /**
+     * 酷狗登录版本：`concept` 概念版（默认）/ `standard` 正式版
+     *
+     * 概念版会整体切换 appid、clientver、签名盐与 RSA 公钥。
+     * 实测：登录后的「我的歌单」读写（cloudlist 路由）只在概念版可用，
+     * 正式版同一路径返回 20017 / 502。
+     */
+    kugouLoginVersion?: "standard" | "concept";
+  };
 }
 
 /**
@@ -119,6 +130,9 @@ export const useStore = () => {
       downloadThreadCount: 8,
       enableDownloadHttp2: true,
       updateChannel: "stable",
+      system: {
+        kugouLoginVersion: "concept",
+      },
     },
   });
 };
