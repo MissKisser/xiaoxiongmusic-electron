@@ -78,6 +78,12 @@ export interface WebDavPlaylistInput {
 
 export { DEFAULT_TASKBAR_CONFIG, TASKBAR_IPC_CHANNELS } from "./shared/taskbar-ipc";
 export type {
+  ApiCallResponse,
+  ApiPlatform,
+  PlatformMusicApi,
+  PlatformProfile,
+} from "./shared/apis";
+export type {
   SyncStatePayload,
   SyncTickPayload,
   TaskbarConfig,

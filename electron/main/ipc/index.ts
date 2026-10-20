@@ -19,6 +19,8 @@ import initRendererLogIpc from "./ipc-renderer-log";
 // Based on SPlayer-Next
 import initEnvIpc from "./ipc-env";
 import initRemotePlaylistIpc from "./ipc-remote-playlist";
+// 第三方音源平台（QQ 音乐 / 酷狗）——独立通道，不影响网易云 ncm-api 体系
+import initPlatformMusicIpc from "./ipc-platform-music";
 
 /**
  * 初始化全部 IPC 通信
@@ -42,6 +44,7 @@ const initIpc = (): void => {
   initRendererLogIpc();
 initEnvIpc();
   initRemotePlaylistIpc();
+  initPlatformMusicIpc();
   if (isMac) {
     initMacStatusBarIpc();
   } else {

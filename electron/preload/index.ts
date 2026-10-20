@@ -46,6 +46,15 @@ if (process.contextIsolated) {
         remove: (playlistId: string) => ipcRenderer.invoke("remote-playlist:remove", playlistId),
         clear: () => ipcRenderer.invoke("remote-playlist:clear"),
       },
+      // 第三方音源平台（QQ 音乐 / 酷狗）——与网易云 ncm-api 体系完全隔离
+      platformMusic: {
+        call: (platform: string, name: string, params?: Record<string, unknown>) =>
+          ipcRenderer.invoke("platformMusic:call", platform, name, params ?? {}),
+        clearSession: (platform: string) => ipcRenderer.invoke("platformMusic:clearSession", platform),
+        setCookie: (platform: string, cookie: string) =>
+          ipcRenderer.invoke("platformMusic:setCookie", platform, cookie),
+        listModules: (platform: string) => ipcRenderer.invoke("platformMusic:listModules", platform),
+      },
     });
   } catch (error) {
     console.error(error);

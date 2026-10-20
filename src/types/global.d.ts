@@ -1,5 +1,5 @@
 import { DialogApi, LoadingBarApi, MessageApi, ModalApi, NotificationApi } from "naive-ui";
-import type { EnvironmentInfo, WebDavPlaylistInput } from "./shared";
+import type { EnvironmentInfo, PlatformMusicApi, WebDavPlaylistInput } from "./shared";
 
 declare global {
   interface Window {
@@ -36,6 +36,8 @@ declare global {
         remove(playlistId: string): Promise<boolean>;
         clear(): Promise<boolean>;
       };
+      // 第三方音源平台（QQ 音乐 / 酷狗）——与网易云 ncm-api 体系完全隔离
+      platformMusic: PlatformMusicApi;
     };
   }
 }

@@ -1,5 +1,5 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
-import type { WebDavPlaylistInput } from "@shared";
+import type { PlatformMusicApi, WebDavPlaylistInput } from "@shared";
 import type { StoreType } from "../main/store";
 import type { EnvironmentInfo } from "../../src/types/shared";
 
@@ -33,6 +33,8 @@ declare global {
         remove(playlistId: string): Promise<boolean>;
         clear(): Promise<boolean>;
       };
+      // 第三方音源平台（QQ 音乐 / 酷狗）
+      platformMusic: PlatformMusicApi;
     };
     // logs
     logger: {
