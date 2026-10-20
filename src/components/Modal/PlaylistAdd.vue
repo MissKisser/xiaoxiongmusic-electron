@@ -17,11 +17,11 @@
             v-for="(item, index) in onlinePlaylists"
             :key="index"
             class="playlist"
-            @click="addToOnlinePlaylist(Number(item?.id), index)"
+            @click="addToOnlinePlaylist(item)"
           >
             <template #prefix>
               <n-image
-                :src="item?.coverSize?.s || '/images/album.jpg?asset'"
+                :src="item.coverSmall || '/images/album.jpg?asset'"
                 class="cover"
                 preview-disabled
                 lazy
@@ -34,7 +34,7 @@
                 </template>
               </n-image>
             </template>
-            <n-thing :title="index === 0 ? '我喜欢的音乐' : item.name">
+            <n-thing :title="item.name">
               <template #description>
                 <n-text depth="3" class="size">{{ item.count }} 首音乐</n-text>
               </template>
@@ -94,12 +94,18 @@
 <script setup lang="ts">
 import type { SongType } from "@/types/main";
 import type { MessageReactive } from "naive-ui";
-import { useDataStore, useLocalStore } from "@/stores";
+import { useDataStore, useLocalStore, usePlatformStore } from "@/stores";
 import { coverLoaded } from "@/utils/helper";
 import { playlistTracks } from "@/api/playlist";
 import { debounce } from "lodash-es";
 import { isLogin, updateUserLikePlaylist, updateUserLikeSongs } from "@/utils/auth";
 import { openCreatePlaylist } from "@/utils/modal";
+import {
+  addSongsToPlaylist,
+  getManageablePlaylists,
+  likeSongs,
+  type ManageablePlaylist,
+} from "@/api/platform/manage";
 
 const props = defineProps<{
   data: SongType[];
@@ -112,32 +118,72 @@ const emit = defineEmits<{
 
 const dataStore = useDataStore();
 const localStore = useLocalStore();
+const platformStore = usePlatformStore();
 
 // 加载提示
 const loadingMsg = ref<MessageReactive>();
 
-// 在线歌单
-const onlinePlaylists = computed(() => {
-  return (
-    dataStore.userLikeData.playlists.filter(
-      (playlist) => playlist.userId === dataStore.userData?.userId,
-    ) || []
-  );
-});
+// 当前音源平台
+const currentPlatform = computed(() => platformStore.currentPlatform);
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => currentPlatform.value !== "netease");
+
+// 在线歌单（网易云沿用既有本地缓存，第三方平台按平台拉取）
+const onlinePlaylists = ref<ManageablePlaylist[]>([]);
 
 // 本地歌单
 const localPlaylists = computed(() => localStore.localPlaylists);
 
+/**
+ * 拉取当前平台的可管理歌单
+ *
+ * 网易云走既有本地缓存（首项固定是「我喜欢的音乐」），
+ * 第三方平台走平台数据层取自建歌单。
+ */
+const loadOnlinePlaylists = async () => {
+  if (isPlatformSource.value) {
+    onlinePlaylists.value = await getManageablePlaylists(currentPlatform.value);
+    return;
+  }
+  const userId = dataStore.userData?.userId;
+  onlinePlaylists.value = (dataStore.userLikeData.playlists || [])
+    .filter((playlist) => playlist.userId === userId)
+    .map((playlist, index) => ({
+      id: String(playlist.id),
+      name: index === 0 ? "我喜欢的音乐" : playlist.name,
+      cover: playlist.cover,
+      coverSmall: playlist.coverSize?.s,
+      count: playlist.count ?? 0,
+      isLiked: index === 0,
+    }));
+};
+
 // 添加到在线歌单
 const addToOnlinePlaylist = debounce(
-  async (id: number, index: number) => {
-    if (isLogin() === 2) {
+  async (playlist: ManageablePlaylist) => {
+    // 网易云的 UID 登录模式不支持写操作
+    if (!isPlatformSource.value && isLogin() === 2) {
       window.$message.warning("该登录模式暂不支持该操作");
       return;
     }
     loadingMsg.value = window.$message.loading("正在添加歌曲至歌单", { duration: 0 });
+    // 第三方平台：走平台写操作分派层
+    if (isPlatformSource.value) {
+      const result = playlist.isLiked
+        ? await likeSongs(currentPlatform.value, props.data, true)
+        : await addSongsToPlaylist(currentPlatform.value, playlist.id, props.data);
+      if (loadingMsg.value) loadingMsg.value.destroy();
+      if (!result.ok) {
+        window.$message.error(result.message || "添加失败，请重试");
+        return;
+      }
+      emit("close");
+      window.$message.success("添加歌曲至歌单成功");
+      return;
+    }
     const ids = props.data.map((item) => item.id).filter((item) => item !== 0);
-    const result = await playlistTracks(id, ids);
+    const result = await playlistTracks(Number(playlist.id), ids);
     if (loadingMsg.value) loadingMsg.value.destroy();
     if (result.status === 200) {
       if (result.body?.code !== 200) {
@@ -146,7 +192,7 @@ const addToOnlinePlaylist = debounce(
       }
       emit("close");
       window.$message.success("添加歌曲至歌单成功");
-      if (index === 0) await updateUserLikeSongs();
+      if (playlist.isLiked) await updateUserLikeSongs();
       await updateUserLikePlaylist();
     } else {
       window.$message.error(result?.message || "添加失败，请重试");
@@ -183,6 +229,15 @@ const addToLocalPlaylist = debounce(
   500,
   { leading: true, trailing: false },
 );
+
+onMounted(() => {
+  void loadOnlinePlaylists();
+});
+
+// 平台切换后重新拉取可管理歌单
+watch(currentPlatform, () => {
+  void loadOnlinePlaylists();
+});
 </script>
 
 <style lang="scss" scoped>

@@ -6,12 +6,15 @@
         <n-form-item label="歌单名称" path="name">
           <n-input v-model:value="onlineFormData.name" placeholder="请输入歌单名称" />
         </n-form-item>
-        <n-form-item label="歌单类型" path="type">
-          <n-select v-model:value="onlineFormData.type" :options="onlinePlaylistType" />
-        </n-form-item>
-        <n-form-item label="设为隐私歌单" path="privacy" label-placement="left">
-          <n-switch v-model:value="onlineFormData.privacy" />
-        </n-form-item>
+        <!-- 歌单类型与隐私设置仅网易云支持 -->
+        <template v-if="!isPlatformSource">
+          <n-form-item label="歌单类型" path="type">
+            <n-select v-model:value="onlineFormData.type" :options="onlinePlaylistType" />
+          </n-form-item>
+          <n-form-item label="设为隐私歌单" path="privacy" label-placement="left">
+            <n-switch v-model:value="onlineFormData.privacy" />
+          </n-form-item>
+        </template>
       </n-form>
     </template>
     <!-- 本地歌单表单 -->
@@ -36,10 +39,11 @@
 
 <script setup lang="ts">
 import type { FormInst, FormRules, SelectOption } from "naive-ui";
-import { useDataStore, useLocalStore } from "@/stores";
+import { useDataStore, useLocalStore, usePlatformStore } from "@/stores";
 import { textRule } from "@/utils/rules";
 import { debounce } from "lodash-es";
 import { createPlaylist } from "@/api/playlist";
+import { createPlaylist as manageCreatePlaylist } from "@/api/platform/manage";
 import { updateUserLikePlaylist } from "@/utils/auth";
 
 const props = withDefaults(
@@ -66,6 +70,10 @@ interface LocalFormType {
 
 const dataStore = useDataStore();
 const localStore = useLocalStore();
+const platformStore = usePlatformStore();
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
 
 // 在线歌单数据
 const onlineFormRef = ref<FormInst | null>(null);
@@ -102,6 +110,21 @@ const toCreatePlaylist = debounce(
     if (!props.isLocal) {
       // 在线歌单
       await onlineFormRef.value?.validate((errors) => errors);
+      // 第三方平台：走平台写操作分派层
+      if (isPlatformSource.value) {
+        const result = await manageCreatePlaylist(
+          platformStore.currentPlatform,
+          onlineFormData.value.name,
+          onlineFormData.value.privacy,
+        );
+        if (result.ok) {
+          emit("close");
+          window.$message.success("新建歌单成功");
+        } else {
+          window.$message.error(result.message || "新建歌单失败，请重试");
+        }
+        return;
+      }
       const result = await createPlaylist(
         onlineFormData.value.name,
         onlineFormData.value.privacy,

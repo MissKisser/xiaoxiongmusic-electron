@@ -1,0 +1,785 @@
+/**
+ * 平台歌单 / 歌曲 / 收藏管理写操作分派层
+ *
+ * 页面层只认「当前平台」这一个维度：建歌单、改名、删除歌单、加歌、删歌、
+ * 收藏歌单、喜欢歌曲七类写操作都从这里进：
+ *
+ * - 网易云：直调既有网易云封装（`src/api/playlist.ts` / `src/api/song.ts`），
+ *   返回结构与原链路完全一致，页面行为零变化；
+ * - QQ 音乐 / 酷狗：走主进程平台写模块（`playlist_create` / `playlist_rename` /
+ *   `playlist_delete` / `playlist_tracks` / `playlist_subscribe`），
+ *   模块内部遵循「写入 → 读回确认 → 才返回成功」。
+ *
+ * 「喜欢」的平台差异（实测定案）：
+ * - QQ 音乐的喜欢是系统目录（`dirId=201`），加歌走 `playlist_tracks` 指向该目录；
+ * - 酷狗的红心是「我喜欢」这类系统歌单（`is_def=2`），加歌同样走 `playlist_tracks`。
+ * 两者都由本层的 `likeSong` 统一路由到对应特殊歌单的曲目写操作。
+ *
+ * 失败口径：平台模块的业务错误码（酷狗 `20010` 参数不合 / `20017` token 无效 /
+ * `404` 路由不对，以及模块自身的 `401` 未登录 / `404` 目标不存在）统一翻译成
+ * 用户可读提示，由调用方直接 toast。
+ *
+ * 刷新口径：平台写操作成功后统一触发 S3a-1 接好的歌单列表刷新链
+ * （`usePlatformStore().refreshPlaylists`）；网易云分支的刷新沿用既有调用点
+ * （页面层已调用 `updateUserLikePlaylist`），此处不重复触发。
+ */
+
+import type { ApiPlatform } from "@/types/shared";
+import type { SongType } from "@/types/main";
+import {
+  createPlaylist as neteaseCreatePlaylist,
+  deletePlaylist as neteaseDeletePlaylist,
+  likePlaylist as neteaseLikePlaylist,
+  playlistTracks as neteasePlaylistTracks,
+  updatePlaylist as neteaseUpdatePlaylist,
+} from "@/api/playlist";
+import { likeSong as neteaseLikeSong } from "@/api/song";
+import { useDataStore } from "@/stores/data";
+import { usePlatformStore } from "@/stores/platform";
+import { dispatchLikedSongs, type DispatchPlaylist } from "./dispatch";
+import { platformRequest } from "./http";
+import { platformCall } from "./music";
+import { normalizeQqPlaylist } from "./qqmusic";
+import { kgFindLikedPlaylist, normalizeKgPlaylist } from "./kugou";
+import type { PlatformPlaylist } from "./types";
+
+/** 写操作统一返回 */
+export interface ManageResult<T = unknown> {
+  /** 是否成功 */
+  ok: boolean;
+  /** 用户可读的失败提示（成功时为空） */
+  message?: string;
+  /** 平台返回的业务数据 */
+  data?: T;
+  /** 新建 / 定位到的歌单标识（平台内主键） */
+  playlistId?: string;
+}
+
+/** 加歌弹窗需要的「可管理歌单」条目 */
+export interface ManageablePlaylist {
+  /** 歌单标识（平台内主键） */
+  id: string;
+  /** 歌单名 */
+  name: string;
+  /** 封面直链 */
+  cover: string;
+  /** 封面小图直链 */
+  coverSmall?: string;
+  /** 曲目数 */
+  count: number;
+  /** 是否为「我喜欢的音乐」（写入时走喜欢机制而非普通歌单写入） */
+  isLiked: boolean;
+}
+
+/** 主进程平台写模块的返回形状 */
+interface PlatformWriteResult {
+  code?: number;
+  message?: string;
+  tid?: number | string;
+  dirId?: number | string;
+  id?: number | string;
+  name?: string;
+  subscribed?: boolean;
+  deleted?: boolean;
+  verified?: boolean;
+  items?: Array<{ id: string; status: string }>;
+}
+
+/** 主进程「我的歌单」模块的返回形状 */
+interface PlatformPlaylistListResponse {
+  code?: number;
+  owned?: Array<Record<string, any>>;
+  favorites?: Array<Record<string, any>>;
+}
+
+/** 酷狗业务错误码 → 用户可读提示 */
+const KG_ERROR_TEXT: Record<string, string> = {
+  "20006": "请求参数不符合平台要求，请重试",
+  "20010": "请求参数不符合平台要求，请重试",
+  "20017": "登录状态已失效，请重新登录后再试",
+  "30203": "平台限制了本次操作，请稍后再试",
+};
+
+/**
+ * 把平台模块的失败描述翻译成用户可读提示
+ *
+ * 酷狗的错误码埋在 message 里（形如 `创建歌单失败：error_code=20010`），
+ * QQ 与通用失败用模块自身的 `code` 表达。
+ * @param platform 音源平台
+ * @param code 模块返回码
+ * @param message 模块返回描述
+ * @returns 用户可读提示，无可识别信息时返回原始描述
+ */
+const describeFailure = (
+  platform: ApiPlatform,
+  code?: number,
+  message?: string,
+): string | undefined => {
+  // 酷狗：先从描述里抽出业务错误码
+  if (platform === "kugou") {
+    const matched = /error_code=(\d+)/.exec(message ?? "");
+    if (matched && KG_ERROR_TEXT[matched[1]]) return KG_ERROR_TEXT[matched[1]];
+    const http = /HTTP (\d{3})/.exec(message ?? "");
+    if (http) {
+      return http[1] === "404"
+        ? "平台接口路由不可用，请稍后再试"
+        : `平台请求失败（HTTP ${http[1]}），请重试`;
+    }
+  }
+  if (code === 401) return "登录状态已失效，请重新登录后再试";
+  if (code === 404) return "未找到目标歌单，或该平台暂未开放此能力";
+  if (code === 400) return message || "请求参数不符合平台要求，请重试";
+  return message || "操作失败，请重试";
+};
+
+/**
+ * 把平台模块的返回整理成统一结果
+ * @param platform 音源平台
+ * @param result 模块返回
+ * @returns 统一结果
+ */
+const toManageResult = (
+  platform: ApiPlatform,
+  result: PlatformWriteResult | undefined,
+): ManageResult => {
+  if (!result) return { ok: false, message: "操作失败，请重试" };
+  if (result.code === 200) {
+    const playlistId =
+      result.tid !== undefined
+        ? String(result.tid)
+        : result.id !== undefined
+          ? String(result.id)
+          : undefined;
+    return { ok: true, data: result, playlistId };
+  }
+  return { ok: false, message: describeFailure(platform, result.code, result.message) };
+};
+
+/**
+ * 调用平台写模块并兜住异常
+ * @param platform 音源平台
+ * @param moduleName 模块名
+ * @param params 业务参数
+ * @returns 统一结果
+ */
+const callWriteModule = async (
+  platform: ApiPlatform,
+  moduleName: string,
+  params: Record<string, unknown>,
+): Promise<ManageResult> => {
+  try {
+    const result = await platformCall<PlatformWriteResult>(platform, moduleName, params);
+    return toManageResult(platform, result);
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "操作失败，请重试",
+    };
+  }
+};
+
+/**
+ * 把平台归一化歌单转为分派层统一条目（与分派层同口径）
+ * @param playlist 平台归一化歌单
+ * @returns 分派层统一歌单条目
+ */
+const toDispatchPlaylist = (playlist: PlatformPlaylist): DispatchPlaylist => ({
+  id: playlist.id,
+  name: playlist.name,
+  cover: playlist.coverImgUrl,
+  coverSize: playlist.coverSize,
+  count: playlist.trackCount,
+  playCount: playlist.playCount,
+  description: playlist.description,
+  creatorName: playlist.creator?.name,
+  createTime: playlist.createTime,
+  updateTime: playlist.updateTime,
+  platform: playlist.platform,
+  platformId: playlist.platformId,
+  dirId: playlist.dirId,
+  subscribed: playlist.subscribed === true,
+  isLiked: playlist.isLiked === true,
+});
+
+/**
+ * 强制拉取平台的最新歌单列表
+ *
+ * 主进程对读模块有 2 分钟响应缓存，分派层对用户歌单另有 30 秒缓存；
+ * 写操作之后必须绕过这两层缓存重新取，否则界面拿到的仍是旧数据。
+ * 这里带一个时间戳参数重新请求，读模块会忽略该参数。
+ * @param platform 音源平台
+ * @returns 自建歌单与收藏歌单
+ */
+const fetchFreshPlatformPlaylists = async (
+  platform: ApiPlatform,
+): Promise<{ owned: DispatchPlaylist[]; favorites: DispatchPlaylist[] }> => {
+  const res = await platformRequest<PlatformPlaylistListResponse>(platform, "user_playlist_list", {
+    _t: Date.now(),
+  });
+  if (platform === "qqmusic") {
+    const owned = (res?.owned ?? []).map(normalizeQqPlaylist);
+    const favorites = (res?.favorites ?? []).map(normalizeQqPlaylist);
+    return {
+      owned: owned.map(toDispatchPlaylist),
+      favorites: favorites.map(toDispatchPlaylist),
+    };
+  }
+  const owned = (res?.owned ?? []).map(normalizeKgPlaylist);
+  const favorites = (res?.favorites ?? []).map(normalizeKgPlaylist);
+  const ownedList = owned.map(toDispatchPlaylist);
+  // 酷狗的「我喜欢的歌」是自建歌单里的一种，按平台语义定位后打标
+  const liked = kgFindLikedPlaylist(owned);
+  if (liked) {
+    const target = ownedList.find(
+      (item) => String(item.platformId ?? item.id) === String(liked.platformId ?? liked.id),
+    );
+    if (target) target.isLiked = true;
+  }
+  return { owned: ownedList, favorites: favorites.map(toDispatchPlaylist) };
+};
+
+/**
+ * 写操作后刷新当前平台的歌单列表
+ *
+ * 先走 S3a-1 接好的刷新链（`usePlatformStore().refreshPlaylists`），
+ * 再用一次强制刷新覆盖，保证写操作后的界面立刻反映最新数据。
+ * @param platform 音源平台
+ */
+const refreshPlatformPlaylists = async (platform: ApiPlatform): Promise<void> => {
+  if (platform === "netease") return;
+  try {
+    const store = usePlatformStore();
+    if (store.currentPlatform !== platform) return;
+    await store.refreshPlaylists(platform);
+    const fresh = await fetchFreshPlatformPlaylists(platform);
+    store.playlists = fresh;
+  } catch (error) {
+    console.error("刷新平台歌单列表失败：", error);
+  }
+};
+
+/**
+ * 把歌曲转换成 QQ 音乐写操作需要的条目
+ * @param song 歌曲
+ * @returns QQ 写操作条目（数字歌曲 id）
+ */
+const toQqSongEntry = (song: SongType) => ({
+  id: Number(song.id) || 0,
+  type: 0,
+});
+
+/**
+ * 把歌曲转换成酷狗写操作需要的条目
+ *
+ * 酷狗加歌接口要求 `hash`（内容哈希）与 `name`（歌名）均非空，
+ * 缺歌名会被服务端以 `error_code=20010` 拒绝。
+ * @param song 歌曲
+ * @returns 酷狗写操作条目
+ */
+const toKgSongEntry = (song: SongType) => {
+  const album = typeof song.album === "object" && song.album ? song.album : null;
+  return {
+    hash: String(song.platformId ?? "").toUpperCase(),
+    name: String(song.name ?? ""),
+    album_id: Number(album?.id ?? 0),
+    mixsongid: Number(song.id ?? 0),
+  };
+};
+
+/** 各平台「喜欢」歌曲 id 缓存 */
+const likedSongIds = new Map<ApiPlatform, Set<number>>();
+
+/**
+ * 读取某平台「我喜欢的音乐」里的歌曲 id 集合
+ *
+ * QQ 音乐走系统目录模块，酷狗按「我喜欢」歌单定位后取曲。
+ * @param platform 音源平台
+ * @returns 歌曲 id 集合
+ */
+export const getPlatformLikedSongIds = async (platform: ApiPlatform): Promise<Set<number>> => {
+  if (platform === "netease") return new Set<number>();
+  const cached = likedSongIds.get(platform);
+  if (cached) return cached;
+  try {
+    const result = await dispatchLikedSongs(platform, { pageSize: 300 });
+    const ids = new Set<number>(result.tracks.map((song) => Number(song.id)).filter(Boolean));
+    likedSongIds.set(platform, ids);
+    return ids;
+  } catch (error) {
+    console.error("读取平台喜欢歌曲失败：", error);
+    return new Set<number>();
+  }
+};
+
+/**
+ * 判断某首歌在当前平台是否已被喜欢
+ *
+ * 仅对第三方平台有效；网易云的心跳状态由既有本地缓存维护。
+ * @param platform 音源平台
+ * @param song 歌曲
+ * @returns 是否已喜欢
+ */
+export const isSongLiked = (platform: ApiPlatform, song: SongType): boolean => {
+  if (platform === "netease") return false;
+  const ids = likedSongIds.get(platform);
+  return ids ? ids.has(Number(song.id)) : false;
+};
+
+/**
+ * 在本地缓存里增删一首喜欢歌曲
+ * @param platform 音源平台
+ * @param song 歌曲
+ * @param liked 是否喜欢
+ */
+const patchLikedSongCache = (platform: ApiPlatform, song: SongType, liked: boolean): void => {
+  if (platform === "netease") return;
+  const ids = likedSongIds.get(platform) ?? new Set<number>();
+  if (liked) ids.add(Number(song.id));
+  else ids.delete(Number(song.id));
+  likedSongIds.set(platform, ids);
+};
+
+/**
+ * 创建歌单
+ * @param platform 音源平台
+ * @param name 歌单名
+ * @param privacy 是否隐私歌单（仅网易云支持，其余平台忽略）
+ * @returns 统一结果
+ */
+export const createPlaylist = async (
+  platform: ApiPlatform,
+  name: string,
+  privacy?: boolean,
+): Promise<ManageResult> => {
+  if (platform === "netease") {
+    try {
+      const result = await neteaseCreatePlaylist(name, privacy ?? false);
+      return {
+        ok: result?.code === 200,
+        message: result?.code === 200 ? undefined : result?.message || "新建歌单失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "新建歌单失败，请重试" };
+    }
+  }
+  const result = await callWriteModule(platform, "playlist_create", { name });
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 改名歌单
+ * @param platform 音源平台
+ * @param playlistId 歌单标识
+ * @param name 新歌单名
+ * @param options.desc 歌单描述（仅网易云 / 酷狗支持）
+ * @param options.tags 歌单标签（仅网易云支持）
+ * @returns 统一结果
+ */
+export const renamePlaylist = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+  name: string,
+  options: { desc?: string; tags?: string[] } = {},
+): Promise<ManageResult> => {
+  if (platform === "netease") {
+    try {
+      const result = await neteaseUpdatePlaylist(
+        Number(playlistId),
+        name,
+        options.desc ?? "",
+        options.tags ?? [],
+      );
+      return {
+        ok: result?.code === 200,
+        message: result?.code === 200 ? undefined : result?.message || "歌单编辑失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "歌单编辑失败，请重试" };
+    }
+  }
+  if (platform === "qqmusic") {
+    const result = await callWriteModule(platform, "playlist_rename", {
+      tid: Number(playlistId),
+      name,
+    });
+    if (result.ok) await refreshPlatformPlaylists(platform);
+    return result;
+  }
+  const params: Record<string, unknown> = { id: String(playlistId), name };
+  if (options.desc !== undefined) params.intro = options.desc;
+  const result = await callWriteModule(platform, "playlist_rename", params);
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 删除歌单
+ * @param platform 音源平台
+ * @param playlistId 歌单标识
+ * @returns 统一结果
+ */
+export const deletePlaylist = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+): Promise<ManageResult> => {
+  if (platform === "netease") {
+    try {
+      const result = await neteaseDeletePlaylist(Number(playlistId));
+      return {
+        ok: result?.code === 200,
+        message: result?.code === 200 ? undefined : result?.message || "歌单删除失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "歌单删除失败，请重试" };
+    }
+  }
+  const params = platform === "qqmusic" ? { tid: Number(playlistId) } : { id: String(playlistId) };
+  const result = await callWriteModule(platform, "playlist_delete", params);
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 往歌单加歌
+ * @param platform 音源平台
+ * @param playlistId 歌单标识
+ * @param songs 歌曲列表
+ * @returns 统一结果
+ */
+export const addSongsToPlaylist = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+  songs: SongType[],
+): Promise<ManageResult> => {
+  if (!songs?.length) return { ok: false, message: "请选择要添加的歌曲" };
+  if (platform === "netease") {
+    try {
+      const ids = songs.map((song) => song.id).filter((id) => id !== 0);
+      const result = await neteasePlaylistTracks(Number(playlistId), ids, "add");
+      const ok = result?.status === 200 && result?.body?.code === 200;
+      return {
+        ok,
+        message: ok ? undefined : result?.body?.message || "添加失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "添加失败，请重试" };
+    }
+  }
+  const params =
+    platform === "qqmusic"
+      ? {
+          tid: Number(playlistId),
+          op: "add",
+          songs: songs.map(toQqSongEntry),
+        }
+      : {
+          id: String(playlistId),
+          op: "add",
+          songs: songs.map(toKgSongEntry),
+        };
+  const result = await callWriteModule(platform, "playlist_tracks", params);
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 从歌单删歌
+ * @param platform 音源平台
+ * @param playlistId 歌单标识
+ * @param songs 歌曲列表
+ * @returns 统一结果
+ */
+export const removeSongsFromPlaylist = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+  songs: SongType[],
+): Promise<ManageResult> => {
+  if (!songs?.length) return { ok: false, message: "请选择要删除的歌曲" };
+  if (platform === "netease") {
+    try {
+      const ids = songs.map((song) => song.id).filter((id) => id !== 0);
+      const result = await neteasePlaylistTracks(Number(playlistId), ids, "del");
+      const ok = result?.status === 200 && result?.body?.code === 200;
+      return {
+        ok,
+        message: ok ? undefined : result?.body?.message || "删除失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "删除失败，请重试" };
+    }
+  }
+  const params =
+    platform === "qqmusic"
+      ? {
+          tid: Number(playlistId),
+          op: "del",
+          songs: songs.map(toQqSongEntry),
+        }
+      : {
+          id: String(playlistId),
+          op: "del",
+          songs: songs.map(toKgSongEntry),
+        };
+  const result = await callWriteModule(platform, "playlist_tracks", params);
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 收藏 / 取消收藏歌单
+ * @param platform 音源平台
+ * @param playlistId 歌单标识（酷狗为公开歌单的原始歌单号）
+ * @param subscribed 是否收藏
+ * @returns 统一结果
+ */
+export const subscribePlaylist = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+  subscribed: boolean,
+): Promise<ManageResult> => {
+  if (platform === "netease") {
+    try {
+      const result = await neteaseLikePlaylist(Number(playlistId), subscribed ? 1 : 2);
+      return {
+        ok: result?.code === 200,
+        message: result?.code === 200 ? undefined : result?.message || "收藏歌单失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "收藏歌单失败，请重试" };
+    }
+  }
+  const params =
+    platform === "qqmusic"
+      ? { tid: Number(playlistId), subscribed }
+      : { id: String(playlistId), subscribed };
+  const result = await callWriteModule(platform, "playlist_subscribe", params);
+  if (result.ok) await refreshPlatformPlaylists(platform);
+  return result;
+};
+
+/**
+ * 查询歌单的收藏（订阅）状态
+ * @param platform 音源平台
+ * @param playlistId 歌单标识
+ * @returns 是否已收藏
+ */
+export const isPlaylistSubscribed = async (
+  platform: ApiPlatform,
+  playlistId: string | number,
+): Promise<boolean> => {
+  if (platform === "netease") {
+    const dataStore = useDataStore();
+    return dataStore.userLikeData.playlists.some((playlist) => playlist.id === Number(playlistId));
+  }
+  if (platform === "qqmusic") {
+    try {
+      const result = await platformCall<PlatformWriteResult>(platform, "subscription_status", {
+        type: "playlist",
+        ids: String(playlistId),
+      });
+      return result?.items?.[0]?.status === "subscribed";
+    } catch (error) {
+      console.error("查询歌单收藏状态失败：", error);
+      return false;
+    }
+  }
+  try {
+    const { favorites } = await fetchFreshPlatformPlaylists(platform);
+    return favorites.some(
+      (playlist) => String(playlist.platformId ?? playlist.id) === String(playlistId),
+    );
+  } catch (error) {
+    console.error("查询歌单收藏状态失败：", error);
+    return false;
+  }
+};
+
+/**
+ * 读取某平台「我喜欢的音乐」的曲目总数
+ *
+ * QQ 音乐走系统目录模块，酷狗的红心是「我喜欢」系统歌单。
+ * @param platform 音源平台
+ * @returns 曲目总数，读取失败时为 0
+ */
+const readLikedTotal = async (platform: ApiPlatform): Promise<number> => {
+  try {
+    if (platform === "qqmusic") {
+      const res = await platformCall<{ total?: number }>(platform, "user_liked_songs", {
+        song_begin: 0,
+        song_num: 1,
+        _t: Date.now(),
+      });
+      return Number(res?.total ?? 0);
+    }
+    const { owned } = await fetchFreshPlatformPlaylists(platform);
+    const liked = owned.find((playlist) => playlist.isLiked === true);
+    if (!liked) return 0;
+    const res = await platformCall<{ total?: number }>(platform, "playlist_detail", {
+      id: liked.platformId ?? liked.id,
+      page: 1,
+      pageSize: 1,
+      _t: Date.now(),
+    });
+    return Number(res?.total ?? 0);
+  } catch (error) {
+    console.error("读取平台喜欢歌曲总数失败：", error);
+    return 0;
+  }
+};
+
+/**
+ * 查询 QQ 音乐单曲的收藏（红心）状态
+ * @param song 歌曲
+ * @returns 是否已喜欢，读取失败时为 null
+ */
+const readQqSongLikedState = async (song: SongType): Promise<boolean | null> => {
+  const mid = song.platformId;
+  if (!mid) return null;
+  try {
+    const res = await platformCall<PlatformWriteResult>("qqmusic", "subscription_status", {
+      type: "song",
+      ids: mid,
+    });
+    const status = res?.items?.[0]?.status;
+    if (!status) return null;
+    return status === "subscribed";
+  } catch (error) {
+    console.error("查询歌曲收藏状态失败：", error);
+    return null;
+  }
+};
+
+/**
+ * 喜欢 / 取消喜欢歌曲
+ *
+ * QQ 音乐写入系统目录「我喜欢」，酷狗写入「我喜欢」系统歌单，
+ * 两者都落到对应平台的曲目写操作上。
+ *
+ * 注意：QQ 音乐模块对「喜欢」路径的返回码校验不成立（写接口回的是
+ * `dirId=201 / tid=<歌单号>`，而模块按普通歌单口径比对 `tid`），
+ * 真实写入成功时模块仍会返回 502。故这里在模块返回失败时，
+ * 用「我喜欢的总数变化 + 单曲收藏状态」读回确认实际效果。
+ * @param platform 音源平台
+ * @param song 歌曲
+ * @param liked 是否喜欢
+ * @returns 统一结果
+ */
+export const likeSong = async (
+  platform: ApiPlatform,
+  song: SongType,
+  liked: boolean,
+): Promise<ManageResult> => {
+  if (platform === "netease") {
+    try {
+      const result = await neteaseLikeSong(song.id, liked);
+      return {
+        ok: result?.code === 200,
+        message: result?.code === 200 ? undefined : result?.message || "操作失败，请重试",
+        data: result,
+      };
+    } catch (error) {
+      return { ok: false, message: "操作失败，请重试" };
+    }
+  }
+  const params =
+    platform === "qqmusic"
+      ? { op: liked ? "add" : "del", like: true, songs: [toQqSongEntry(song)] }
+      : { op: liked ? "add" : "del", like: true, songs: [toKgSongEntry(song)] };
+  const before = await readLikedTotal(platform);
+  const result = await callWriteModule(platform, "playlist_tracks", params);
+  if (result.ok) {
+    patchLikedSongCache(platform, song, liked);
+    await refreshPlatformPlaylists(platform);
+    return result;
+  }
+  // 模块返回失败：读回确认写入是否实际生效
+  const after = await readLikedTotal(platform);
+  const countChanged = liked ? after > before : after < before;
+  let stateMatched = false;
+  if (!countChanged && platform === "qqmusic") {
+    const state = await readQqSongLikedState(song);
+    stateMatched = state === liked;
+  }
+  if (countChanged || stateMatched) {
+    patchLikedSongCache(platform, song, liked);
+    await refreshPlatformPlaylists(platform);
+    return { ok: true, message: undefined, data: result.data };
+  }
+  return result;
+};
+
+/**
+ * 喜欢 / 取消喜欢一批歌曲
+ *
+ * 平台的「喜欢」是一次一首地写特殊歌单，故按顺序逐首写入。
+ * @param platform 音源平台
+ * @param songs 歌曲列表
+ * @param liked 是否喜欢
+ * @returns 统一结果
+ */
+export const likeSongs = async (
+  platform: ApiPlatform,
+  songs: SongType[],
+  liked: boolean,
+): Promise<ManageResult> => {
+  if (!songs?.length) return { ok: false, message: "请选择歌曲" };
+  if (platform === "netease") {
+    const results = await Promise.all(songs.map((song) => likeSong(platform, song, liked)));
+    const failed = results.find((result) => !result.ok);
+    return failed ?? { ok: true };
+  }
+  let last: ManageResult = { ok: true };
+  for (const song of songs) {
+    last = await likeSong(platform, song, liked);
+    if (!last.ok) return last;
+  }
+  return last;
+};
+
+/**
+ * 读取当前平台「可管理」的歌单列表（加歌弹窗用）
+ *
+ * 只返回自建歌单（可写入的那些）；网易云沿用既有本地缓存口径，
+ * 第三方平台走歌单数据源分派层取自建组。
+ * @param platform 音源平台
+ * @returns 可管理歌单列表
+ */
+export const getManageablePlaylists = async (
+  platform: ApiPlatform,
+): Promise<ManageablePlaylist[]> => {
+  if (platform === "netease") {
+    const dataStore = useDataStore();
+    const userId = dataStore.userData?.userId;
+    return (dataStore.userLikeData.playlists || [])
+      .filter((playlist) => playlist.userId === userId)
+      .map((playlist, index) => ({
+        id: String(playlist.id),
+        name: index === 0 ? "我喜欢的音乐" : playlist.name,
+        cover: playlist.cover,
+        coverSmall: playlist.coverSize?.s,
+        count: playlist.count ?? 0,
+        isLiked: index === 0,
+      }));
+  }
+  try {
+    const { owned } = await fetchFreshPlatformPlaylists(platform);
+    return owned.map((playlist) => ({
+      id: String(playlist.platformId ?? playlist.id),
+      name: playlist.name,
+      cover: playlist.cover,
+      coverSmall: playlist.coverSize?.s,
+      count: playlist.count,
+      isLiked: playlist.isLiked === true,
+    }));
+  } catch (error) {
+    console.error("读取平台可管理歌单失败：", error);
+    return [];
+  }
+};

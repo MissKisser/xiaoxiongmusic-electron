@@ -42,6 +42,26 @@
           </template>
           {{ isLikePlaylist ? "取消收藏" : "收藏歌单" }}
         </n-button>
+        <!-- 第三方平台歌单：自建歌单可编辑，他人歌单可收藏 -->
+        <n-button
+          v-else-if="isPlatformOwnedPlaylist"
+          :focusable="false"
+          strong
+          secondary
+          round
+          @click="updatePlaylist"
+        >
+          <template #icon>
+            <SvgIcon name="EditNote" />
+          </template>
+          编辑歌单
+        </n-button>
+        <n-button v-else :focusable="false" strong secondary round @click="togglePlatformSubscribe">
+          <template #icon>
+            <SvgIcon :name="isPlatformSubscribed ? 'Favorite' : 'FavoriteBorder'" />
+          </template>
+          {{ isPlatformSubscribed ? "取消收藏" : "收藏歌单" }}
+        </n-button>
       </template>
     </ListDetail>
     <Transition name="fade" mode="out-in">
@@ -94,10 +114,15 @@ import type { ApiPlatform } from "@/types/shared";
 import { songDetail } from "@/api/song";
 import { playlistAllSongs, deletePlaylist, updatePlaylistPrivacy } from "@/api/playlist";
 import { dispatchPlaylistDetail } from "@/api/platform/dispatch";
+import {
+  deletePlaylist as manageDeletePlaylist,
+  isPlaylistSubscribed,
+  subscribePlaylist,
+} from "@/api/platform/manage";
 import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isLogin, toLikePlaylist, updateUserLikePlaylist } from "@/utils/auth";
-import { useDataStore, useLocalStore } from "@/stores";
+import { useDataStore, useLocalStore, usePlatformStore } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
 import { useListDetail } from "@/composables/List/useListDetail";
 import { useListSearch } from "@/composables/List/useListSearch";
@@ -108,6 +133,7 @@ import { useListDataCache, type ListCacheData } from "@/composables/List/useList
 const router = useRouter();
 const dataStore = useDataStore();
 const localStore = useLocalStore();
+const platformStore = usePlatformStore();
 
 const {
   detailData,
@@ -193,6 +219,18 @@ const isLikePlaylist = computed(() => {
   return dataStore.userLikeData.playlists.some((playlist) => playlist.id === detailData.value?.id);
 });
 
+// 平台歌单是否为自己创建（可写）
+const isPlatformOwnedPlaylist = computed<boolean>(() => {
+  if (!isPlatformSource.value || !routePlatform.value) return false;
+  const id = platformPlaylistId.value;
+  return platformStore.playlists.owned.some(
+    (playlist) => String(playlist.platformId ?? playlist.id) === id,
+  );
+});
+
+// 平台歌单的收藏（订阅）状态
+const isPlatformSubscribed = ref<boolean>(false);
+
 // 是否处于歌单页面
 const isPlaylistPage = computed<boolean>(() => router.currentRoute.value.name === "playlist");
 
@@ -228,7 +266,7 @@ const playButtonText = computed(() => {
 
 // 更多操作
 const moreOptions = computed<DropdownOption[]>(() => {
-  // 第三方平台歌单：仅保留刷新与批量操作，其余为网易云专有写操作
+  // 第三方平台歌单：保留刷新、批量操作与删除，其余为网易云专有写操作
   if (isPlatformSource.value) {
     return [
       {
@@ -238,6 +276,17 @@ const moreOptions = computed<DropdownOption[]>(() => {
           onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
         },
         icon: renderIcon("Refresh"),
+      },
+      {
+        label: "删除歌单",
+        key: "delete",
+        show: isPlatformOwnedPlaylist.value,
+        props: {
+          onClick: () => {
+            toDeletePlaylist();
+          },
+        },
+        icon: renderIcon("Delete"),
       },
       {
         label: "批量操作",
@@ -582,6 +631,17 @@ const toDeletePlaylist = async () => {
         }
         return;
       }
+      // 第三方平台歌单
+      if (isPlatformSource.value && routePlatform.value) {
+        const result = await manageDeletePlaylist(routePlatform.value, platformPlaylistId.value);
+        if (!result.ok) {
+          window.$message.error(result.message || "歌单删除失败，请重试");
+          return;
+        }
+        window.$message.success("歌单删除成功");
+        router.back();
+        return;
+      }
       // 在线歌单
       const result = await deletePlaylist(playlistId.value);
       if (result.code === 200) {
@@ -594,6 +654,28 @@ const toDeletePlaylist = async () => {
       }
     },
   });
+};
+
+// 收藏 / 取消收藏平台歌单
+const togglePlatformSubscribe = async () => {
+  if (!isPlatformSource.value || !routePlatform.value) return;
+  const subscribed = !isPlatformSubscribed.value;
+  const result = await subscribePlaylist(routePlatform.value, platformPlaylistId.value, subscribed);
+  if (!result.ok) {
+    window.$message.error(result.message || "收藏歌单失败，请重试");
+    return;
+  }
+  isPlatformSubscribed.value = subscribed;
+  window.$message.success(subscribed ? "收藏歌单成功" : "取消收藏歌单成功");
+};
+
+// 读取平台歌单的收藏状态
+const loadPlatformSubscribeState = async () => {
+  if (!isPlatformSource.value || !routePlatform.value) return;
+  isPlatformSubscribed.value = await isPlaylistSubscribed(
+    routePlatform.value,
+    platformPlaylistId.value,
+  );
 };
 
 // 删除指定索引歌曲
@@ -614,6 +696,15 @@ const removeSong = async (ids: number[]) => {
 // 编辑歌单
 const updatePlaylist = () => {
   if (!detailData.value || !playlistId.value) return;
+  if (isPlatformSource.value && routePlatform.value) {
+    openUpdatePlaylist(
+      platformPlaylistId.value,
+      detailData.value,
+      () => getPlaylistDetail(playlistId.value, { getList: false, refresh: false }),
+      routePlatform.value,
+    );
+    return;
+  }
   openUpdatePlaylist(playlistId.value, detailData.value, () =>
     getPlaylistDetail(playlistId.value, { getList: false, refresh: false }),
   );
@@ -644,6 +735,7 @@ onBeforeRouteUpdate((to) => {
     const platform = to.query.platform as ApiPlatform | undefined;
     const source = platform === "qqmusic" || platform === "kugou" ? platform : null;
     getPlaylistDetail(id, { getList: true, refresh: false }, source);
+    void loadPlatformSubscribeState();
   }
 });
 
@@ -656,9 +748,13 @@ onActivated(() => {
     // 刷新歌单
     getPlaylistDetail(playlistId.value, { getList: true, refresh: false });
   }
+  void loadPlatformSubscribeState();
 });
 
 onDeactivated(() => loadingMsgShow(false));
 onUnmounted(() => loadingMsgShow(false));
-onMounted(() => getPlaylistDetail(playlistId.value));
+onMounted(() => {
+  getPlaylistDetail(playlistId.value);
+  void loadPlatformSubscribeState();
+});
 </script>

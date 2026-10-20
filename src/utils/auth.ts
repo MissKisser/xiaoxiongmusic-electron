@@ -20,6 +20,7 @@ import { isBeforeSixAM } from "./time";
 import { dailyRecommend } from "@/api/rec";
 import { isElectron } from "./env";
 import { likePlaylist, playlistTracks } from "@/api/playlist";
+import { likeSong as manageLikeSong } from "@/api/platform/manage";
 import { likeArtist } from "@/api/artist";
 import { likeAlbum } from "@/api/album";
 import { radioSub } from "@/api/radio";
@@ -194,6 +195,16 @@ export const updateUserLikeMvs = async () => {
 export const toLikeSong: DebouncedFunc<(song: SongType, like: boolean) => Promise<void>> = debounce(
   async (song: SongType, like: boolean): Promise<void> => {
     try {
+      // 第三方平台歌曲：走平台「喜欢」机制（特殊歌单的曲目写操作）
+      if (song.platform && song.platform !== "netease") {
+        const result = await manageLikeSong(song.platform, song, like);
+        if (!result.ok) {
+          window.$message.error(result.message || `${like ? "喜欢" : "取消"}音乐时发生错误`);
+          return;
+        }
+        window.$message.success(like ? "已添加到我喜欢的音乐" : "已取消喜欢");
+        return;
+      }
       if (!isLogin()) {
         window.$message.warning("请登录后使用");
         return;

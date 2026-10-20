@@ -1,11 +1,13 @@
 import { DropdownOption } from "naive-ui";
 import { SongType } from "@/types/main";
+import { ApiPlatform } from "@/types/shared";
 import {
   useStatusStore,
   useDataStore,
   useMusicStore,
   useSettingStore,
   useLocalStore,
+  usePlatformStore,
 } from "@/stores";
 import { useDownloadManager } from "@/core/resource/DownloadManager";
 import { usePlayerController } from "@/core/player/PlayerController";
@@ -21,6 +23,12 @@ import { deleteSongs, isLogin } from "@/utils/auth";
 import { songUrl } from "@/api/song";
 import { dailyRecommendDislike } from "@/api/rec";
 import { formatSongsList } from "@/utils/format";
+import {
+  getPlatformLikedSongIds,
+  isSongLiked,
+  likeSong,
+  removeSongsFromPlaylist,
+} from "@/api/platform/manage";
 
 /** 歌曲菜单 */
 export const useSongMenu = () => {
@@ -32,6 +40,7 @@ export const useSongMenu = () => {
   const player = usePlayerController();
   const downloadManager = useDownloadManager();
   const localStore = useLocalStore();
+  const platformStore = usePlatformStore();
 
   // 删除本地歌曲
   const deleteLocalSong = (song: SongType, emit?: (event: "removeSong", args: any[]) => void) => {
@@ -159,6 +168,66 @@ export const useSongMenu = () => {
     }
   };
 
+  // 路由上的平台歌单上下文（第三方平台歌单页带 platform 查询参数）
+  const routePlatform = computed<ApiPlatform | null>(() => {
+    const platform = router.currentRoute.value.query.platform as string | undefined;
+    return platform === "qqmusic" || platform === "kugou" ? platform : null;
+  });
+
+  // 路由上的平台歌单标识
+  const routePlaylistId = computed<string>(() => String(router.currentRoute.value.query.id ?? ""));
+
+  // 当前页面是否为平台歌单详情页
+  const isPlatformPlaylistPage = computed<boolean>(
+    () => routePlatform.value !== null && router.currentRoute.value.name === "playlist",
+  );
+
+  // 当前平台歌单是否为自己创建（可写）
+  const isPlatformOwnedPlaylist = computed<boolean>(() => {
+    if (!isPlatformPlaylistPage.value) return false;
+    const id = routePlaylistId.value;
+    return platformStore.playlists.owned.some(
+      (playlist) => String(playlist.platformId ?? playlist.id) === id,
+    );
+  });
+
+  // 第三方平台歌曲的喜欢 / 取消喜欢
+  const toggleLikeSong = async (song: SongType) => {
+    const platform = song.platform;
+    if (!platform || platform === "netease") return;
+    const liked = !isSongLiked(platform, song);
+    const result = await likeSong(platform, song, liked);
+    if (!result.ok) {
+      window.$message.error(result.message || "操作失败，请重试");
+      return;
+    }
+    window.$message.success(liked ? "已添加到我喜欢的音乐" : "已取消喜欢");
+  };
+
+  // 从平台歌单中删除歌曲（与网易云同款确认流程）
+  const deleteSongsFromPlatformPlaylist = (
+    platform: ApiPlatform,
+    playlistId: string,
+    song: SongType,
+    emit?: (event: "removeSong", args: any[]) => void,
+  ) => {
+    window.$dialog.warning({
+      title: "删除歌曲",
+      content: `确定从歌单中删除 ${song.name}？`,
+      positiveText: "删除",
+      negativeText: "取消",
+      onPositiveClick: async () => {
+        const result = await removeSongsFromPlaylist(platform, playlistId, [song]);
+        if (!result.ok) {
+          window.$message.error(result.message || "删除歌曲失败，请重试");
+          return;
+        }
+        emit?.("removeSong", [song.id]);
+        window.$message.success("删除成功");
+      },
+    });
+  };
+
   // 生成菜单选项
   const getMenuOptions = (
     song: SongType,
@@ -182,6 +251,14 @@ export const useSongMenu = () => {
     const isDownloading = dataStore.downloadingSongs.some((item) => item.song.id === song.id);
     // 第三方平台歌曲：网易云专有的收藏 / 下载 / 百科等写操作不适用
     const isThirdPartySong = !!song.platform && song.platform !== "netease";
+    // 第三方平台歌曲：按平台机制判断是否已喜欢
+    const isThirdPartyLiked = isThirdPartySong ? isSongLiked(song.platform!, song) : false;
+    // 第三方平台是否已登录（未登录时不可写）
+    const isPlatformLoggedIn = isThirdPartySong
+      ? !!platformStore.platformProfiles[song.platform!]
+      : false;
+    // 预热平台喜欢歌曲 id 缓存（首次为空，随后命中缓存）
+    if (isThirdPartySong) void getPlatformLikedSongIds(song.platform!);
 
     return [
       {
@@ -208,11 +285,20 @@ export const useSongMenu = () => {
         show:
           settingStore.contextMenuOptions.addToPlaylist &&
           type !== "streaming" &&
-          !isThirdPartySong,
+          (!isThirdPartySong || isPlatformLoggedIn),
         props: {
           onClick: () => openPlaylistAdd([song], isLocal),
         },
         icon: renderIcon("AddList", { size: 18 }),
+      },
+      {
+        key: "like-song",
+        label: isThirdPartyLiked ? "取消喜欢" : "喜欢该曲",
+        show: isThirdPartySong && !isLocal && type === "song" && isPlatformLoggedIn,
+        props: {
+          onClick: () => toggleLikeSong(song),
+        },
+        icon: renderIcon(isThirdPartyLiked ? "Favorite" : "FavoriteBorder", { size: 18 }),
       },
       {
         key: "mv",
@@ -318,16 +404,18 @@ export const useSongMenu = () => {
         show:
           settingStore.contextMenuOptions.deleteFromPlaylist &&
           emit !== undefined &&
-          isUserPlaylist &&
-          (isLocalPlaylist || isLoginNormal) &&
           !isCloud &&
-          !isThirdPartySong,
+          (isThirdPartySong
+            ? isPlatformPlaylistPage.value && isPlatformOwnedPlaylist.value
+            : isUserPlaylist && (isLocalPlaylist || isLoginNormal)),
         props: {
           onClick: () =>
-            deleteSongs(playListId!, [song.id], {
-              callback: () => emit?.("removeSong", [song.id]),
-              songName: song.name,
-            }),
+            isThirdPartySong
+              ? deleteSongsFromPlatformPlaylist(song.platform!, routePlaylistId.value, song, emit)
+              : deleteSongs(playListId!, [song.id], {
+                  callback: () => emit?.("removeSong", [song.id]),
+                  songName: song.name,
+                }),
         },
         icon: renderIcon("Delete"),
       },

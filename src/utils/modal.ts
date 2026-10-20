@@ -143,7 +143,9 @@ export const openSongInfoEditor = (song: SongType) => {
 // 添加到歌单
 export const openPlaylistAdd = (data: SongType[], isLocal: boolean) => {
   if (!data.length) return window.$message.warning("请正确选择歌曲");
-  if (!isLogin() && !isLocal) return openUserLogin();
+  // 第三方平台歌曲的写操作走平台账号态，不受网易云登录态约束
+  const platform = data[0]?.platform;
+  if ((!platform || platform === "netease") && !isLogin() && !isLocal) return openUserLogin();
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
@@ -218,7 +220,12 @@ export const openCreateRemotePlaylist = () => {
 };
 
 // 编辑歌单
-export const openUpdatePlaylist = (id: number, data: CoverType, func: () => Promise<void>) => {
+export const openUpdatePlaylist = (
+  id: number | string,
+  data: CoverType,
+  func: () => Promise<void>,
+  platform?: ApiPlatform,
+) => {
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
@@ -229,6 +236,7 @@ export const openUpdatePlaylist = (id: number, data: CoverType, func: () => Prom
       return h(UpdatePlaylist, {
         id,
         data,
+        platform,
         onSuccess: () => {
           modal.destroy();
           // 触发回调
