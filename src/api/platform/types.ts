@@ -21,7 +21,7 @@
  */
 
 import type { ApiPlatform } from "@/types/shared";
-import type { CoverSize, SongType } from "@/types/main";
+import { QualityType, type CoverSize, type MetaData, type SongType } from "@/types/main";
 
 /** 归一化后的歌手（网易云形状） */
 export interface PlatformArtist {
@@ -141,10 +141,37 @@ export interface PlatformSongUrl {
   isTrial: boolean;
   /** 歌曲付费标记 */
   payPlay?: number;
+  /** 酷狗播放状态：1 可播 / 2 付费墙 / 3 该账号完全无授权 */
+  status?: number;
+  /** 资源授权位（酷狗 privilege） */
+  privilege?: number | null;
+  /** 试听片段时长（毫秒，酷狗取自 hash_offset.end_ms） */
+  trialDuration?: number;
   /** 失败原因（need_pay / no_authorization / filename_rejected / vkey_error） */
   reason?: string;
   /** 提示文案 */
   message?: string;
+}
+
+/**
+ * 歌词查询入参
+ *
+ * 归一化歌曲与应用内歌曲模型的公共子集：
+ * 平台歌词接口需要「歌曲 ID + 歌名 + 歌手 + 专辑 + 时长」五项才能匹配准歌词。
+ */
+export interface PlatformLyricTarget {
+  /** 歌曲数字 ID */
+  id: number;
+  /** 歌曲名 */
+  name: string;
+  /** 歌手（数组或字符串） */
+  artists: PlatformArtist[] | MetaData[] | string;
+  /** 专辑（对象或名称字符串） */
+  album: PlatformAlbum | MetaData | string;
+  /** 时长（毫秒） */
+  duration: number;
+  /** 平台内字符串主键（QQ 音乐 mid / 酷狗 hash） */
+  platformId?: string;
 }
 
 /** 归一化后的歌词（网易云 `/lyric/new` 形状） */
@@ -207,6 +234,105 @@ export interface PlatformCommentPage {
   /** 游标（下一页传入） */
   cursor?: string;
 }
+
+/**
+ * 取歌曲的歌手名
+ * @param artists 歌手（数组或字符串）
+ * @returns 歌手名，多个歌手用 ` / ` 连接
+ */
+export const getArtistNames = (
+  artists: PlatformArtist[] | MetaData[] | string | undefined,
+): string => {
+  if (!artists) return "";
+  if (typeof artists === "string") return artists;
+  return artists
+    .map((artist) => artist.name)
+    .filter(Boolean)
+    .join(" / ");
+};
+
+/**
+ * 取歌曲的专辑名
+ * @param album 专辑（对象或名称字符串）
+ * @returns 专辑名
+ */
+export const getAlbumName = (album: PlatformAlbum | MetaData | string | undefined): string => {
+  if (!album) return "";
+  return typeof album === "string" ? album : (album.name ?? "");
+};
+
+/**
+ * 应用音质档位 → 平台音质档位
+ *
+ * 应用侧音质档位沿用网易云口径（`exhigh` / `higher` / `lossless` …），
+ * 平台侧各有一套自己的档位名，缺省时回落到 `hq`（QQ 320k / 酷狗 320k）。
+ */
+const PLATFORM_LEVEL_MAP: Record<ApiPlatform, Record<string, string>> = {
+  netease: {},
+  qqmusic: {
+    jymaster: "hi-res",
+    hires: "hi-res",
+    lossless: "lossless",
+    exhigh: "hq",
+    higher: "sq",
+    standard: "lq",
+    dolby: "hq",
+    sky: "hq",
+    jyeffect: "hq",
+  },
+  kugou: {
+    jymaster: "hi-res",
+    hires: "hi-res",
+    lossless: "lossless",
+    exhigh: "hq",
+    higher: "sq",
+    standard: "sq",
+    dolby: "hq",
+    sky: "hq",
+    jyeffect: "hq",
+  },
+};
+
+/**
+ * 取平台音质档位
+ * @param platform 音源平台
+ * @param appLevel 应用侧音质档位
+ * @returns 平台音质档位
+ */
+export const getPlatformLevel = (platform: ApiPlatform, appLevel: string): string => {
+  const map = PLATFORM_LEVEL_MAP[platform] ?? {};
+  return map[appLevel] ?? map.exhigh ?? "hq";
+};
+
+/**
+ * 平台音质档位 → 应用音质
+ *
+ * QQ 音乐：`hi-res` / `lossless` / `hq` / `sq` / `lq` / `trial`；
+ * 酷狗：`high` / `flac` / `320` / `128`。
+ * @param level 平台音质档位
+ * @returns 应用音质，无法判定时返回 undefined
+ */
+export const mapPlatformQuality = (level?: string): QualityType | undefined => {
+  switch (String(level ?? "").toLowerCase()) {
+    case "hi-res":
+    case "high":
+      return QualityType.HiRes;
+    case "lossless":
+    case "flac":
+      return QualityType.SQ;
+    case "hq":
+    case "320":
+      return QualityType.HQ;
+    case "sq":
+    case "128":
+      return QualityType.MQ;
+    case "lq":
+    case "trial":
+      return QualityType.LQ;
+    default:
+      return undefined;
+  }
+};
 
 /**
  * 按网易云口径生成封面各尺寸地址

@@ -10,11 +10,14 @@
 import { platformRequest } from "./http";
 import {
   buildCoverSize,
+  getAlbumName,
+  getArtistNames,
   type PlatformAlbum,
   type PlatformArtist,
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformLyric,
+  type PlatformLyricTarget,
   type PlatformPlaylist,
   type PlatformPlaylistDetail,
   type PlatformSong,
@@ -412,16 +415,18 @@ export const qqSongUrl = async (
 
 /**
  * 读取 QQ 音乐歌词
- * @param song 归一化歌曲（或直接给歌曲 ID）
+ * @param song 归一化歌曲、应用内歌曲或直接给歌曲 ID
  * @returns 归一化后的歌词
  */
-export const qqLyric = async (song: PlatformSong | string): Promise<PlatformLyric> => {
+export const qqLyric = async (
+  song: PlatformSong | PlatformLyricTarget | string,
+): Promise<PlatformLyric> => {
   const isRaw = typeof song === "string";
   const res = await platformRequest<QqLyricResponse>(QQ_MUSIC, "lyric", {
     id: isRaw ? song : song.id,
     name: isRaw ? "" : song.name,
-    artist: isRaw ? "" : song.artists.map((artist) => artist.name).join(" / "),
-    album: isRaw ? "" : song.album.name,
+    artist: isRaw ? "" : getArtistNames(song.artists),
+    album: isRaw ? "" : getAlbumName(song.album),
     // QQ 歌词接口的 interval 单位为秒
     duration: isRaw ? 0 : Math.round(song.duration / 1000),
   });

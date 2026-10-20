@@ -62,15 +62,29 @@ export const songUrl = (
   });
 };
 
-// 获取解锁歌曲 URL
+/**
+ * 获取解锁歌曲 URL
+ *
+ * 网易云解锁源按歌曲 ID 寻址，其余解锁源按「关键词 / 歌名 + 歌手」寻址；
+ * 站外源额外支持可选的 `duration`（秒），参与服务端的三重校验（歌名 / 歌手 / 时长），
+ * 避免匹配到同名不同版的曲目。
+ * @param id 歌曲 ID
+ * @param keyword 搜索关键词（`歌名-歌手`）
+ * @param server 解锁源
+ * @param songName 歌名
+ * @param artist 歌手
+ * @param duration 歌曲声明时长（秒）
+ */
 export const unlockSongUrl = (
   id: number,
   keyword: string,
   server: SongUnlockServer,
   songName?: string,
   artist?: string,
+  duration?: number,
 ) => {
-  const params = server === SongUnlockServer.NETEASE ? { id } : { keyword, songName, artist };
+  const params =
+    server === SongUnlockServer.NETEASE ? { id } : { keyword, songName, artist, duration };
   return request({
     baseURL: "/api/unblock",
     url: `/${server}`,

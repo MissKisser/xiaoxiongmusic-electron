@@ -1,5 +1,7 @@
 import { qqMusicMatch } from "@/api/qqmusic";
 import { songLyric, songLyricTTML } from "@/api/song";
+import { kgLyric } from "@/api/platform/kugou";
+import { qqLyric } from "@/api/platform/qqmusic";
 import { keywords as defaultKeywords, regexes as defaultRegexes } from "@/assets/data/exclude";
 import { useCacheManager } from "@/core/resource/CacheManager";
 import { useMusicStore, useSettingStore, useStatusStore, useStreamingStore } from "@/stores";
@@ -415,6 +417,123 @@ class LyricManager {
   }
 
   /**
+   * 解析酷狗 KRC 格式逐字歌词
+   *
+   * 行首为 `[分:秒.毫秒]`，行内逐字为 `<相对毫秒,时长毫秒>文字`，
+   * 逐字时间以行首时间为基准。
+   * @param krcContent KRC 原始内容
+   * @param trans 翻译歌词（LRC）
+   * @param roma 罗马音歌词（LRC）
+   * @returns LyricLine 数组
+   */
+  private parseKRCLyric(krcContent: string, trans?: string, roma?: string): LyricLine[] {
+    // 行匹配: [分:秒.毫秒]内容
+    const linePattern = /^\[(\d+):(\d{1,2}(?:\.\d{1,3})?)\](.*)$/;
+    // 逐字匹配: <相对起始毫秒,时长毫秒>文字
+    const wordPattern = /<(\d+),(\d+)>([^<]*)/g;
+
+    const lines: LyricLine[] = [];
+    for (const rawLine of String(krcContent ?? "").split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const lineMatch = linePattern.exec(line);
+      if (!lineMatch) continue;
+
+      const lineStart = Math.round(Number(lineMatch[1]) * 60000 + Number(lineMatch[2]) * 1000);
+      const words: Array<{
+        word: string;
+        startTime: number;
+        endTime: number;
+        romanWord: string;
+      }> = [];
+      let wordMatch: RegExpExecArray | null;
+      const wordRegex = new RegExp(wordPattern.source, "g");
+      let lastEnd = lineStart;
+
+      while ((wordMatch = wordRegex.exec(lineMatch[3])) !== null) {
+        const wordText = wordMatch[3];
+        if (!wordText) continue;
+        const startTime = lineStart + Number(wordMatch[1]);
+        const endTime = startTime + Number(wordMatch[2]);
+        words.push({ word: wordText, startTime, endTime, romanWord: "" });
+        if (endTime > lastEnd) lastEnd = endTime;
+      }
+
+      if (words.length > 0) {
+        lines.push({
+          words,
+          startTime: lineStart,
+          endTime: lastEnd,
+          translatedLyric: "",
+          romanLyric: "",
+          isBG: false,
+          isDuet: false,
+        });
+      }
+    }
+
+    // 处理翻译
+    if (trans) {
+      const transLines = parseLrc(trans);
+      if (transLines?.length) {
+        const filtered = transLines.filter((line) => {
+          const text = line.words.map((w) => w.word).join("");
+          return !text.includes("//") && !text.includes("作品的著作权");
+        });
+        this.alignLyrics(lines, filtered, "translatedLyric");
+      }
+    }
+    // 处理音译
+    if (roma) {
+      const romaLines = parseLrc(roma);
+      if (romaLines?.length) {
+        this.alignLyrics(lines, romaLines, "romanLyric");
+      }
+    }
+    return lines;
+  }
+
+  /**
+   * 处理平台歌词（QQ 音乐 / 酷狗音乐）
+   *
+   * 逐字歌词：QQ 音乐 QRC、酷狗 KRC；行级歌词与翻译 / 音译按网易云口径对齐。
+   * @param song 歌曲
+   * @returns 歌词数据
+   */
+  private async handlePlatformLyric(song: SongType): Promise<SongLyric> {
+    const result: SongLyric = { lrcData: [], yrcData: [] };
+    try {
+      const isQq = song.platform === "qqmusic";
+      const lyric = isQq ? await qqLyric(song) : await kgLyric(song);
+      // 逐字歌词
+      if (lyric.yrc?.lyric) {
+        const lines = isQq
+          ? this.parseQRCLyric(lyric.yrc.lyric, lyric.tlyric?.lyric, lyric.romalrc?.lyric)
+          : this.parseKRCLyric(lyric.yrc.lyric, lyric.tlyric?.lyric, lyric.romalrc?.lyric);
+        if (lines.length > 0) result.yrcData = lines;
+      }
+      // 行级歌词（没有逐字歌词时回落）
+      if (!result.yrcData.length && lyric.lrc?.lyric) {
+        let lrcLines = parseLrc(lyric.lrc.lyric) || [];
+        if (lyric.tlyric?.lyric) {
+          const transLines = parseLrc(lyric.tlyric.lyric);
+          if (transLines?.length)
+            lrcLines = this.alignLyrics(lrcLines, transLines, "translatedLyric");
+        }
+        if (lyric.romalrc?.lyric) {
+          const romaLines = parseLrc(lyric.romalrc.lyric);
+          if (romaLines?.length) lrcLines = this.alignLyrics(lrcLines, romaLines, "romanLyric");
+        }
+        if (lrcLines.length > 0) result.lrcData = lrcLines;
+      }
+    } catch (error) {
+      console.error("❌ 获取平台歌词失败:", error);
+    }
+    return result;
+  }
+
+  /**
    * 处理在线歌词
    * @param id 歌曲 ID
    * @returns 歌词数据
@@ -793,7 +912,10 @@ class LyricManager {
     // Based on SPlayer-Next — 排除占位符歌词
     const dropPlaceholderLines = (lines: LyricLine[]): LyricLine[] =>
       lines.filter((line) => {
-        const text = line.words?.map((w) => w.word).join("").trim();
+        const text = line.words
+          ?.map((w) => w.word)
+          .join("")
+          .trim();
         return !text || !isPlaceholderLyric(text);
       });
 
@@ -1011,6 +1133,11 @@ class LyricManager {
         if (settingStore.enableExcludeLocalLyrics) {
           lyricData = this.handleLyricExclude(lyricData);
         }
+      } else if (song.platform && song.platform !== "netease") {
+        // 平台歌曲（QQ 音乐 / 酷狗音乐）走各自的歌词模块
+        lyricData = await this.handlePlatformLyric(song);
+        // 排除内容
+        lyricData = this.handleLyricExclude(lyricData);
       } else {
         lyricData = await this.handleOnlineLyric(song.id);
         // 排除内容

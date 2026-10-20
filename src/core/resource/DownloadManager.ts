@@ -4,6 +4,11 @@ import { isElectron } from "@/utils/env";
 import { saveAs } from "file-saver";
 import { cloneDeep } from "lodash-es";
 import { songDownloadUrl, songLyric, songLyricTTML, songUrl, unlockSongUrl } from "@/api/song";
+import { kgLyric } from "@/api/platform/kugou";
+import { kgSongUrl } from "@/api/platform/kugou";
+import { qqLyric } from "@/api/platform/qqmusic";
+import { qqSongUrl } from "@/api/platform/qqmusic";
+import { getPlatformLevel } from "@/api/platform/types";
 import { SongUnlockServer } from "@/core/player/SongManager";
 
 import { songLevelData } from "@/utils/meta";
@@ -21,6 +26,26 @@ interface LyricResult {
   yrc?: { lyric: string };
   ttml?: { lyric: string };
 }
+
+/**
+ * 从直链推断音频格式
+ * @param url 音频直链
+ * @param fallback 推断不出时的默认格式
+ * @returns 音频格式
+ */
+const inferAudioType = (url: string, fallback = "mp3"): string => {
+  const extensionMatch = url.match(/\.([a-z0-9]+)(?:[?#]|$)/i);
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : null;
+  switch (extension) {
+    case "flac":
+    case "ogg":
+    case "wav":
+    case "m4a":
+      return extension;
+    default:
+      return fallback;
+  }
+};
 
 class DownloadManager {
   private queue: DownloadTask[] = [];
@@ -220,6 +245,87 @@ class DownloadManager {
   }
 
   /**
+   * 解析歌曲的播放直链（按平台分派）
+   *
+   * 网易云走 `/song/url/v1`；QQ 音乐与酷狗走平台模块，
+   * 且只接受完整可播的直链 —— 官方试听片段不可用于下载。
+   * @param song 歌曲
+   * @param levelName 音质档位（网易云口径）
+   * @returns 直链与音频格式
+   */
+  private resolvePlaybackUrl = async (
+    song: SongType,
+    levelName: string,
+  ): Promise<{ url?: string; type: string }> => {
+    const platform = song.platform ?? "netease";
+    if (platform === "qqmusic") {
+      const res = await qqSongUrl(
+        song.platformId ?? String(song.id),
+        getPlatformLevel("qqmusic", levelName),
+      );
+      if (!res.available || res.isTrial || !res.url) return { type: "mp3" };
+      return { url: res.url, type: inferAudioType(res.url, res.format || "mp3") };
+    }
+    if (platform === "kugou") {
+      const res = await kgSongUrl(
+        song.platformId ?? String(song.id),
+        getPlatformLevel("kugou", levelName),
+      );
+      // status=1 才是完整可播；付费墙（status=2）只给试听片段
+      if (res.status !== 1 || res.isTrial || !res.url) return { type: "mp3" };
+      return { url: res.url, type: inferAudioType(res.url) };
+    }
+    const result = await songUrl(song.id, levelName as Parameters<typeof songUrl>[1]);
+    if (result.code === 200 && result?.data?.[0]?.url) {
+      return {
+        url: result.data[0].url,
+        type: (result.data[0].type || result.data[0].encodeType || "mp3").toLowerCase(),
+      };
+    }
+    return { type: "mp3" };
+  };
+
+  /**
+   * 解析歌曲的下载直链（按平台分派）
+   *
+   * 网易云有专用下载端点；平台歌曲没有独立下载端点，用平台直链，
+   * 付费歌拿不到完整直链时由调用方转走解锁链。
+   * @param song 歌曲
+   * @param quality 音质
+   * @param levelName 音质档位（网易云口径）
+   * @returns 直链、音频格式与失败原因
+   */
+  private resolveDownloadUrl = async (
+    song: SongType,
+    quality: SongLevelType,
+    levelName: string,
+  ): Promise<{ url?: string; type: string; message?: string }> => {
+    const platform = song.platform ?? "netease";
+    if (platform !== "netease") {
+      const playback = await this.resolvePlaybackUrl(song, levelName);
+      if (playback.url) return { url: playback.url, type: playback.type };
+      return { type: "mp3", message: "该歌曲暂无可下载的完整音频" };
+    }
+    const result = await songDownloadUrl(song.id, quality);
+    if (result.code !== 200 || !result?.data?.url) {
+      return { type: "mp3", message: result.message || "获取下载链接失败" };
+    }
+    return { url: result.data.url, type: result.data.type?.toLowerCase() || "mp3" };
+  };
+
+  /**
+   * 读取歌曲歌词（按平台分派）
+   * @param song 歌曲
+   * @returns 歌词数据
+   */
+  private fetchSongLyric = async (song: SongType): Promise<LyricResult> => {
+    const platform = song.platform ?? "netease";
+    if (platform === "qqmusic") return (await qqLyric(song)) as LyricResult;
+    if (platform === "kugou") return (await kgLyric(song)) as LyricResult;
+    return (await songLyric(song.id)) as LyricResult;
+  };
+
+  /**
    * 处理下载逻辑
    * @param params 下载参数
    * @param params.song 歌曲信息
@@ -242,7 +348,6 @@ class DownloadManager {
     mode?: "standard" | "playback";
   }): Promise<{ success: boolean; skipped?: boolean; message?: string; status?: string }> {
     try {
-      const dataStore = useDataStore();
       const settingStore = useSettingStore();
       let url = "";
       let type = "mp3";
@@ -255,10 +360,10 @@ class DownloadManager {
       // 尝试获取播放链接
       if (usePlayback) {
         try {
-          const result = await songUrl(song.id, levelName as Parameters<typeof songUrl>[1]);
-          if (result.code === 200 && result?.data?.[0]?.url) {
-            url = result.data[0].url;
-            type = (result.data[0].type || result.data[0].encodeType || "mp3").toLowerCase();
+          const playback = await this.resolvePlaybackUrl(song, levelName);
+          if (playback.url) {
+            url = playback.url;
+            type = playback.type;
           }
         } catch (e) {
           console.error("Error fetching playback url for download:", e);
@@ -266,50 +371,50 @@ class DownloadManager {
       }
 
       // 尝试使用解锁接口获取下载链接
-      // 检查 VIP 权限
-      const isVipUser = dataStore.userData?.vipType > 0;
-      const isRestricted = song.free === 1 || song.free === 4 || song.free === 8;
-      const canUseUnlock = !isRestricted || isVipUser;
+      // 解锁准入与播放链同口径：不再按版权 / 会员态拦截
+      const canUnlock = song.type !== "radio" && settingStore.useSongUnlock;
 
-      if (!url && settingStore.useUnlockForDownload && canUseUnlock) {
+      if (!url && settingStore.useUnlockForDownload && canUnlock) {
         try {
+          // 第三方平台的歌曲不参与网易云解锁源：解锁按歌曲 ID 寻址，ID 口径不同必然错配
+          const isNeteaseSong = (song.platform ?? "netease") === "netease";
           // 解锁服务优先级顺序：网易云 -> 波点音乐 -> 歌曲宝 -> 酷我音乐
-          const priorityOrder = [
-            SongUnlockServer.NETEASE,
-            SongUnlockServer.BODIAN,
-            SongUnlockServer.GEQUBAO,
-            SongUnlockServer.KUWO,
-          ];
+          const priorityOrder = isNeteaseSong
+            ? [
+                SongUnlockServer.NETEASE,
+                SongUnlockServer.BODIAN,
+                SongUnlockServer.GEQUBAO,
+                SongUnlockServer.KUWO,
+              ]
+            : [SongUnlockServer.BODIAN, SongUnlockServer.GEQUBAO, SongUnlockServer.KUWO];
 
           const enabledServers = settingStore.songUnlockServer
             .filter((s) => s.enabled)
             .map((s) => s.key);
-          
+
           // 按优先级顺序排序启用的服务器
           const sortedServers = priorityOrder.filter((server) => enabledServers.includes(server));
-          
+
           const artist = (Array.isArray(song.artists) ? song.artists[0]?.name : song.artists) || "";
           const keyWord = `${song.name}-${artist}`;
+          // 歌曲声明时长（秒），参与站外源的时长校验
+          const duration = song.duration > 0 ? Math.round(song.duration / 1000) : undefined;
 
           // 按顺序请求，一旦成功就使用
           for (const server of sortedServers) {
             try {
-              const result = await unlockSongUrl(song.id, keyWord, server);
+              const result = await unlockSongUrl(
+                song.id,
+                keyWord,
+                server,
+                song.name,
+                artist,
+                duration,
+              );
               if (result.code === 200 && result.url) {
                 url = result.url;
                 // 尝试推断类型
-                const extensionMatch = url.match(/\.([a-z0-9]+)(?:[?#]|$)/i);
-                const extension = extensionMatch ? extensionMatch[1].toLowerCase() : null;
-                switch (extension) {
-                  case "flac":
-                  case "ogg":
-                  case "wav":
-                  case "m4a":
-                    type = extension;
-                    break;
-                  default:
-                    type = "mp3";
-                }
+                type = inferAudioType(url);
                 console.log(`🔓 [${song.id}] Unlock download URL found from ${server}:`, url);
                 break; // 找到可用链接，退出循环
               }
@@ -325,15 +430,15 @@ class DownloadManager {
 
       // 尝试获取标准下载链接
       if (!url) {
-        const result = await songDownloadUrl(song.id, quality);
-        if (result.code !== 200 || !result?.data?.url) {
+        const download = await this.resolveDownloadUrl(song, quality, levelName);
+        if (!download.url) {
           return {
             success: false,
-            message: result.message || "获取下载链接失败",
+            message: download.message || "获取下载链接失败",
           };
         }
-        url = result.data.url;
-        type = result.data.type?.toLowerCase() || "mp3";
+        url = download.url;
+        type = download.type;
       }
 
       const infoObj = getPlayerInfoObj(song) || {
@@ -381,30 +486,46 @@ class DownloadManager {
         let lyric = "";
         let yrcLyric = "";
         let ttmlLyric = "";
+        // 逐字歌词原文与另存扩展名（网易云 ttml/yrc，平台 qrc/krc）
+        let verbatimLyric = "";
+        let verbatimExt = "";
 
         if (downloadLyric) {
-          const lyricResult = (await songLyric(song.id)) as LyricResult;
+          const lyricResult = (await this.fetchSongLyric(song)) as LyricResult;
           lyric = this.processLyric(lyricResult);
 
           // 获取逐字歌词内容用于另存
           if (downloadMakeYrc) {
             console.log(`[Download] Fetching verbatim lyrics for ${song.name} (${song.id})...`);
-            try {
-              const ttmlRes = await songLyricTTML(song.id);
-              if (typeof ttmlRes === "string") {
-                ttmlLyric = ttmlRes;
-              }
-              console.log(`[Download] TTML fetched: ${!!ttmlLyric}, len: ${ttmlLyric?.length}`);
+            const platform = song.platform ?? "netease";
+            if (platform === "netease") {
+              try {
+                const ttmlRes = await songLyricTTML(song.id);
+                if (typeof ttmlRes === "string") {
+                  ttmlLyric = ttmlRes;
+                }
+                console.log(`[Download] TTML fetched: ${!!ttmlLyric}, len: ${ttmlLyric?.length}`);
 
-              // 如果没有 TTML，检查 YRC
-              if (!ttmlLyric) {
-                yrcLyric = lyricResult?.yrc?.lyric || "";
-                console.log(
-                  `[Download] YRC fetched from lrcResult: ${!!yrcLyric}, len: ${yrcLyric?.length}`,
-                );
+                // 如果没有 TTML，检查 YRC
+                if (!ttmlLyric) {
+                  yrcLyric = lyricResult?.yrc?.lyric || "";
+                  console.log(
+                    `[Download] YRC fetched from lrcResult: ${!!yrcLyric}, len: ${yrcLyric?.length}`,
+                  );
+                }
+              } catch (e) {
+                console.error("[Download] Error fetching verbatim lyrics:", e);
               }
-            } catch (e) {
-              console.error("[Download] Error fetching verbatim lyrics:", e);
+              // 优先使用 TTML，其次 YRC
+              verbatimLyric = ttmlLyric || yrcLyric;
+              verbatimExt = ttmlLyric ? "ttml" : "yrc";
+            } else {
+              // 平台逐字歌词：QQ 音乐 QRC / 酷狗 KRC，按平台原生扩展名另存
+              verbatimLyric = lyricResult?.yrc?.lyric || "";
+              verbatimExt = platform === "qqmusic" ? "qrc" : "krc";
+              console.log(
+                `[Download] Platform verbatim lyric fetched: ${!!verbatimLyric}, len: ${verbatimLyric?.length}`,
+              );
             }
           }
         }
@@ -425,11 +546,10 @@ class DownloadManager {
         const result = await window.electron.ipcRenderer.invoke("download-file", url, config);
 
         if (result.status !== "cancelled" && result.status !== "error" && downloadMakeYrc) {
-          // 优先使用 TTML，其次 YRC
-          let content = ttmlLyric || yrcLyric;
+          let content = verbatimLyric;
           if (content) {
             try {
-              const ext = ttmlLyric ? "ttml" : "yrc";
+              const ext = verbatimExt;
               const fileName = `${safeFileName}.${ext}`;
               const encoding = settingStore.downloadLyricEncoding || "utf-8";
 

@@ -18,6 +18,7 @@ import {
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformLyric,
+  type PlatformLyricTarget,
   type PlatformPlaylist,
   type PlatformPlaylistDetail,
   type PlatformSong,
@@ -65,6 +66,10 @@ interface KgSongUrlResponse {
   downgraded?: boolean;
   size?: number;
   bitrate?: number;
+  status?: number;
+  privilege?: number | null;
+  isTrial?: boolean;
+  trial?: { duration?: number };
   message?: string;
 }
 
@@ -233,7 +238,10 @@ export const normalizeKgSongUrl = (raw: KgSongUrlResponse): PlatformSongUrl => (
   url: raw?.url ?? "",
   level: raw?.quality,
   isFallback: raw?.downgraded === true,
-  isTrial: false,
+  isTrial: raw?.isTrial === true,
+  status: raw?.status,
+  privilege: raw?.privilege ?? null,
+  trialDuration: Number(raw?.trial?.duration ?? 0) || undefined,
   message: raw?.message,
 });
 
@@ -350,10 +358,12 @@ export const kgSongUrl = async (
 
 /**
  * 读取酷狗歌词
- * @param song 归一化歌曲（或直接给歌曲 hash）
+ * @param song 归一化歌曲、应用内歌曲或直接给歌曲 hash
  * @returns 归一化后的歌词
  */
-export const kgLyric = async (song: PlatformSong | string): Promise<PlatformLyric> => {
+export const kgLyric = async (
+  song: PlatformSong | PlatformLyricTarget | string,
+): Promise<PlatformLyric> => {
   const isRaw = typeof song === "string";
   const res = await platformRequest<KgLyricResponse>(KUGOU, "lyric", {
     hash: isRaw ? song : (song.platformId ?? String(song.id)),
