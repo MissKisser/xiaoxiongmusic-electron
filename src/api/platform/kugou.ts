@@ -7,7 +7,7 @@
  * 字段对照见 `src/api/platform/types.ts` 顶部表格。
  *
  * 平台标识约定：
- * - `id`：酷狗的 `audio_id`（数字），与网易云同为数字，便于复用 `SongType.id`；
+ * - `id`：酷狗的 `mixSongId`（`album_audio_id` 口径，数字），与网易云同为数字，便于复用 `SongType.id`；
  * - `platformId`：酷狗的 `hash`（字符串主键），播放地址 / 歌词等接口以它为键。
  */
 
@@ -141,12 +141,46 @@ const splitArtists = (artist: unknown): PlatformArtist[] => {
     .map((name) => ({ id: "", name }));
 };
 
+/** 酷狗授权位：完全免费可播 */
+const KG_PRIVILEGE_FREE = 0;
+
+/** 酷狗授权位：非会员可免费播放（低码率） */
+const KG_PRIVILEGE_FREE_FOR_AD = 8;
+
+/**
+ * 取酷狗曲目的基档授权位
+ *
+ * 授权位按音质档位逐档下发，基档（最低码率）决定这首曲子能不能免费播：
+ * 基档为 `0` / `8` 时账号可播，高档被锁只是会员权益差异。
+ * @param qualities 各音质档位
+ * @returns 基档授权位，取不到时为 null
+ */
+const pickBasePrivilege = (qualities: unknown): number | null => {
+  if (!Array.isArray(qualities) || qualities.length === 0) return null;
+  const tiers = qualities
+    .map((item: Record<string, any>) => ({
+      bitrate: Number(item?.bitrate ?? 0),
+      privilege: Number(item?.privilege ?? 0),
+    }))
+    .sort((left, right) => left.bitrate - right.bitrate);
+  // 优先取声明了码率的最低档，码率全缺时退回第一档
+  const base = tiers.find((tier) => tier.bitrate > 0) ?? tiers[0];
+  return base?.privilege ?? null;
+};
+
 /**
  * 归一化酷狗歌曲
  *
  * 平台原生字段 → 网易云字段：
- * `audioId` → `id`；`hash` → `platformId`；`singername` → `artists[].name`；
- * `album_name` → `album.name`；`img` 模板 → `cover`；`duration` 已是毫秒。
+ * `mixSongId`（歌曲主键，album_audio_id 口径）→ `id`；`hash` → `platformId`；
+ * `singername` → `artists[].name`；`album_name` → `album.name`；
+ * `img` 模板 → `cover`；`duration` 已是毫秒。
+ *
+ * 歌曲主键说明：云歌单条目的 `audio_id` 恒为 0，不能作主键；
+ * 真实主键是 `mixSongId`（`album_audio_id` 口径），播放地址 / 歌词 / 评论均以它为键。
+ *
+ * 可播性判据：取基档授权位 `privilege`（`0` / `8` 可免费播，其余为会员墙或无授权）。
+ * `pay_type`（`media_pay_type`）描述的是单个音频文件的版权形态，与可播性无单调关系，不作判据。
  * @param song 酷狗原生歌曲
  * @returns 归一化歌曲
  */
@@ -155,9 +189,18 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
   const artists: PlatformArtist[] = Array.isArray(song?.artists)
     ? song.artists.map(normalizeArtist)
     : splitArtists(song?.artist);
+  // 付费判据：基档授权位（各音质档位取最低码率那一档）
+  const basePrivilege = pickBasePrivilege(song?.qualities);
+  const privilege = basePrivilege ?? Number(song?.privilege ?? song?.pay?.privilege ?? Number.NaN);
+  const fee =
+    Number.isNaN(privilege) ||
+    privilege === KG_PRIVILEGE_FREE ||
+    privilege === KG_PRIVILEGE_FREE_FOR_AD
+      ? 0
+      : 1;
 
   return {
-    id: Number(song?.audioId ?? song?.audio_id ?? 0) || 0,
+    id: Number(song?.mixSongId ?? song?.albumAudioId ?? song?.audioId ?? song?.audio_id ?? 0) || 0,
     name: String(song?.name ?? song?.songname ?? ""),
     artists,
     album: {
@@ -166,8 +209,8 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
       picUrl: cover,
     },
     duration: Number(song?.duration ?? 0),
-    // 酷狗 payType / payplay 非 0 表示 VIP 专享
-    fee: Number(song?.payType ?? song?.pay?.payplay ?? 0) > 0 ? 1 : 0,
+    // 酷狗：基档授权位非免费口径即视为不可免费播放
+    fee,
     mv: null,
     cover,
     coverSize: buildCoverSize(cover),
@@ -179,11 +222,15 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
 
 /**
  * 归一化酷狗歌单条目
+ *
+ * `type` 区分目录语义：0 为自建歌单，1 为收藏歌单；
+ * `isDefault` 标记系统默认歌单（「默认收藏」「我喜欢的歌」）。
  * @param playlist 酷狗原生歌单条目
  * @returns 归一化歌单
  */
 export const normalizeKgPlaylist = (playlist: Record<string, any>): PlatformPlaylist => {
   const cover = fillCover(playlist?.cover ?? playlist?.img ?? "");
+  const subscribed = Number(playlist?.type ?? 0) === 1;
   return {
     id: playlist?.listid ?? playlist?.id ?? "",
     name: String(playlist?.name ?? ""),
@@ -200,6 +247,9 @@ export const normalizeKgPlaylist = (playlist: Record<string, any>): PlatformPlay
     updateTime: Number(playlist?.updateTime ?? playlist?.update_time ?? 0) || undefined,
     platform: KUGOU,
     platformId: String(playlist?.listid ?? playlist?.id ?? "") || undefined,
+    owned: !subscribed,
+    subscribed,
+    isDefault: playlist?.isDefault === true,
   };
 };
 
@@ -229,6 +279,9 @@ export const normalizeKgPlaylistDetail = (
 
 /**
  * 归一化酷狗播放地址
+ *
+ * 可播性判据全部透出：播放状态 `status`（1 可播 / 2 付费墙 / 3 无授权）、
+ * 资源授权位 `privilege`、是否官方试听片段 `isTrial` 与试听时长 `trialDuration`。
  * @param raw 酷狗原生播放地址
  * @returns 归一化播放地址
  */
@@ -319,6 +372,47 @@ export const kgSearch = async (
 export const kgUserPlaylists = async (): Promise<PlatformPlaylist[]> => {
   const res = await platformRequest<KgPlaylistListResponse>(KUGOU, "user_playlist_list");
   return [...(res?.owned ?? []), ...(res?.favorites ?? [])].map(normalizeKgPlaylist);
+};
+
+/**
+ * 读取当前酷狗账号的歌单列表（自建与收藏分开返回）
+ *
+ * 酷狗侧自建（type=0）与收藏（type=1）是两套目录语义，
+ * 页面层需要区分「创建的歌单」与「收藏的歌单」两组，故分开返回。
+ * @returns 自建歌单与收藏歌单
+ */
+export const kgUserPlaylistList = async (): Promise<{
+  owned: PlatformPlaylist[];
+  favorites: PlatformPlaylist[];
+}> => {
+  const res = await platformRequest<KgPlaylistListResponse>(KUGOU, "user_playlist_list");
+  return {
+    owned: (res?.owned ?? []).map(normalizeKgPlaylist),
+    favorites: (res?.favorites ?? []).map(normalizeKgPlaylist),
+  };
+};
+
+/**
+ * 酷狗「我喜欢的歌」歌单号候选（按优先级排列）
+ *
+ * 概念版把「我喜欢的歌」放在 listid=4，正式语义下是 listid=3「我喜欢」，
+ * 再退到系统默认歌单（isDef=1，即 listid=1「默认收藏」）。
+ */
+const LIKED_PLAYLIST_IDS = ["4", "3", "1"];
+
+/**
+ * 从自建歌单里定位「我喜欢的歌」
+ *
+ * 酷狗没有独立的红心接口族，「喜欢」本身就是一种歌单。
+ * @param owned 自建歌单列表
+ * @returns 命中的歌单，未命中时为 null
+ */
+export const kgFindLikedPlaylist = (owned: PlatformPlaylist[]): PlatformPlaylist | null => {
+  for (const listid of LIKED_PLAYLIST_IDS) {
+    const hit = owned.find((playlist) => String(playlist.platformId ?? playlist.id) === listid);
+    if (hit) return hit;
+  }
+  return owned.find((playlist) => playlist.isDefault) ?? null;
 };
 
 /**

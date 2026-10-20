@@ -27,6 +27,9 @@ import {
 /** QQ 音乐平台标识 */
 export const QQ_MUSIC = "qqmusic" as const;
 
+/** QQ 音乐「我喜欢的音乐」系统目录号 */
+const LIKED_DIR_ID = 201;
+
 /** QQ 音乐专辑封面直链模板（album.mid 取不到时回落到 album.pmid） */
 const ALBUM_COVER_TEMPLATE = "https://y.gtimg.cn/music/photo_new/T002R300x300M000";
 
@@ -182,6 +185,9 @@ const normalizeAlbum = (album: unknown, albumMid: string, albumId: string): Plat
  * 平台原生字段 → 网易云字段：
  * `id`（songid）→ `id`；`mid` → `platformId`；`artist` → `artists[].name`；
  * `album` → `album.name`；`cover` → `cover`；`duration` 已是毫秒。
+ *
+ * 付费判据取上游 `pay` 对象：`pay_play` 非 0 表示 VIP 专享，
+ * `price_album` 非 0 表示需购买专辑。
  * @param song QQ 原生歌曲
  * @returns 归一化歌曲
  */
@@ -196,6 +202,10 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
   const artists: PlatformArtist[] = Array.isArray(song?.artists)
     ? song.artists.map(normalizeArtist)
     : splitArtists(song?.artist);
+  // 付费标记：QQ 上游的 pay 字段是下划线口径
+  const pay = (song?.pay ?? {}) as Record<string, any>;
+  const payPlay = Number(pay.pay_play ?? pay.payplay ?? 0);
+  const priceAlbum = Number(pay.price_album ?? pay.payalbum ?? 0);
 
   return {
     id: Number(song?.id) || 0,
@@ -206,8 +216,8 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
       picUrl: albumCover,
     },
     duration: Number(song?.duration ?? 0),
-    // QQ 付费标记：payalbum=1 表示需购买专辑，payplay=1 表示 VIP 歌曲
-    fee: song?.pay?.payalbum === 1 ? 4 : song?.pay?.payplay === 1 ? 1 : 0,
+    // QQ 付费标记：需购买专辑 → 4，VIP 专享 → 1
+    fee: priceAlbum > 0 ? 4 : payPlay > 0 ? 1 : 0,
     mv: null,
     cover: albumCover,
     coverSize: buildCoverSize(albumCover),
@@ -219,11 +229,16 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
 
 /**
  * 归一化 QQ 歌单条目
+ *
+ * `dirType` 区分目录语义：0 为自建歌单，3 为收藏（订阅）歌单。
  * @param playlist QQ 原生歌单条目
  * @returns 归一化歌单
  */
 export const normalizeQqPlaylist = (playlist: Record<string, any>): PlatformPlaylist => {
   const cover = secureUrl(playlist?.cover ?? "");
+  const dirType = Number(playlist?.dirType ?? 0);
+  const subscribed = dirType === 3;
+  const dirId = Number(playlist?.dirId ?? 0) || undefined;
   return {
     id: playlist?.tid ?? playlist?.id ?? "",
     name: String(playlist?.dirName ?? playlist?.name ?? ""),
@@ -231,13 +246,19 @@ export const normalizeQqPlaylist = (playlist: Record<string, any>): PlatformPlay
     coverSize: buildCoverSize(cover),
     trackCount: Number(playlist?.songNum ?? 0),
     playCount: Number(playlist?.listenNum ?? 0),
+    description: String(playlist?.description ?? ""),
     creator: {
       id: "",
       name: String(playlist?.creator ?? ""),
     },
     createTime: Number(playlist?.createTime) || undefined,
+    updateTime: Number(playlist?.updateTime) || undefined,
     platform: QQ_MUSIC,
     platformId: String(playlist?.tid ?? playlist?.id ?? "") || undefined,
+    owned: !subscribed,
+    subscribed,
+    dirId,
+    isLiked: dirId === LIKED_DIR_ID,
   };
 };
 
@@ -458,4 +479,96 @@ export const qqComment = async (
     cursor,
   });
   return normalizeQqCommentPage(res);
+};
+
+/** 主进程 QQ「我喜欢的音乐」模块的原生返回 */
+interface QqLikedSongsResponse {
+  code?: number;
+  tid?: string | number;
+  dirId?: number;
+  total?: number;
+  hasmore?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 读取当前 QQ 音乐账号的歌单列表（自建 + 收藏，两类分开返回）
+ *
+ * 自建与收藏在 QQ 侧是两套目录语义（`dirType` 0 / 3），
+ * 页面层需要区分「创建的歌单」与「收藏的歌单」两组，故分开返回。
+ * @returns 自建歌单与收藏歌单
+ */
+export const qqUserPlaylistList = async (): Promise<{
+  owned: PlatformPlaylist[];
+  favorites: PlatformPlaylist[];
+}> => {
+  const res = await platformRequest<QqPlaylistListResponse>(QQ_MUSIC, "user_playlist_list");
+  return {
+    owned: (res?.owned ?? []).map(normalizeQqPlaylist),
+    favorites: (res?.favorites ?? []).map(normalizeQqPlaylist),
+  };
+};
+
+/**
+ * 读取一张 QQ 音乐歌单的详情与曲目（支持分页）
+ *
+ * QQ 歌单详情单页上限 100 首，超出部分按 `song_begin` 递增取后续分页。
+ * @param id 歌单 tid
+ * @param options.dirId 歌单目录号（自建歌单需要）
+ * @param options.songBegin 起始曲目位置（从 0 开始）
+ * @param options.songNum 本次取回的曲目数
+ * @returns 归一化后的歌单详情
+ */
+export const qqPlaylistDetailPage = async (
+  id: string | number,
+  options: { dirId?: number; songBegin?: number; songNum?: number } = {},
+): Promise<PlatformPlaylistDetail> => {
+  const res = await platformRequest<QqPlaylistDetailResponse>(QQ_MUSIC, "playlist_detail", {
+    id,
+    dirId: options.dirId ?? 0,
+    song_begin: options.songBegin ?? 0,
+    song_num: options.songNum ?? 100,
+  });
+  return normalizeQqPlaylistDetail(res);
+};
+
+/**
+ * 归一化 QQ「我喜欢的音乐」模块的返回
+ *
+ * 该模块只回曲目与总数，不回歌单名与封面，歌单名按平台语义补齐。
+ * @param raw QQ 原生返回
+ * @returns 归一化歌单详情
+ */
+export const normalizeQqLikedSongs = (raw: QqLikedSongsResponse): PlatformPlaylistDetail => ({
+  id: String(raw?.tid ?? ""),
+  name: "我喜欢的音乐",
+  coverImgUrl: "",
+  coverSize: buildCoverSize(""),
+  trackCount: Number(raw?.total ?? 0),
+  playCount: 0,
+  creator: { id: "", name: "" },
+  platform: QQ_MUSIC,
+  platformId: String(raw?.tid ?? "") || undefined,
+  tracks: (raw?.songs ?? []).map(normalizeQqSong),
+  hasMore: Number(raw?.hasmore ?? 0) > 0,
+});
+
+/**
+ * 读取 QQ 音乐账号「我喜欢的音乐」的曲目
+ *
+ * 「我喜欢的音乐」是系统目录（dirId=201），主进程模块按目录号定位其 tid 后取曲。
+ * @param songBegin 起始曲目位置（从 0 开始）
+ * @param songNum 本次取回的曲目数
+ * @returns 归一化后的歌单详情
+ */
+export const qqUserLikedSongs = async (
+  songBegin = 0,
+  songNum = 100,
+): Promise<PlatformPlaylistDetail> => {
+  const res = await platformRequest<QqLikedSongsResponse>(QQ_MUSIC, "user_liked_songs", {
+    song_begin: songBegin,
+    song_num: songNum,
+  });
+  return normalizeQqLikedSongs(res);
 };

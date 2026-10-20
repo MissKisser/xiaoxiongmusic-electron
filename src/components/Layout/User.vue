@@ -211,7 +211,11 @@ const userLikeData = computed(() => {
     {
       label: "歌单",
       name: "like-playlists",
-      value: dataStore.userLikeData.playlists.length,
+      // 第三方平台按当前平台的歌单数量统计
+      value:
+        platformStore.currentPlatform === "netease"
+          ? dataStore.userLikeData.playlists.length
+          : platformStore.playlists.owned.length + platformStore.playlists.favorites.length,
     },
     {
       label: "专辑",

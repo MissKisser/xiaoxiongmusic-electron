@@ -180,6 +180,8 @@ export const useSongMenu = () => {
     const isUserPlaylist =
       (!!playListId && userPlaylistsData.some((pl) => pl.id === playListId)) || isLocalPlaylist;
     const isDownloading = dataStore.downloadingSongs.some((item) => item.song.id === song.id);
+    // 第三方平台歌曲：网易云专有的收藏 / 下载 / 百科等写操作不适用
+    const isThirdPartySong = !!song.platform && song.platform !== "netease";
 
     return [
       {
@@ -203,7 +205,10 @@ export const useSongMenu = () => {
       {
         key: "playlist-add",
         label: "添加到歌单",
-        show: settingStore.contextMenuOptions.addToPlaylist && type !== "streaming",
+        show:
+          settingStore.contextMenuOptions.addToPlaylist &&
+          type !== "streaming" &&
+          !isThirdPartySong,
         props: {
           onClick: () => openPlaylistAdd([song], isLocal),
         },
@@ -263,10 +268,9 @@ export const useSongMenu = () => {
           {
             key: "share",
             label: `分享${type === "song" ? "歌曲" : "节目"}链接`,
-            show: !isLocal && type !== "streaming",
+            show: !isLocal && type !== "streaming" && !isThirdPartySong,
             props: {
-              onClick: () =>
-                copyData(getShareUrl(type, song.id), "已复制分享链接到剪贴板"),
+              onClick: () => copyData(getShareUrl(type, song.id), "已复制分享链接到剪贴板"),
             },
             icon: renderIcon("Share", { size: 18 }),
           },
@@ -301,7 +305,8 @@ export const useSongMenu = () => {
           !isCloud &&
           isLoginNormal &&
           type === "song" &&
-          !isLocal,
+          !isLocal &&
+          !isThirdPartySong,
         props: {
           onClick: () => importSongToCloud(song),
         },
@@ -315,7 +320,8 @@ export const useSongMenu = () => {
           emit !== undefined &&
           isUserPlaylist &&
           (isLocalPlaylist || isLoginNormal) &&
-          !isCloud,
+          !isCloud &&
+          !isThirdPartySong,
         props: {
           onClick: () =>
             deleteSongs(playListId!, [song.id], {
@@ -381,7 +387,8 @@ export const useSongMenu = () => {
           settingStore.contextMenuOptions.wiki &&
           settingStore.useOnlineService &&
           !isLocal &&
-          type === "song",
+          type === "song" &&
+          !isThirdPartySong,
         props: {
           onClick: () => router.push({ name: "wiki", query: { id: song.id } }),
         },
@@ -395,7 +402,8 @@ export const useSongMenu = () => {
           statusStore.isDeveloperMode &&
           !isLocal &&
           type === "song" &&
-          !isDownloading,
+          !isDownloading &&
+          !isThirdPartySong,
         props: { onClick: () => openDownloadSong(song) },
         icon: renderIcon("Download"),
       },

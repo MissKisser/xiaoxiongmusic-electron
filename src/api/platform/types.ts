@@ -8,14 +8,14 @@
  *
  * | 语义     | 网易云            | QQ 音乐                | 酷狗                |
  * | -------- | ----------------- | ---------------------- | ------------------- |
- * | 歌曲 ID  | `id`（数字）      | `id`（songid，数字）    | `audioId`（数字）   |
+ * | 歌曲 ID  | `id`（数字）      | `id`（songid，数字）    | `mixSongId`（数字） |
  * | 字符串主键 | 无              | `mid`（字符串）         | `hash`（字符串）    |
  * | 歌曲名   | `name`            | `name`                 | `name`              |
  * | 歌手     | `artists[].name`  | `artists[].name`       | `artists[].name`    |
  * | 专辑     | `album.name`      | `album`（名称字符串）  | `album`（名称字符串）|
  * | 专辑封面 | `album.picUrl`    | `cover`（直链拼 album mid） | `cover`（`img` 模板） |
  * | 时长     | `duration`（毫秒） | `duration`（已是毫秒）  | `duration`（已是毫秒）|
- * | 付费标记 | `fee`             | `pay.payalbum` / `pay.payplay` | `pay.payplay` |
+ * | 付费标记 | `fee`             | `pay.pay_play` / `pay.price_album` | 基档 `privilege` |
  * | 歌单封面 | `coverImgUrl`     | `cover`                | `cover`             |
  * | 歌单曲目数 | `trackCount`    | `songNum`              | `count`             |
  */
@@ -111,6 +111,16 @@ export interface PlatformPlaylist {
   platform: ApiPlatform;
   /** 平台内字符串标识（歌单号） */
   platformId?: string;
+  /** 是否为自建歌单 */
+  owned?: boolean;
+  /** 是否为收藏（订阅）歌单 */
+  subscribed?: boolean;
+  /** 歌单目录号（QQ 自建歌单读详情时需要） */
+  dirId?: number;
+  /** 是否为系统默认歌单（如「我喜欢的音乐」「默认收藏」） */
+  isDefault?: boolean;
+  /** 是否为「我喜欢的音乐」歌单 */
+  isLiked?: boolean;
 }
 
 /** 归一化后的歌单详情（网易云 `playlist` + `tracks` 形状） */

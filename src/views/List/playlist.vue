@@ -2,22 +2,22 @@
 <template>
   <div class="playlist-list">
     <ListDetail
-      :detail-data="detailData?.id === playlistId ? detailData : null"
-      :list-data="detailData?.id === playlistId ? listData : []"
+      :detail-data="isCurrentPlaylist ? detailData : null"
+      :list-data="isCurrentPlaylist ? listData : []"
       :loading="showLoading"
       :list-scrolling="listScrolling"
       :search-value="searchValue"
       :config="listConfig"
       :play-button-text="playButtonText"
       :more-options="moreOptions"
-      :hide-comment-tab="isLocalPlaylist || detailData?.privacy === 10"
+      :hide-comment-tab="isLocalPlaylist || detailData?.privacy === 10 || isPlatformSource"
       @update:search-value="handleSearchUpdate"
       @play-all="playAllSongs"
       @tab-change="handleTabChange"
     >
       <template #action-buttons>
         <n-button
-          v-if="isUserPlaylist"
+          v-if="isUserPlaylist && !isPlatformSource"
           :focusable="false"
           strong
           secondary
@@ -30,7 +30,7 @@
           编辑歌单
         </n-button>
         <n-button
-          v-else
+          v-else-if="!isPlatformSource"
           :focusable="false"
           strong
           secondary
@@ -47,12 +47,23 @@
     <Transition name="fade" mode="out-in">
       <!-- 歌曲列表 -->
       <template v-if="currentTab === 'songs'">
+        <!-- 平台歌单曲目不可读 -->
+        <n-empty
+          v-if="isUnsupportedPlaylist"
+          description="该歌单类型暂不支持读取曲目"
+          style="margin-top: 60px"
+          size="large"
+        >
+          <template #icon>
+            <SvgIcon name="Music" />
+          </template>
+        </n-empty>
         <SongList
-          v-if="!searchValue || searchData?.length"
-          :data="detailData?.id === playlistId ? displayData : []"
+          v-else-if="!searchValue || searchData?.length"
+          :data="isCurrentPlaylist ? displayData : []"
           :loading="loading"
           :height="songListHeight"
-          :playListId="playlistId"
+          :playListId="listPlayListId"
           :doubleClickAction="searchData?.length ? 'add' : 'all'"
           @scroll="handleListScroll"
           @removeSong="removeSong"
@@ -78,15 +89,12 @@
 
 <script setup lang="ts">
 import type { DropdownOption, MessageReactive } from "naive-ui";
-import { SongType } from "@/types/main";
+import type { CoverType, SongType } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { songDetail } from "@/api/song";
-import {
-  playlistDetail,
-  playlistAllSongs,
-  deletePlaylist,
-  updatePlaylistPrivacy,
-} from "@/api/playlist";
-import { formatCoverList, formatSongsList } from "@/utils/format";
+import { playlistAllSongs, deletePlaylist, updatePlaylistPrivacy } from "@/api/playlist";
+import { dispatchPlaylistDetail } from "@/api/platform/dispatch";
+import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isLogin, toLikePlaylist, updateUserLikePlaylist } from "@/utils/auth";
 import { useDataStore, useLocalStore } from "@/stores";
@@ -120,6 +128,42 @@ const { saveCache, loadCache, checkNeedsUpdate } = useListDataCache();
 // 歌单 ID
 const oldPlaylistId = ref<number>(0);
 const playlistId = computed<number>(() => Number(router.currentRoute.value.query.id as string));
+
+// 路由指定的音源平台（第三方平台歌单带 platform 参数，网易云原路径不带）
+const routePlatform = computed<ApiPlatform | null>(() => {
+  const platform = router.currentRoute.value.query.platform as string | undefined;
+  return platform === "qqmusic" || platform === "kugou" ? platform : null;
+});
+
+// 是否为第三方平台歌单
+const isPlatformSource = computed<boolean>(() => routePlatform.value !== null);
+
+// 平台歌单标识
+const platformPlaylistId = computed<string>(() => String(router.currentRoute.value.query.id ?? ""));
+
+// 平台自建歌单目录号
+const platformDirId = computed<number | undefined>(
+  () => Number(router.currentRoute.value.query.dirId ?? 0) || undefined,
+);
+
+// 播放列表标识（平台歌单不参与网易云歌单写操作）
+const listPlayListId = computed<number>(() => (isPlatformSource.value ? 0 : playlistId.value));
+
+// 当前详情是否属于路由上的歌单
+// 平台歌单的 id 是平台内主键（字符串），网易云与本地歌单是数字，
+// 这里按字符串口径比对，避免类型不同导致头部与曲目列表不渲染。
+const isCurrentPlaylist = computed<boolean>(
+  () => !!detailData.value && String(detailData.value.id) === String(playlistId.value),
+);
+
+// 平台歌单曲目不可读（上游端点对该类歌单返回空曲目）
+const isUnsupportedPlaylist = computed<boolean>(
+  () =>
+    isPlatformSource.value &&
+    !loading.value &&
+    (detailData.value?.count ?? 0) > 0 &&
+    listData.value.length === 0,
+);
 
 // 当前正在请求的歌单 ID，用于防止竞态条件
 const currentRequestId = ref<number>(0);
@@ -183,75 +227,99 @@ const playButtonText = computed(() => {
 });
 
 // 更多操作
-const moreOptions = computed<DropdownOption[]>(() => [
-  {
-    label: "刷新缓存",
-    key: "refresh",
-    show: !isLocalPlaylist.value,
-    props: {
-      onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
-    },
-    icon: renderIcon("Refresh"),
-  },
-  {
-    label: "公开隐私歌单",
-    key: "privacy",
-    show: !isLocalPlaylist.value && detailData.value?.privacy === 10,
-    props: { onClick: openPrivacy },
-    icon: renderIcon("ListLockOpen"),
-  },
-  {
-    label: "删除歌单",
-    key: "delete",
-    show: isUserPlaylist.value,
-    props: {
-      onClick: () => toDeletePlaylist(),
-    },
-    icon: renderIcon("Delete"),
-  },
-  {
-    label: "批量操作",
-    key: "batch",
-    props: {
-      onClick: () =>
-        openBatchList(
-          displayData.value,
-          isLocalPlaylist.value,
-          isUserPlaylist.value ? playlistId.value : undefined,
-        ),
-    },
-    icon: renderIcon("Batch"),
-  },
-  {
-    label: "复制分享链接",
-    key: "copy",
-    show: !isLocalPlaylist.value,
-    props: {
-      onClick: () =>
-        copyData(
-          `https://music.163.com/#/playlist?id=${playlistId.value}`,
-          "已复制分享链接到剪贴板",
-        ),
-    },
-    icon: renderIcon("Share"),
-  },
-  {
-    label: "打开源页面",
-    key: "open",
-    show: !isLocalPlaylist.value,
-    props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/playlist?id=${playlistId.value}`);
+const moreOptions = computed<DropdownOption[]>(() => {
+  // 第三方平台歌单：仅保留刷新与批量操作，其余为网易云专有写操作
+  if (isPlatformSource.value) {
+    return [
+      {
+        label: "刷新缓存",
+        key: "refresh",
+        props: {
+          onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
+        },
+        icon: renderIcon("Refresh"),
       },
+      {
+        label: "批量操作",
+        key: "batch",
+        props: {
+          onClick: () => openBatchList(displayData.value, false),
+        },
+        icon: renderIcon("Batch"),
+      },
+    ];
+  }
+  return [
+    {
+      label: "刷新缓存",
+      key: "refresh",
+      show: !isLocalPlaylist.value,
+      props: {
+        onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
+      },
+      icon: renderIcon("Refresh"),
     },
-    icon: renderIcon("Link"),
-  },
-]);
+    {
+      label: "公开隐私歌单",
+      key: "privacy",
+      show: !isLocalPlaylist.value && detailData.value?.privacy === 10,
+      props: { onClick: openPrivacy },
+      icon: renderIcon("ListLockOpen"),
+    },
+    {
+      label: "删除歌单",
+      key: "delete",
+      show: isUserPlaylist.value,
+      props: {
+        onClick: () => toDeletePlaylist(),
+      },
+      icon: renderIcon("Delete"),
+    },
+    {
+      label: "批量操作",
+      key: "batch",
+      props: {
+        onClick: () =>
+          openBatchList(
+            displayData.value,
+            isLocalPlaylist.value,
+            isUserPlaylist.value ? playlistId.value : undefined,
+          ),
+      },
+      icon: renderIcon("Batch"),
+    },
+    {
+      label: "复制分享链接",
+      key: "copy",
+      show: !isLocalPlaylist.value,
+      props: {
+        onClick: () =>
+          copyData(
+            `https://music.163.com/#/playlist?id=${playlistId.value}`,
+            "已复制分享链接到剪贴板",
+          ),
+      },
+      icon: renderIcon("Share"),
+    },
+    {
+      label: "打开源页面",
+      key: "open",
+      show: !isLocalPlaylist.value,
+      props: {
+        onClick: () => {
+          window.open(`https://music.163.com/#/playlist?id=${playlistId.value}`);
+        },
+      },
+      icon: renderIcon("Link"),
+    },
+  ];
+});
 
 // 获取歌单基础信息
 const getPlaylistDetail = async (
   id: number,
   options: { getList: boolean; refresh: boolean } = { getList: true, refresh: false },
+  platform: ApiPlatform | null = routePlatform.value,
 ) => {
   if (!id) return;
   // 设置当前请求的歌单 ID，用于防止竞态条件
@@ -266,6 +334,8 @@ const getPlaylistDetail = async (
   const isLocal = id.toString().length === 16;
   // 本地歌单
   if (isLocal) handleLocalPlaylist(id);
+  // 第三方平台歌单
+  else if (platform) await handlePlatformPlaylist(platform, getList);
   // 在线歌单
   else await handleOnlinePlaylist(id, getList, refresh);
 };
@@ -307,6 +377,43 @@ const handleLocalPlaylist = (id: number) => {
   setLoading(false);
 };
 
+// 获取第三方平台歌单
+const handlePlatformPlaylist = async (platform: ApiPlatform, getList: boolean) => {
+  const pageSize = 300;
+  const tracks: SongType[] = [];
+  let detail: CoverType | null = null;
+  let count = 0;
+  let page = 1;
+  try {
+    // 逐页取回曲目，行为与网易云链路一致
+    do {
+      const result = await dispatchPlaylistDetail(platform, {
+        id: platformPlaylistId.value,
+        dirId: platformDirId.value,
+        withTracks: getList,
+        page,
+        pageSize,
+      });
+      // 检查是否仍然是当前请求的歌单
+      if (currentRequestId.value !== playlistId.value) return;
+      detail = result.detail;
+      count = result.count;
+      if (getList && result.tracks.length) {
+        tracks.push(...result.tracks);
+        appendListData(result.tracks);
+      }
+      page += 1;
+      if (!getList || result.tracks.length === 0 || tracks.length >= count) break;
+    } while (page <= 50);
+    setDetailData(detail);
+    setLoading(false);
+  } catch (error) {
+    console.error("获取平台歌单失败：", error);
+    setLoading(false);
+    window.$message.error("获取歌单失败，请重试");
+  }
+};
+
 // 获取在线歌单
 const handleOnlinePlaylist = async (id: number, getList: boolean, refresh: boolean) => {
   // 1. 尝试读取缓存
@@ -324,10 +431,13 @@ const handleOnlinePlaylist = async (id: number, getList: boolean, refresh: boole
   }
 
   // 获取歌单详情
-  const detail = await playlistDetail(id);
+  const { detail: cover, privileges } = await dispatchPlaylistDetail("netease", {
+    id,
+    withTracks: false,
+  });
   // 检查是否仍然是当前请求的歌单
   if (currentRequestId.value !== id) return;
-  setDetailData(formatCoverList(detail.playlist)[0]);
+  setDetailData(cover);
   const count = detailData.value?.count || 0;
   // 不需要获取列表或无歌曲
   if (!getList || count === 0) {
@@ -335,8 +445,8 @@ const handleOnlinePlaylist = async (id: number, getList: boolean, refresh: boole
     return;
   }
   // 如果已登录且歌曲数量少于 800，直接加载所有歌曲
-  if (isLogin() === 1 && count === detail.privileges?.length && count < 800) {
-    const ids = detail.privileges.map((song: any) => song.id as number);
+  if (isLogin() === 1 && count === privileges?.length && count < 800) {
+    const ids = privileges as number[];
     const result = await songDetail(ids);
     // 检查是否仍然是当前请求的歌单
     if (currentRequestId.value !== id) return;
@@ -355,10 +465,11 @@ const handleOnlinePlaylist = async (id: number, getList: boolean, refresh: boole
 // 后台检查更新
 const backgroundCheck = async (id: number, cached: ListCacheData) => {
   try {
-    const detail = await playlistDetail(id);
+    const { detail: latestDetail } = await dispatchPlaylistDetail("netease", {
+      id,
+      withTracks: false,
+    });
     if (currentRequestId.value !== id) return;
-
-    const latestDetail = formatCoverList(detail.playlist)[0];
 
     if (checkNeedsUpdate(cached, latestDetail)) {
       console.log("Cache expired, refreshing...");
@@ -432,7 +543,8 @@ const handleTabChange = (value: "songs" | "comments") => {
 // 播放全部歌曲
 const playAllSongs = useDebounceFn(() => {
   if (!detailData.value || !listData.value?.length) return;
-  playAllSongsAction(listData.value, playlistId.value);
+  // 平台歌单不参与网易云歌单写操作，不传歌单 id
+  playAllSongsAction(listData.value, isPlatformSource.value ? undefined : playlistId.value);
 }, 300);
 
 // 加载提示
@@ -528,7 +640,10 @@ onBeforeRouteUpdate((to) => {
   const id = Number(to.query.id as string);
   if (id) {
     oldPlaylistId.value = id;
-    getPlaylistDetail(id);
+    // 路由上带平台维度时按该平台取数（平台切换即换源）
+    const platform = to.query.platform as ApiPlatform | undefined;
+    const source = platform === "qqmusic" || platform === "kugou" ? platform : null;
+    getPlaylistDetail(id, { getList: true, refresh: false }, source);
   }
 });
 

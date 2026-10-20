@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import type { ApiPlatform, PlatformProfile } from "@/types/shared";
 import { platformCall } from "@/api/platform/music";
+import { dispatchUserPlaylists, type DispatchPlaylist } from "@/api/platform/dispatch";
 
 /** 支持的音源平台（网易云走既有 ncm-api 链路，不经平台 IPC 通道） */
 export const SUPPORTED_PLATFORMS: ApiPlatform[] = ["netease", "qqmusic", "kugou"];
@@ -73,6 +74,13 @@ interface PlatformState {
   currentPlatform: ApiPlatform;
   /** 各平台账号资料 */
   platformProfiles: PlatformProfileMap;
+  /** 当前平台的歌单列表（第三方平台维护，网易云沿用既有本地缓存） */
+  playlists: {
+    /** 自建歌单 */
+    owned: DispatchPlaylist[];
+    /** 收藏（订阅）歌单 */
+    favorites: DispatchPlaylist[];
+  };
 }
 
 /**
@@ -90,6 +98,11 @@ export const usePlatformStore = defineStore("platform", {
       netease: null,
       qqmusic: null,
       kugou: null,
+    },
+    // 当前平台的歌单列表
+    playlists: {
+      owned: [],
+      favorites: [],
     },
   }),
 
@@ -121,6 +134,30 @@ export const usePlatformStore = defineStore("platform", {
       this.currentPlatform = platform;
       emitPlatformChange({ platform, previous });
       return true;
+    },
+
+    /**
+     * 刷新指定平台的歌单列表
+     *
+     * 走歌单数据源分派层；网易云的歌单列表由既有本地缓存维护，此处直接清空。
+     * @param platform 音源平台
+     * @returns 该平台的自建歌单与收藏歌单
+     */
+    async refreshPlaylists(
+      platform?: ApiPlatform,
+    ): Promise<{ owned: DispatchPlaylist[]; favorites: DispatchPlaylist[] }> {
+      const target = platform ?? this.currentPlatform;
+      if (target === "netease") {
+        this.playlists = { owned: [], favorites: [] };
+        return this.playlists;
+      }
+      try {
+        this.playlists = await dispatchUserPlaylists(target);
+      } catch (error) {
+        console.error(`获取 ${PLATFORM_META[target].name}歌单列表失败：`, error);
+        this.playlists = { owned: [], favorites: [] };
+      }
+      return this.playlists;
     },
 
     /**
@@ -162,6 +199,9 @@ export const usePlatformStore = defineStore("platform", {
       if (platform === "netease") return;
       await window.api.platformMusic.clearSession(platform);
       this.platformProfiles[platform] = null;
+      if (this.currentPlatform === platform) {
+        this.playlists = { owned: [], favorites: [] };
+      }
     },
   },
 

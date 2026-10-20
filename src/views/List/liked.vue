@@ -21,7 +21,7 @@
         :data="displayData"
         :loading="loading"
         :height="songListHeight"
-        :playListId="playlistId"
+        :playListId="listPlayListId"
         :doubleClickAction="searchData?.length ? 'add' : 'all'"
         @scroll="handleListScroll"
         @removeSong="removeSong"
@@ -42,13 +42,14 @@
 
 <script setup lang="ts">
 import type { DropdownOption, MessageReactive } from "naive-ui";
-import { SongType } from "@/types/main";
+import type { CoverType, SongType } from "@/types/main";
 import { songDetail } from "@/api/song";
-import { playlistDetail, playlistAllSongs } from "@/api/playlist";
-import { formatCoverList, formatSongsList } from "@/utils/format";
+import { playlistAllSongs } from "@/api/playlist";
+import { dispatchLikedSongs, dispatchPlaylistDetail } from "@/api/platform/dispatch";
+import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isObject, uniqBy } from "lodash-es";
-import { useDataStore } from "@/stores";
+import { useDataStore, usePlatformStore, onPlatformChange } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
 import { isLogin, updateUserLikePlaylist } from "@/utils/auth";
 import { useListDetail } from "@/composables/List/useListDetail";
@@ -58,12 +59,21 @@ import { useListActions } from "@/composables/List/useListActions";
 
 const router = useRouter();
 const dataStore = useDataStore();
+const platformStore = usePlatformStore();
 
 // 是否激活
 const isActivated = ref<boolean>(false);
 
-const { detailData, listData, loading, getSongListHeight, setDetailData, setListData, setLoading } =
-  useListDetail();
+const {
+  detailData,
+  listData,
+  loading,
+  getSongListHeight,
+  setDetailData,
+  setListData,
+  appendListData,
+  setLoading,
+} = useListDetail();
 const { searchValue, searchData, displayData, clearSearch, performSearch } =
   useListSearch(listData);
 const { listScrolling, handleListScroll, resetScroll } = useListScroll();
@@ -71,6 +81,12 @@ const { playAllSongs: playAllSongsAction } = useListActions();
 
 // 歌单 ID
 const playlistId = computed<number>(() => Number(dataStore.userLikeData.playlists?.[0]?.id) || 0);
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
+
+// 播放列表标识（平台歌单不参与网易云歌单写操作）
+const listPlayListId = computed<number>(() => (isPlatformSource.value ? 0 : playlistId.value));
 
 // 当前正在请求的歌单 ID，用于防止竞态条件
 const currentRequestId = ref<number>(0);
@@ -109,59 +125,82 @@ const playButtonText = computed(() => {
 });
 
 // 更多操作
-const moreOptions = computed<DropdownOption[]>(() => [
-  {
-    label: "刷新缓存",
-    key: "refresh",
-    props: {
-      onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
-    },
-    icon: renderIcon("Refresh"),
-  },
-  {
-    label: "编辑歌单",
-    key: "edit",
-    props: {
-      onClick: () => {
-        if (!detailData.value || !playlistId.value) return;
-        openUpdatePlaylist(playlistId.value, detailData.value, () =>
-          getPlaylistDetail(playlistId.value, { getList: false, refresh: false }),
-        );
+const moreOptions = computed<DropdownOption[]>(() => {
+  // 第三方平台：仅保留刷新与批量操作，其余为网易云专有写操作
+  if (isPlatformSource.value) {
+    return [
+      {
+        label: "刷新缓存",
+        key: "refresh",
+        props: {
+          onClick: () => getPlatformLikedSongs(true),
+        },
+        icon: renderIcon("Refresh"),
       },
-    },
-    icon: renderIcon("EditNote"),
-  },
-  {
-    label: "批量操作",
-    key: "batch",
-    props: {
-      onClick: () => openBatchList(displayData.value, false, playlistId.value),
-    },
-    icon: renderIcon("Batch"),
-  },
-  {
-    label: "复制分享链接",
-    key: "copy",
-    props: {
-      onClick: () =>
-        copyData(
-          `https://music.163.com/#/playlist?id=${playlistId.value}`,
-          "已复制分享链接到剪贴板",
-        ),
-    },
-    icon: renderIcon("Share"),
-  },
-  {
-    label: "打开源页面",
-    key: "open",
-    props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/playlist?id=${playlistId.value}`);
+      {
+        label: "批量操作",
+        key: "batch",
+        props: {
+          onClick: () => openBatchList(displayData.value, false),
+        },
+        icon: renderIcon("Batch"),
       },
+    ];
+  }
+  return [
+    {
+      label: "刷新缓存",
+      key: "refresh",
+      props: {
+        onClick: () => getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
+      },
+      icon: renderIcon("Refresh"),
     },
-    icon: renderIcon("Link"),
-  },
-]);
+    {
+      label: "编辑歌单",
+      key: "edit",
+      props: {
+        onClick: () => {
+          if (!detailData.value || !playlistId.value) return;
+          openUpdatePlaylist(playlistId.value, detailData.value, () =>
+            getPlaylistDetail(playlistId.value, { getList: false, refresh: false }),
+          );
+        },
+      },
+      icon: renderIcon("EditNote"),
+    },
+    {
+      label: "批量操作",
+      key: "batch",
+      props: {
+        onClick: () => openBatchList(displayData.value, false, playlistId.value),
+      },
+      icon: renderIcon("Batch"),
+    },
+    {
+      label: "复制分享链接",
+      key: "copy",
+      props: {
+        onClick: () =>
+          copyData(
+            `https://music.163.com/#/playlist?id=${playlistId.value}`,
+            "已复制分享链接到剪贴板",
+          ),
+      },
+      icon: renderIcon("Share"),
+    },
+    {
+      label: "打开源页面",
+      key: "open",
+      props: {
+        onClick: () => {
+          window.open(`https://music.163.com/#/playlist?id=${playlistId.value}`);
+        },
+      },
+      icon: renderIcon("Link"),
+    },
+  ];
+});
 
 // 获取歌单基础信息
 const getPlaylistDetail = async (
@@ -201,10 +240,13 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
   // 加载缓存
   loadLikedCache();
   // 获取歌单详情
-  const detail = await playlistDetail(id);
+  const { detail: cover, privileges } = await dispatchPlaylistDetail("netease", {
+    id,
+    withTracks: false,
+  });
   // 检查是否仍然是当前请求的歌单
   if (currentRequestId.value !== id) return;
-  setDetailData(formatCoverList(detail.playlist)[0]);
+  setDetailData(cover);
   // 不需要获取列表或无歌曲
   if (!getList || detailData.value?.count === 0) {
     setLoading(false);
@@ -212,7 +254,7 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
   }
   // 如果已登录且歌曲数量少于 800，直接加载所有歌曲
   if (isLogin() === 1 && (detailData.value?.count as number) < 800) {
-    const ids: number[] = detail.privileges.map((song: any) => song.id as number);
+    const ids: number[] = privileges ?? [];
     const result = await songDetail(ids);
     // 检查是否仍然是当前请求的歌单
     if (currentRequestId.value !== id) return;
@@ -228,6 +270,40 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
     dataStore.setLikeSongsList(detailData.value, listData.value);
   }
   setLoading(false);
+};
+
+// 获取第三方平台的「我喜欢的音乐」
+const getPlatformLikedSongs = async (refresh = false) => {
+  const platform = platformStore.currentPlatform;
+  const pageSize = 300;
+  const tracks: SongType[] = [];
+  let detail: CoverType | null = null;
+  let count = 0;
+  let page = 1;
+  setLoading(true);
+  clearSearch();
+  if (!refresh) resetPlaylistData(true);
+  try {
+    // 逐页取回曲目，行为与网易云链路一致
+    do {
+      const result = await dispatchLikedSongs(platform, { page, pageSize });
+      detail = result.detail;
+      count = result.count;
+      if (result.tracks.length) {
+        tracks.push(...result.tracks);
+        appendListData(result.tracks);
+      }
+      page += 1;
+      if (result.tracks.length === 0 || tracks.length >= count) break;
+    } while (page <= 50);
+    setDetailData(detail);
+    if (refresh) setListData(tracks);
+    setLoading(false);
+  } catch (error) {
+    console.error("获取平台喜欢歌曲失败：", error);
+    setLoading(false);
+    window.$message.error("获取我喜欢的音乐失败，请重试");
+  }
 };
 
 // 加载缓存
@@ -322,7 +398,8 @@ const handleSearchUpdate = (val: string) => {
 // 播放全部歌曲
 const playAllSongs = useDebounceFn(() => {
   if (!detailData.value || !listData.value?.length) return;
-  playAllSongsAction(listData.value, playlistId.value);
+  // 平台歌单不参与网易云歌单写操作，不传歌单 id
+  playAllSongsAction(listData.value, isPlatformSource.value ? undefined : playlistId.value);
 }, 300);
 
 // 加载提示
@@ -349,6 +426,9 @@ const removeSong = (ids: number[]) => {
 onActivated(async () => {
   if (!isActivated.value) {
     isActivated.value = true;
+  } else if (isPlatformSource.value) {
+    // 第三方平台：重新拉取当前平台的喜欢歌曲
+    await getPlatformLikedSongs(true);
   } else {
     // 检查是否需要更新缓存
     const needsUpdate = checkNeedsUpdate();
@@ -358,10 +438,28 @@ onActivated(async () => {
   }
 });
 
+// 平台切换后按新平台刷新喜欢歌曲
+const offPlatformChange = onPlatformChange(() => {
+  if (isPlatformSource.value) {
+    void getPlatformLikedSongs(true);
+    return;
+  }
+  void getPlaylistDetail(playlistId.value, { getList: true, refresh: true });
+});
+
 onDeactivated(() => loadingMsgShow(false));
-onUnmounted(() => loadingMsgShow(false));
+onUnmounted(() => {
+  offPlatformChange();
+  loadingMsgShow(false);
+});
 
 onMounted(async () => {
+  // 第三方平台：按当前平台取「我喜欢的音乐」
+  if (isPlatformSource.value) {
+    await getPlatformLikedSongs();
+    return;
+  }
+
   // 首先确保用户歌单数据已加载
   if (!dataStore.userLikeData.playlists?.length) {
     try {

@@ -28,7 +28,15 @@ interface OwnedPlaylistEntry {
   listenNum?: number;
   logo?: string;
   logoUrl?: string;
+  /** 歌单封面直链 */
+  picUrl?: string;
+  /** 歌单封面直链（大图） */
+  bigpicUrl?: string;
+  /** 创建者昵称 */
+  nick?: string;
+  desc?: string;
   createTime?: number;
+  updateTime?: number;
 }
 
 interface OwnedPlaylistResponse {
@@ -63,30 +71,34 @@ export const user_playlist_list: QMModule = async (_params: QMParams) => {
   const owned = list.filter((item) => item.dirType === 0 || item.dirType === undefined);
   const favorites = list.filter((item) => item.dirType === 3);
 
+  /**
+   * 归一化歌单条目
+   *
+   * 封面直链优先取 `picUrl` / `bigpicUrl`，`logo` / `logoUrl` 作为旧字段兜底。
+   * @param item - 上游歌单条目
+   * @param dirType - 目录类型
+   * @returns 归一化后的歌单条目
+   */
+  const toPlaylistEntry = (item: OwnedPlaylistEntry, dirType: number) => ({
+    tid: positiveInt(item.tid) ?? 0,
+    dirId: positiveInt(item.dirId) ?? 0,
+    dirName: item.dirName ?? "",
+    dirType,
+    songNum: item.songnum ?? item.songNum ?? 0,
+    listenNum: item.listenNum ?? 0,
+    cover: item.picUrl ?? item.bigpicUrl ?? item.logo ?? item.logoUrl ?? "",
+    creator: item.nick ?? "",
+    description: item.desc ?? "",
+    createTime: item.createTime ?? 0,
+    updateTime: item.updateTime ?? 0,
+  });
+
   return {
     code: 200,
     total: data?.total ?? list.length,
     bFinish: data?.bFinish ?? true,
-    owned: owned.map((item) => ({
-      tid: positiveInt(item.tid) ?? 0,
-      dirId: positiveInt(item.dirId) ?? 0,
-      dirName: item.dirName ?? "",
-      dirType: item.dirType ?? 0,
-      songNum: item.songnum ?? item.songNum ?? 0,
-      listenNum: item.listenNum ?? 0,
-      cover: item.logo ?? item.logoUrl ?? "",
-      createTime: item.createTime ?? 0,
-    })),
-    favorites: favorites.map((item) => ({
-      tid: positiveInt(item.tid) ?? 0,
-      dirId: positiveInt(item.dirId) ?? 0,
-      dirName: item.dirName ?? "",
-      dirType: item.dirType ?? 3,
-      songNum: item.songnum ?? item.songNum ?? 0,
-      listenNum: item.listenNum ?? 0,
-      cover: item.logo ?? item.logoUrl ?? "",
-      createTime: item.createTime ?? 0,
-    })),
+    owned: owned.map((item) => toPlaylistEntry(item, item.dirType ?? 0)),
+    favorites: favorites.map((item) => toPlaylistEntry(item, 3)),
   };
 };
 
@@ -129,6 +141,7 @@ export const user_liked_songs: QMModule = async (params: QMParams) => {
       singer?: Array<{ name?: string }>;
       album?: string;
       interval?: number;
+      pay?: Record<string, unknown>;
     }>;
     total_song_num?: number;
     hasmore?: number;
@@ -158,9 +171,14 @@ export const user_liked_songs: QMModule = async (params: QMParams) => {
       id: song.id ?? 0,
       mid: song.mid ?? "",
       name: song.name ?? "",
-      artist: (song.singer ?? []).map((s) => s.name ?? "").filter(Boolean).join(" / "),
+      artist: (song.singer ?? [])
+        .map((s) => s.name ?? "")
+        .filter(Boolean)
+        .join(" / "),
       album: song.album ?? "",
       duration: (song.interval ?? 0) * 1000,
+      // 付费标记（pay_play / price_album），渲染端据此标记不可免费播放的曲目
+      pay: song.pay ?? {},
     })),
   };
 };
@@ -246,6 +264,7 @@ export const playlist_detail: QMModule = async (params: QMParams) => {
       singer?: Array<{ name?: string }>;
       album?: string;
       interval?: number;
+      pay?: Record<string, unknown>;
     }>;
     total_song_num?: number;
     hasmore?: number;
@@ -280,9 +299,14 @@ export const playlist_detail: QMModule = async (params: QMParams) => {
       id: song.id ?? 0,
       mid: song.mid ?? "",
       name: song.name ?? "",
-      artist: (song.singer ?? []).map((s) => s.name ?? "").filter(Boolean).join(" / "),
+      artist: (song.singer ?? [])
+        .map((s) => s.name ?? "")
+        .filter(Boolean)
+        .join(" / "),
       album: song.album ?? "",
       duration: (song.interval ?? 0) * 1000,
+      // 付费标记（pay_play / price_album），渲染端据此标记不可免费播放的曲目
+      pay: song.pay ?? {},
     })),
   };
 };
@@ -364,7 +388,10 @@ export const song_detail: QMModule = async (params: QMParams) => {
     id: track.id,
     mid: track.mid ?? mid,
     name: track.name ?? track.title ?? "",
-    artist: (track.singer ?? []).map((s) => s.name ?? "").filter(Boolean).join(" / "),
+    artist: (track.singer ?? [])
+      .map((s) => s.name ?? "")
+      .filter(Boolean)
+      .join(" / "),
     album: track.album?.name ?? "",
     duration: (track.interval ?? 0) * 1000,
   };
