@@ -66,7 +66,7 @@
 
 <script setup lang="ts">
 import { searchSuggest } from "@/api/search";
-import { useStatusStore, useSettingStore } from "@/stores";
+import { onPlatformChange, useStatusStore, useSettingStore, usePlatformStore } from "@/stores";
 
 const emit = defineEmits<{
   toSearch: [key: number | string, type: string];
@@ -74,6 +74,7 @@ const emit = defineEmits<{
 
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
 
 // 搜索建议数据
 const searchSuggestData = ref<any>({});
@@ -110,6 +111,11 @@ const searchSuggestionsType = {
 // 获取搜索建议
 const getSearchSuggest = async (keywords: string) => {
   searchSuggestData.value = {};
+  // 第三方平台无搜索建议能力：降级为回车直接搜索
+  if (platformStore.currentPlatform !== "netease") {
+    nextTick(calcSearchSuggestHeights);
+    return;
+  }
   const result = await searchSuggest(keywords);
   searchSuggestData.value = result.result;
   // 计算高度
@@ -225,6 +231,16 @@ watchDebounced(
   },
   { debounce: 300 },
 );
+
+// 平台切换后清空建议数据
+const stopPlatformWatch = onPlatformChange(() => {
+  searchSuggestData.value = {};
+  nextTick(calcSearchSuggestHeights);
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
+});
 </script>
 
 <style lang="scss" scoped>

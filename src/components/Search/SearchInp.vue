@@ -51,7 +51,11 @@
             </n-button>
           </template>
           <span>
-            {{ canInstall ? "安装应用" : "当前不可安装：请重启开发服务并刷新，或用生产构建/预览模式访问" }}
+            {{
+              canInstall
+                ? "安装应用"
+                : "当前不可安装：请重启开发服务并刷新，或用生产构建/预览模式访问"
+            }}
           </span>
         </n-tooltip>
       </template>
@@ -70,7 +74,13 @@
 </template>
 
 <script setup lang="ts">
-import { useStatusStore, useDataStore, useSettingStore } from "@/stores";
+import {
+  useStatusStore,
+  useDataStore,
+  useSettingStore,
+  usePlatformStore,
+  onPlatformChange,
+} from "@/stores";
 import { searchDefault } from "@/api/search";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { songDetail } from "@/api/song";
@@ -83,6 +93,7 @@ const router = useRouter();
 const dataStore = useDataStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
 const player = usePlayerController();
 const { isDesktop } = useMobile();
 
@@ -177,6 +188,12 @@ const setSearchHistory = (keyword: string) => {
 const updatePlaceholder = async () => {
   if (!settingStore.enableSearchKeyword) {
     searchPlaceholder.value = "搜索音乐 / 视频";
+    return;
+  }
+  // 第三方平台无默认搜索词：不展示平台无关的默认词
+  if (platformStore.currentPlatform !== "netease") {
+    searchPlaceholder.value = "搜索音乐 / 视频";
+    searchRealkeyword.value = "";
     return;
   }
   try {
@@ -286,6 +303,11 @@ watch([() => settingStore.enableSearchKeyword, () => settingStore.useOnlineServi
   updatePlaceholder();
 });
 
+// 平台切换后按新平台刷新默认词
+const stopPlatformWatch = onPlatformChange(() => {
+  updatePlaceholder();
+});
+
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown);
 
@@ -317,6 +339,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
+  stopPlatformWatch();
 });
 </script>
 

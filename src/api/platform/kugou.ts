@@ -92,6 +92,10 @@ interface KgCommentResponse {
   hasMore?: boolean;
   nextCursor?: string;
   comments?: Array<Record<string, any>>;
+  /** 当前页码 */
+  page?: number;
+  /** 总页数 */
+  maxPage?: number;
   message?: string;
 }
 
@@ -331,15 +335,21 @@ export const normalizeKgComment = (raw: Record<string, any>): PlatformComment =>
 
 /**
  * 归一化酷狗评论分页
+ *
+ * 酷狗评论接口不给 `hasMore`，改用「当前页 < 总页数」判定是否还有更多。
  * @param raw 酷狗原生评论分页
  * @returns 归一化评论分页
  */
-export const normalizeKgCommentPage = (raw: KgCommentResponse): PlatformCommentPage => ({
-  comments: (raw?.comments ?? []).map(normalizeKgComment),
-  total: Number(raw?.total ?? 0),
-  more: raw?.hasMore === true,
-  cursor: raw?.nextCursor,
-});
+export const normalizeKgCommentPage = (raw: KgCommentResponse): PlatformCommentPage => {
+  const page = Number(raw?.page ?? 1);
+  const maxPage = Number(raw?.maxPage ?? 0);
+  return {
+    comments: (raw?.comments ?? []).map(normalizeKgComment),
+    total: Number(raw?.total ?? 0),
+    more: raw?.hasMore === true || (maxPage > 0 && page < maxPage),
+    cursor: raw?.nextCursor,
+  };
+};
 
 /**
  * 搜索酷狗歌曲
@@ -470,27 +480,219 @@ export const kgLyric = async (
 
 /**
  * 读取酷狗歌曲评论
- * @param song 归一化歌曲（或直接给歌曲 hash）
- * @param type 评论类型：hot 热门 / new 最新
+ *
+ * 酷狗评论接口的业务主键是 **album_audio_id** 口径的歌曲主键（即 `mixSongId`），
+ * 与播放地址 / 歌词使用的 hash 不是同一个键：传 hash 会直接 HTTP 400。
+ *
+ * 酷狗评论只有一套列表端点，没有独立的「热门评论」通道，
+ * 热门与最新共用同一端点（热门取第一页）。
+ * @param song 归一化歌曲（或直接给歌曲 mixSongId）
  * @param page 页码（从 1 开始）
  * @param limit 每页数量
- * @param cursor 游标，取上一页返回的 nextCursor
  * @returns 归一化后的评论分页
  */
 export const kgComment = async (
   song: PlatformSong | string,
-  type: "hot" | "new" = "hot",
   page = 1,
   limit = 20,
-  cursor = "",
 ): Promise<PlatformCommentPage> => {
-  const hash = typeof song === "string" ? song : (song.platformId ?? String(song.id));
+  const mixSongId = typeof song === "string" ? song : String(song.id ?? "");
   const res = await platformRequest<KgCommentResponse>(KUGOU, "comment", {
-    hash,
-    type,
+    mixsongid: mixSongId,
+    // 酷狗侧按评论对象类型选评论池，歌曲评论固定走歌曲池
+    type: "song",
     page,
     limit,
-    cursor,
   });
   return normalizeKgCommentPage(res);
+};
+
+/** 酷狗音乐搜索分类（与主进程搜索模块的 type 口径一致） */
+const KG_SEARCH_TYPE = {
+  /** 单曲 */
+  song: 0,
+  /** 专辑 */
+  album: 8,
+  /** 歌手 */
+  artist: 9,
+  /** 歌单 */
+  playlist: 2,
+} as const;
+
+/**
+ * 酷狗搜索结果条目（网易云形状）
+ *
+ * 平台原生字段按网易云 `/cloudsearch` 的条目形状重排，
+ * 渲染端再交给既有格式化函数（`formatCoverList` / `formatArtistsList`）归一。
+ */
+export interface KgSearchCoverEntry {
+  /** 条目 id */
+  id: number | string;
+  /** 名称 */
+  name: string;
+  /** 封面直链 */
+  cover: string;
+  /** 曲目数 */
+  trackCount: number;
+  /** 播放量 */
+  playCount?: number;
+  /** 创建者昵称 */
+  creator?: { nickname: string };
+  /** 简介 */
+  description?: string;
+  /** 发行时间（毫秒） */
+  publishTime?: number;
+}
+
+/** 酷狗搜索歌手条目（网易云形状） */
+export interface KgSearchArtistEntry {
+  /** 歌手 id */
+  id: number | string;
+  /** 歌手名 */
+  name: string;
+  /** 头像直链 */
+  cover: string;
+  /** 专辑数 */
+  albumSize: number;
+  /** 单曲数 */
+  musicSize: number;
+  /** 粉丝数 */
+  fans?: number;
+}
+
+/** 主进程酷狗搜索模块的分类返回 */
+interface KgSearchCategoryResponse {
+  code?: number;
+  total?: number;
+  albums?: Array<Record<string, any>>;
+  artists?: Array<Record<string, any>>;
+  playlists?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 把酷狗的秒级时间戳换算为毫秒
+ * @param value 时间戳
+ * @returns 毫秒时间戳，取不到时为 undefined
+ */
+const toPublishTime = (value: unknown): number | undefined => {
+  const time = Number(value);
+  if (!Number.isFinite(time) || time <= 0) return undefined;
+  // 上游给的是秒级时间戳，毫秒口径的数值远大于该量级
+  return time < 1e11 ? time * 1000 : time;
+};
+
+/**
+ * 归一化酷狗搜索到的专辑
+ * @param album 酷狗原生专辑条目
+ * @returns 网易云形状的专辑条目
+ */
+const normalizeKgSearchAlbum = (album: Record<string, any>): KgSearchCoverEntry => ({
+  id: album?.id ?? "",
+  name: String(album?.name ?? ""),
+  cover: fillCover(album?.cover ?? ""),
+  trackCount: Number(album?.trackCount ?? 0),
+  creator: { nickname: String(album?.artist ?? "") },
+  description: album?.intro ? String(album.intro) : undefined,
+  publishTime: toPublishTime(album?.publishTime),
+});
+
+/**
+ * 归一化酷狗搜索到的歌单
+ * @param playlist 酷狗原生歌单条目
+ * @returns 网易云形状的歌单条目
+ */
+const normalizeKgSearchPlaylist = (playlist: Record<string, any>): KgSearchCoverEntry => ({
+  id: playlist?.id ?? "",
+  name: String(playlist?.name ?? ""),
+  cover: fillCover(playlist?.cover ?? ""),
+  trackCount: Number(playlist?.trackCount ?? 0),
+  playCount: Number(playlist?.playCount ?? 0),
+  creator: { nickname: String(playlist?.creator ?? "") },
+});
+
+/**
+ * 归一化酷狗搜索到的歌手
+ * @param artist 酷狗原生歌手条目
+ * @returns 网易云形状的歌手条目
+ */
+const normalizeKgSearchArtist = (artist: Record<string, any>): KgSearchArtistEntry => ({
+  id: artist?.id ?? "",
+  name: String(artist?.name ?? ""),
+  cover: fillCover(artist?.cover ?? ""),
+  albumSize: Number(artist?.albumCount ?? 0),
+  musicSize: Number(artist?.songCount ?? 0),
+  fans: Number(artist?.fansCount ?? 0),
+});
+
+/**
+ * 搜索酷狗音乐专辑
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的专辑列表与总数
+ */
+export const kgSearchAlbums = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; albums: KgSearchCoverEntry[] }> => {
+  const res = await platformRequest<KgSearchCategoryResponse>(KUGOU, "search", {
+    keywords,
+    page,
+    limit,
+    type: KG_SEARCH_TYPE.album,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    albums: (res?.albums ?? []).map(normalizeKgSearchAlbum),
+  };
+};
+
+/**
+ * 搜索酷狗音乐歌手
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的歌手列表与总数
+ */
+export const kgSearchArtists = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; artists: KgSearchArtistEntry[] }> => {
+  const res = await platformRequest<KgSearchCategoryResponse>(KUGOU, "search", {
+    keywords,
+    page,
+    limit,
+    type: KG_SEARCH_TYPE.artist,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    artists: (res?.artists ?? []).map(normalizeKgSearchArtist),
+  };
+};
+
+/**
+ * 搜索酷狗音乐歌单
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的歌单列表与总数
+ */
+export const kgSearchPlaylists = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; playlists: KgSearchCoverEntry[] }> => {
+  const res = await platformRequest<KgSearchCategoryResponse>(KUGOU, "search", {
+    keywords,
+    page,
+    limit,
+    type: KG_SEARCH_TYPE.playlist,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    playlists: (res?.playlists ?? []).map(normalizeKgSearchPlaylist),
+  };
 };

@@ -1,28 +1,62 @@
 /**
- * 歌单数据源分派层
+ * 数据源分派层
  *
- * 页面层只认「当前平台」这一个维度：歌单列表、歌单详情、喜欢歌曲列表
- * 三组数据都从这里取，分派层内部按平台走各自的数据源：
+ * 页面层只认「当前平台」这一个维度：歌单列表、歌单详情、喜欢歌曲列表、
+ * 搜索结果、歌曲评论五组数据都从这里取，分派层内部按平台走各自的数据源：
  *
- * - 网易云：直调既有网易云封装（`src/api/user.ts` / `src/api/playlist.ts` / `src/api/song.ts`），
+ * - 网易云：直调既有网易云封装（`src/api/user.ts` / `src/api/playlist.ts` /
+ *   `src/api/song.ts` / `src/api/search.ts` / `src/api/comment.ts`），
  *   返回结构与原链路完全一致，页面行为零变化；
  * - QQ 音乐 / 酷狗：走 `src/api/platform/{qqmusic,kugou}.ts` 的平台数据层，
  *   平台原生字段已在该层归一成网易云字段形状。
  *
  * 归一化口径（页面层只按网易云口径取字段）：
  * - 歌单头部 → `CoverType`（`id` / `name` / `cover` / `count` / `creator` …）；
- * - 曲目 → `SongType`（`id` / `name` / `artists` / `album` / `duration` / `free` / `platform` / `platformId`）。
+ * - 曲目 → `SongType`（`id` / `name` / `artists` / `album` / `duration` / `free` / `platform` / `platformId`）；
+ * - 搜索结果 → 歌曲 `SongType` / 歌单与专辑 `CoverType` / 歌手 `ArtistType`；
+ * - 评论 → `CommentType`（`id` / `content` / `time` / `likedCount` / `user`）。
  */
 
 import { userPlaylist } from "@/api/user";
 import { playlistAllSongs, playlistDetail } from "@/api/playlist";
 import { songDetail } from "@/api/song";
-import { formatCoverList, formatSongsList } from "@/utils/format";
+import { searchHot, searchResult, SearchTypes } from "@/api/search";
+import { getComment, getHotComment } from "@/api/comment";
+import {
+  formatArtistsList,
+  formatCommentList,
+  formatCoverList,
+  formatSongsList,
+} from "@/utils/format";
 import type { ApiPlatform } from "@/types/shared";
-import type { CoverSize, CoverType, SongType } from "@/types/main";
-import { kgFindLikedPlaylist, kgPlaylistDetail, kgUserPlaylistList } from "./kugou";
-import { qqPlaylistDetailPage, qqUserLikedSongs, qqUserPlaylistList } from "./qqmusic";
-import { toSongType, type PlatformPlaylist } from "./types";
+import type { ArtistType, CommentType, CoverSize, CoverType, SongType } from "@/types/main";
+import {
+  kgComment,
+  kgFindLikedPlaylist,
+  kgPlaylistDetail,
+  kgSearch,
+  kgSearchAlbums,
+  kgSearchArtists,
+  kgSearchPlaylists,
+  kgUserPlaylistList,
+} from "./kugou";
+import {
+  qqComment,
+  qqHotSearch,
+  qqPlaylistDetailPage,
+  qqSearch,
+  qqSearchAlbums,
+  qqSearchArtists,
+  qqSearchPlaylists,
+  qqUserLikedSongs,
+  qqUserPlaylistList,
+} from "./qqmusic";
+import {
+  toSongType,
+  type PlatformComment,
+  type PlatformCommentPage,
+  type PlatformPlaylist,
+} from "./types";
 
 /** 网易云歌单详情单页曲目数 */
 const NETEASE_PAGE_SIZE = 500;
@@ -528,4 +562,471 @@ export const dispatchLikedSongs = async (
     page,
     pageSize,
   };
+};
+
+/** 搜索结果分类 */
+export type DispatchSearchCategory = "song" | "playlist" | "album" | "artist";
+
+/** 分派层搜索结果（网易云形状） */
+export interface DispatchSearchResult {
+  /** 结果总数 */
+  total: number;
+  /** 是否还有更多 */
+  hasMore: boolean;
+  /** 歌曲结果 */
+  songs: SongType[];
+  /** 歌单结果 */
+  playlists: CoverType[];
+  /** 专辑结果 */
+  albums: CoverType[];
+  /** 歌手结果 */
+  artists: ArtistType[];
+}
+
+/** 搜索读取参数 */
+export interface DispatchSearchOptions {
+  /** 搜索关键词 */
+  keyword: string;
+  /** 结果分类 */
+  category: DispatchSearchCategory;
+  /** 页码（从 1 开始） */
+  page?: number;
+  /** 每页数量 */
+  limit?: number;
+}
+
+/** 网易云搜索分类 → `/cloudsearch` 的 type 口径 */
+const NETEASE_SEARCH_TYPE: Record<DispatchSearchCategory, SearchTypes> = {
+  song: SearchTypes.Single,
+  playlist: SearchTypes.Playlist,
+  album: SearchTypes.Album,
+  artist: SearchTypes.Artist,
+};
+
+/** 第三方平台搜索默认每页数量 */
+const DEFAULT_SEARCH_LIMIT = 50;
+
+/**
+ * 读取网易云搜索结果
+ *
+ * 直调既有 `/cloudsearch` 封装：偏移量按 `(页码 - 1) × 每页数量` 计算，
+ * 与原页面逐页累加偏移量的口径完全一致。
+ * @param options 搜索参数
+ * @returns 归一化后的搜索结果
+ */
+const fetchNeteaseSearchResult = async (
+  options: DispatchSearchOptions,
+): Promise<DispatchSearchResult> => {
+  const page = options.page ?? 1;
+  const limit = options.limit ?? DEFAULT_SEARCH_LIMIT;
+  const offset = (page - 1) * limit;
+  const res = await searchResult(
+    options.keyword,
+    limit,
+    offset,
+    NETEASE_SEARCH_TYPE[options.category],
+  );
+  const result = res.result;
+  const empty: DispatchSearchResult = {
+    total: 0,
+    hasMore: false,
+    songs: [],
+    playlists: [],
+    albums: [],
+    artists: [],
+  };
+
+  if (options.category === "song") {
+    const songs = formatSongsList(result?.songs);
+    const total = Number(result?.songCount ?? 0);
+    return {
+      ...empty,
+      total,
+      hasMore: result?.hasMore === true || total > offset + limit,
+      songs,
+    };
+  }
+  if (options.category === "playlist") {
+    const playlists = formatCoverList(result?.playlists);
+    const total = Number(result?.playlistCount ?? 0);
+    return {
+      ...empty,
+      total,
+      hasMore: result?.hasMore === true || total > offset + limit,
+      playlists,
+    };
+  }
+  if (options.category === "album") {
+    const albums = formatCoverList(result?.albums);
+    const total = Number(result?.albumCount ?? 0);
+    return {
+      ...empty,
+      total,
+      hasMore: result?.hasMore === true || total > offset + limit,
+      albums,
+    };
+  }
+  const artists = formatArtistsList(result?.artists);
+  const total = Number(result?.artistCount ?? 0);
+  return {
+    ...empty,
+    total,
+    hasMore: result?.hasMore === true || total > offset + limit,
+    artists,
+  };
+};
+
+/**
+ * 读取当前平台的搜索结果
+ *
+ * 网易云一次 `/cloudsearch` 返回多类型结果；第三方平台的搜索模块按分类逐次请求，
+ * 每次只返回该分类的结果。
+ * @param platform 音源平台
+ * @param options 搜索参数
+ * @returns 归一化后的搜索结果
+ */
+export const dispatchSearch = async (
+  platform: ApiPlatform,
+  options: DispatchSearchOptions,
+): Promise<DispatchSearchResult> => {
+  const page = options.page ?? 1;
+  const limit = options.limit ?? DEFAULT_SEARCH_LIMIT;
+  const empty: DispatchSearchResult = {
+    total: 0,
+    hasMore: false,
+    songs: [],
+    playlists: [],
+    albums: [],
+    artists: [],
+  };
+
+  if (platform === "netease") {
+    return fetchNeteaseSearchResult({ ...options, page, limit });
+  }
+
+  const hasMore = (total: number): boolean => page * limit < total;
+
+  if (platform === "qqmusic") {
+    if (options.category === "song") {
+      const res = await qqSearch(options.keyword, page, limit);
+      return {
+        ...empty,
+        total: res.total,
+        hasMore: hasMore(res.total),
+        songs: res.songs.map(toSongType),
+      };
+    }
+    if (options.category === "playlist") {
+      const res = await qqSearchPlaylists(options.keyword, page, limit);
+      return {
+        ...empty,
+        total: res.total,
+        hasMore: hasMore(res.total),
+        playlists: formatCoverList(res.playlists),
+      };
+    }
+    if (options.category === "album") {
+      const res = await qqSearchAlbums(options.keyword, page, limit);
+      return {
+        ...empty,
+        total: res.total,
+        hasMore: hasMore(res.total),
+        albums: formatCoverList(res.albums),
+      };
+    }
+    const res = await qqSearchArtists(options.keyword, page, limit);
+    return {
+      ...empty,
+      total: res.total,
+      hasMore: hasMore(res.total),
+      artists: formatArtistsList(res.artists),
+    };
+  }
+
+  if (options.category === "song") {
+    const res = await kgSearch(options.keyword, page, limit);
+    return {
+      ...empty,
+      total: res.total,
+      hasMore: hasMore(res.total),
+      songs: res.songs.map(toSongType),
+    };
+  }
+  if (options.category === "playlist") {
+    const res = await kgSearchPlaylists(options.keyword, page, limit);
+    return {
+      ...empty,
+      total: res.total,
+      hasMore: hasMore(res.total),
+      playlists: formatCoverList(res.playlists),
+    };
+  }
+  if (options.category === "album") {
+    const res = await kgSearchAlbums(options.keyword, page, limit);
+    return {
+      ...empty,
+      total: res.total,
+      hasMore: hasMore(res.total),
+      albums: formatCoverList(res.albums),
+    };
+  }
+  const res = await kgSearchArtists(options.keyword, page, limit);
+  return {
+    ...empty,
+    total: res.total,
+    hasMore: hasMore(res.total),
+    artists: formatArtistsList(res.artists),
+  };
+};
+
+/** 热搜条目（网易云形状） */
+export interface DispatchHotSearchItem {
+  /** 热搜词 */
+  searchWord: string;
+  /** 热度分 */
+  score: number;
+  /** 热搜描述 */
+  content: string;
+  /** 图标地址 */
+  iconUrl?: string;
+  /** 图标类型：1 HOT / 其他 UP */
+  iconType?: number;
+}
+
+/**
+ * 读取当前平台的热搜榜
+ *
+ * 网易云走 `/search/hot/detail`；QQ 音乐走平台热搜模块；
+ * 酷狗没有热搜模块，返回空列表（页面退化为只显示最近搜索）。
+ * @param platform 音源平台
+ * @returns 归一化后的热搜条目
+ */
+export const dispatchHotSearch = async (
+  platform: ApiPlatform,
+): Promise<DispatchHotSearchItem[]> => {
+  if (platform === "netease") {
+    const res = await searchHot();
+    return (res.data ?? []).map((item: Record<string, any>) => ({
+      searchWord: item?.searchWord ?? "",
+      score: Number(item?.score ?? 0),
+      content: item?.content ?? "",
+      iconUrl: item?.iconUrl,
+      iconType: item?.iconType,
+    }));
+  }
+
+  if (platform === "qqmusic") {
+    const res = await qqHotSearch();
+    return res.list.map((item) => ({
+      searchWord: item.keyword,
+      score: item.score,
+      content: item.description,
+    }));
+  }
+
+  return [];
+};
+
+/** 分派层评论分页 */
+export interface DispatchCommentPage {
+  /** 评论列表 */
+  comments: CommentType[];
+  /** 评论总数 */
+  total: number;
+  /** 是否还有更多 */
+  hasMore: boolean;
+  /** 下一页游标（网易云为时间戳，平台为平台游标） */
+  cursor?: number | string;
+}
+
+/** 评论读取参数 */
+export interface DispatchCommentOptions {
+  /** 资源 id（网易云为数字 id，平台为平台数字 id） */
+  id: number | string;
+  /** 平台内字符串主键（QQ 音乐 mid；酷狗评论用数字 id，不取该字段） */
+  platformId?: string;
+  /** 资源类型（网易云口径）：0 歌曲 / 1 mv / 2 歌单 / 3 专辑 / 4 电台节目 / 5 视频 / 6 动态 / 7 电台 */
+  type?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  /** 页码（从 1 开始） */
+  page?: number;
+  /** 每页数量 */
+  pageSize?: number;
+  /** 排序方式：1 推荐 / 2 热度 / 3 时间 */
+  sortType?: 1 | 2 | 3;
+  /** 游标（翻页用） */
+  cursor?: number | string;
+}
+
+/**
+ * 把平台标识映射为稳定的数字 id
+ *
+ * 平台评论 / 用户 id 可能是非数字字符串（如 QQ 音乐的 `1!xxx`），
+ * 而应用内评论模型的 id 是数字：能直接转数字时按原值取，
+ * 转不了时用 FNV-1a 散列成 32 位正整数，
+ * 保证「同一条评论恒得同一个 id、不同评论不撞 id」。
+ * @param value 平台原始 id
+ * @returns 数字 id
+ */
+const toNumericId = (value: number | string | undefined): number => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const text = String(value ?? "");
+  if (!text) return 0;
+  if (/^\d+$/.test(text)) return Number(text);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash || 1;
+};
+
+/**
+ * 把平台评论条目转为应用内评论模型
+ * @param comment 平台归一化评论
+ * @returns 应用内评论模型
+ */
+const toCommentType = (comment: PlatformComment): CommentType => ({
+  id: toNumericId(comment.id),
+  content: comment.content,
+  time: comment.time,
+  liked: comment.liked,
+  likedCount: comment.likedCount,
+  user: {
+    id: toNumericId(comment.user?.id),
+    name: comment.user?.name ?? "",
+    avatarUrl: comment.user?.avatarUrl ?? "",
+  },
+  beReplied: comment.beReplied
+    ? {
+        content: comment.beReplied.content,
+        user: {
+          id: toNumericId(comment.beReplied.user?.id),
+          name: comment.beReplied.user?.name ?? "",
+          avatarUrl: comment.beReplied.user?.avatarUrl ?? "",
+        },
+      }
+    : undefined,
+});
+
+/**
+ * 把平台评论分页转为分派层评论分页
+ * @param page 平台归一化评论分页
+ * @returns 分派层评论分页
+ */
+const fromPlatformCommentPage = (page: PlatformCommentPage): DispatchCommentPage => ({
+  comments: page.comments.map(toCommentType),
+  total: page.total,
+  hasMore: page.more,
+  cursor: page.cursor,
+});
+
+/**
+ * 读取网易云评论列表
+ *
+ * 直调既有 `/comment/new` 封装，游标口径与原页面一致（上一页最后一条的时间戳）。
+ * @param options 评论参数
+ * @returns 评论分页
+ */
+const fetchNeteaseComments = async (
+  options: DispatchCommentOptions,
+): Promise<DispatchCommentPage> => {
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? 20;
+  const sortType = options.sortType ?? 3;
+  const cursor = typeof options.cursor === "number" ? options.cursor : undefined;
+  const res = await getComment(
+    Number(options.id),
+    options.type ?? 0,
+    page,
+    pageSize,
+    sortType,
+    cursor,
+  );
+  const comments = formatCommentList(res.data?.comments);
+  const last = comments[comments.length - 1];
+  return {
+    comments,
+    total: Number(res.data?.total ?? comments.length),
+    hasMore: res.data?.hasMore === true,
+    cursor: last?.time,
+  };
+};
+
+/**
+ * 读取网易云热门评论
+ * @param options 评论参数
+ * @returns 评论分页
+ */
+const fetchNeteaseHotComments = async (
+  options: DispatchCommentOptions,
+): Promise<DispatchCommentPage> => {
+  const res = await getHotComment(Number(options.id), options.type ?? 0, options.pageSize ?? 20, 0);
+  const comments = formatCommentList(res.hotComments);
+  return {
+    comments,
+    total: Number(res.total ?? comments.length),
+    hasMore: res.hasMore === true,
+  };
+};
+
+/**
+ * 读取当前平台的评论列表
+ *
+ * 网易云走 `/comment/new`；QQ 音乐按「时间 / 热门」两套通道取；
+ * 酷狗只有一套评论端点，热门与最新共用第一页。
+ * @param platform 音源平台
+ * @param options 评论参数
+ * @returns 评论分页
+ */
+export const dispatchComments = async (
+  platform: ApiPlatform,
+  options: DispatchCommentOptions,
+): Promise<DispatchCommentPage> => {
+  if (platform === "netease") {
+    return fetchNeteaseComments(options);
+  }
+
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? 20;
+  // 网易云的「全部评论」按时间排序（sortType=3），平台侧对应「最新」通道
+  const commentType = (options.sortType ?? 3) === 3 ? "new" : "hot";
+
+  if (platform === "qqmusic") {
+    // QQ 音乐评论的业务主键是歌曲 mid（主进程可由 mid 换算出数字歌曲 id）
+    const key = options.platformId || String(options.id);
+    const cursor = typeof options.cursor === "string" ? options.cursor : "";
+    const res = await qqComment(key, commentType, page, pageSize, cursor);
+    return fromPlatformCommentPage(res);
+  }
+
+  // 酷狗评论的业务主键是 album_audio_id 口径的歌曲主键（即数字 id）
+  const res = await kgComment(String(options.id), page, pageSize);
+  return fromPlatformCommentPage(res);
+};
+
+/**
+ * 读取当前平台的热门评论
+ *
+ * 网易云走 `/comment/hot`；QQ 音乐走热门评论通道；
+ * 酷狗没有独立热门通道，复用评论列表第一页。
+ * @param platform 音源平台
+ * @param options 评论参数
+ * @returns 评论分页
+ */
+export const dispatchHotComments = async (
+  platform: ApiPlatform,
+  options: DispatchCommentOptions,
+): Promise<DispatchCommentPage> => {
+  if (platform === "netease") {
+    return fetchNeteaseHotComments(options);
+  }
+
+  if (platform === "qqmusic") {
+    const key = options.platformId || String(options.id);
+    const res = await qqComment(key, "hot", 1, options.pageSize ?? 20, "");
+    return fromPlatformCommentPage(res);
+  }
+
+  const res = await kgComment(String(options.id), 1, options.pageSize ?? 20);
+  return fromPlatformCommentPage(res);
 };

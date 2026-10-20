@@ -61,9 +61,15 @@
 </template>
 
 <script setup lang="ts">
-import { searchHot } from "@/api/search";
+import { dispatchHotSearch } from "@/api/platform/dispatch";
 import { getCacheData } from "@/utils/cache";
-import { useSettingStore, useStatusStore, useDataStore } from "@/stores";
+import {
+  onPlatformChange,
+  useSettingStore,
+  useStatusStore,
+  useDataStore,
+  usePlatformStore,
+} from "@/stores";
 
 interface SearchHotItem {
   searchWord: string;
@@ -80,6 +86,7 @@ const emit = defineEmits<{
 const dataStore = useDataStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
 
 const searchHotData = ref<SearchHotItem[]>([]);
 
@@ -107,11 +114,14 @@ const isShowHotSearch = computed(() => {
 // 获取热搜数据
 const getSearchHotData = async () => {
   if (!settingStore.useOnlineService || !settingStore.showHotSearch) return;
-  const result = await getCacheData(searchHot, {
-    key: "searchHotData",
+  const platform = platformStore.currentPlatform;
+  // 网易云沿用既有缓存键，其余平台按平台隔离缓存
+  const cacheKey = platform === "netease" ? "searchHotData" : `searchHotData-${platform}`;
+  const result = await getCacheData(() => dispatchHotSearch(platform), {
+    key: cacheKey,
     time: 10,
   });
-  searchHotData.value = result.data;
+  searchHotData.value = result ?? [];
 };
 
 // 删除搜索历史
@@ -129,6 +139,15 @@ const deleteSearchHistory = () => {
 
 onMounted(() => {
   getSearchHotData();
+});
+
+// 平台切换后按新平台重新取热搜
+const stopPlatformWatch = onPlatformChange(() => {
+  getSearchHotData();
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
 });
 </script>
 

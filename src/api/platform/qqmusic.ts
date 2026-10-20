@@ -572,3 +572,218 @@ export const qqUserLikedSongs = async (
   });
   return normalizeQqLikedSongs(res);
 };
+
+/** QQ 音乐搜索分类（与主进程搜索模块的 type 口径一致） */
+const QQ_SEARCH_TYPE = {
+  /** 单曲 */
+  song: 0,
+  /** 专辑 */
+  album: 8,
+  /** 歌手 */
+  artist: 9,
+  /** 歌单 */
+  playlist: 2,
+} as const;
+
+/**
+ * QQ 搜索结果条目（网易云形状）
+ *
+ * 平台原生字段按网易云 `/cloudsearch` 的条目形状重排，
+ * 渲染端再交给既有格式化函数（`formatCoverList` / `formatArtistsList`）归一。
+ */
+export interface QqSearchCoverEntry {
+  /** 条目 id */
+  id: number | string;
+  /** 名称 */
+  name: string;
+  /** 封面直链 */
+  cover: string;
+  /** 曲目数 */
+  trackCount: number;
+  /** 播放量 */
+  playCount?: number;
+  /** 创建者昵称 */
+  creator?: { nickname: string };
+  /** 简介 */
+  description?: string;
+  /** 发行时间（毫秒） */
+  publishTime?: number;
+}
+
+/** QQ 搜索歌手条目（网易云形状） */
+export interface QqSearchArtistEntry {
+  /** 歌手 id（QQ 为 mid 字符串） */
+  id: number | string;
+  /** 歌手名 */
+  name: string;
+  /** 头像直链 */
+  cover: string;
+  /** 专辑数 */
+  albumSize: number;
+  /** 单曲数 */
+  musicSize: number;
+  /** 粉丝数 */
+  fans?: number;
+}
+
+/** QQ 热搜条目 */
+export interface QqHotSearchEntry {
+  /** 排名 */
+  rank: number;
+  /** 热搜词 */
+  keyword: string;
+  /** 热度分 */
+  score: number;
+  /** 封面直链 */
+  cover: string;
+  /** 描述 */
+  description: string;
+}
+
+/** 主进程 QQ 搜索模块的分类返回 */
+interface QqSearchCategoryResponse {
+  code?: number;
+  total?: number;
+  albums?: Array<Record<string, any>>;
+  artists?: Array<Record<string, any>>;
+  playlists?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程 QQ 热搜模块的原生返回 */
+interface QqHotSearchResponse {
+  code?: number;
+  total?: number;
+  list?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 归一化 QQ 搜索到的专辑
+ * @param album QQ 原生专辑条目
+ * @returns 网易云形状的专辑条目
+ */
+const normalizeQqSearchAlbum = (album: Record<string, any>): QqSearchCoverEntry => ({
+  id: album?.albumId || album?.id || "",
+  name: String(album?.name ?? ""),
+  cover: secureUrl(album?.cover ?? ""),
+  trackCount: Number(album?.trackCount ?? 0),
+  creator: { nickname: String(album?.artist ?? "") },
+});
+
+/**
+ * 归一化 QQ 搜索到的歌单
+ * @param playlist QQ 原生歌单条目
+ * @returns 网易云形状的歌单条目
+ */
+const normalizeQqSearchPlaylist = (playlist: Record<string, any>): QqSearchCoverEntry => ({
+  id: playlist?.id ?? "",
+  name: String(playlist?.name ?? ""),
+  cover: secureUrl(playlist?.cover ?? ""),
+  trackCount: Number(playlist?.trackCount ?? 0),
+  playCount: Number(playlist?.playCount ?? 0),
+  creator: { nickname: String(playlist?.creator ?? "") },
+});
+
+/**
+ * 归一化 QQ 搜索到的歌手
+ * @param artist QQ 原生歌手条目
+ * @returns 网易云形状的歌手条目
+ */
+const normalizeQqSearchArtist = (artist: Record<string, any>): QqSearchArtistEntry => ({
+  id: artist?.id ?? "",
+  name: String(artist?.name ?? ""),
+  cover: secureUrl(artist?.cover ?? ""),
+  albumSize: Number(artist?.albumCount ?? 0),
+  musicSize: Number(artist?.songCount ?? 0),
+});
+
+/**
+ * 搜索 QQ 音乐专辑
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的专辑列表与总数
+ */
+export const qqSearchAlbums = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; albums: QqSearchCoverEntry[] }> => {
+  const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
+    keywords,
+    page,
+    limit,
+    type: QQ_SEARCH_TYPE.album,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    albums: (res?.albums ?? []).map(normalizeQqSearchAlbum),
+  };
+};
+
+/**
+ * 搜索 QQ 音乐歌手
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的歌手列表与总数
+ */
+export const qqSearchArtists = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; artists: QqSearchArtistEntry[] }> => {
+  const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
+    keywords,
+    page,
+    limit,
+    type: QQ_SEARCH_TYPE.artist,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    artists: (res?.artists ?? []).map(normalizeQqSearchArtist),
+  };
+};
+
+/**
+ * 搜索 QQ 音乐歌单
+ * @param keywords 搜索关键词
+ * @param page 页码（从 1 开始）
+ * @param limit 每页数量
+ * @returns 归一化后的歌单列表与总数
+ */
+export const qqSearchPlaylists = async (
+  keywords: string,
+  page = 1,
+  limit = 30,
+): Promise<{ total: number; playlists: QqSearchCoverEntry[] }> => {
+  const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
+    keywords,
+    page,
+    limit,
+    type: QQ_SEARCH_TYPE.playlist,
+  });
+  return {
+    total: Number(res?.total ?? 0),
+    playlists: (res?.playlists ?? []).map(normalizeQqSearchPlaylist),
+  };
+};
+
+/**
+ * 读取 QQ 音乐站内热搜榜
+ * @returns 归一化后的热搜条目与总数
+ */
+export const qqHotSearch = async (): Promise<{ total: number; list: QqHotSearchEntry[] }> => {
+  const res = await platformRequest<QqHotSearchResponse>(QQ_MUSIC, "hot_search");
+  return {
+    total: Number(res?.total ?? 0),
+    list: (res?.list ?? []).map((item) => ({
+      rank: Number(item?.rank ?? 0),
+      keyword: String(item?.keyword ?? ""),
+      score: Number(item?.score ?? 0),
+      cover: secureUrl(item?.cover ?? ""),
+      description: String(item?.description ?? ""),
+    })),
+  };
+};
