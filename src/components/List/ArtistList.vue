@@ -9,7 +9,13 @@
           @click="
             router.push({
               name: 'artist',
-              query: { id: item.id },
+              query: {
+                // 第三方平台条目以平台主键定位，网易云条目保持原样
+                id: item.platformId ?? item.id,
+                ...(item.platform && item.platform !== 'netease'
+                  ? { platform: item.platform }
+                  : {}),
+              },
             })
           "
         >

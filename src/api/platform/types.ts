@@ -21,7 +21,14 @@
  */
 
 import type { ApiPlatform } from "@/types/shared";
-import { QualityType, type CoverSize, type MetaData, type SongType } from "@/types/main";
+import {
+  QualityType,
+  type ArtistType,
+  type CoverSize,
+  type CoverType,
+  type MetaData,
+  type SongType,
+} from "@/types/main";
 
 /** 归一化后的歌手（网易云形状） */
 export interface PlatformArtist {
@@ -35,10 +42,103 @@ export interface PlatformArtist {
   mid?: string;
 }
 
+/** 归一化后的歌手详情 */
+export interface PlatformArtistDetail {
+  /** 歌手数字 ID（平台侧给出的数值主键，取不到时为 0） */
+  id: number;
+  /** 平台内字符串主键（QQ 音乐 mid / 酷狗 author_id） */
+  platformId: string;
+  /** 来源平台 */
+  platform: ApiPlatform;
+  /** 歌手名 */
+  name: string;
+  /** 头像地址 */
+  cover: string;
+  /** 封面尺寸 */
+  coverSize?: CoverSize;
+  /** 单曲数 */
+  musicSize: number;
+  /** 专辑数 */
+  albumSize: number;
+  /** MV 数 */
+  mvSize: number;
+  /** 粉丝数 */
+  fansSize: number;
+  /** 歌手简介 */
+  description: string;
+}
+
+/** 归一化后的专辑详情 */
+export interface PlatformAlbumDetail {
+  /** 专辑 ID */
+  id: number | string;
+  /** 平台内字符串主键（QQ 音乐 mid / 酷狗 album_id） */
+  platformId: string;
+  /** 专辑名 */
+  name: string;
+  /** 专辑封面 */
+  cover: string;
+  /** 封面尺寸 */
+  coverSize?: CoverSize;
+  /** 专辑歌手名 */
+  artist: string;
+  /** 曲目数 */
+  count: number;
+  /** 发行时间（毫秒） */
+  publishTime?: number;
+  /** 专辑简介 */
+  description?: string;
+}
+
+/**
+ * 归一化后的封面条目
+ *
+ * 歌单 / 专辑 / 榜单卡片共用的条目形状，字段与网易云 `CoverType` 对齐，
+ * 额外带上平台维度，便于详情页选择数据源。
+ */
+export interface PlatformCoverEntry {
+  /** 条目 ID */
+  id: number | string;
+  /** 平台内字符串主键 */
+  platformId?: string;
+  /** 条目名 */
+  name: string;
+  /** 封面直链 */
+  cover: string;
+  /** 曲目数 */
+  count?: number;
+  /** 播放量 */
+  playCount?: number;
+  /** 创建者昵称 */
+  creatorName?: string;
+  /** 简介 */
+  description?: string;
+  /** 发行 / 创建时间（毫秒） */
+  publishTime?: number;
+  /** 来源平台 */
+  platform: ApiPlatform;
+}
+
+/** 归一化后的榜单 */
+export interface PlatformLeaderboard {
+  /** 榜单名 */
+  title: string;
+  /** 榜单副标题 */
+  subTitle: string;
+  /** 榜单封面 */
+  cover: string;
+  /** 榜单曲目总数 */
+  total: number;
+  /** 榜单歌曲 */
+  songs: PlatformSong[];
+}
+
 /** 归一化后的专辑（网易云形状） */
 export interface PlatformAlbum {
   /** 专辑 ID */
   id: number | string;
+  /** 平台内字符串主键（QQ 音乐 mid / 酷狗 album_id） */
+  platformId?: string;
   /** 专辑名 */
   name: string;
   /** 专辑封面（网易云字段名为 picUrl） */
@@ -378,11 +478,14 @@ export const toSongType = (song: PlatformSong): SongType => ({
     id: Number(artist.id) || 0,
     name: artist.name,
     cover: artist.picUrl,
+    // QQ 音乐用 mid、酷狗用 author_id 作为歌手的平台主键
+    platformId: artist.mid ?? (artist.id !== "" ? String(artist.id) : undefined),
   })),
   album: {
     id: Number(song.album.id) || 0,
     name: song.album.name,
     cover: song.album.picUrl,
+    platformId: song.album.platformId,
   },
   cover: song.cover,
   coverSize: song.coverSize,
@@ -394,4 +497,49 @@ export const toSongType = (song: PlatformSong): SongType => ({
   type: "song",
   platform: song.platform,
   platformId: song.platformId,
+});
+
+/**
+ * 把归一化歌手详情转换为应用内歌手模型
+ *
+ * 平台维度一并带上：详情页据此选择数据源，
+ * `platformId` 是平台内主键（QQ 音乐 mid / 酷狗 author_id）。
+ * @param artist 归一化歌手详情
+ * @returns 应用内歌手模型
+ */
+export const toArtistType = (artist: PlatformArtistDetail): ArtistType => ({
+  id: artist.id,
+  name: artist.name,
+  cover: artist.cover,
+  coverSize: artist.coverSize,
+  description: artist.description,
+  albumSize: artist.albumSize,
+  musicSize: artist.musicSize,
+  mvSize: artist.mvSize,
+  fansSize: artist.fansSize,
+  platform: artist.platform,
+  platformId: artist.platformId,
+});
+
+/**
+ * 把归一化封面条目转换为应用内封面模型
+ * @param entry 归一化封面条目
+ * @returns 应用内封面模型
+ */
+export const toCoverEntry = (entry: PlatformCoverEntry): CoverType => ({
+  id: entry.id,
+  name: entry.name,
+  cover: entry.cover,
+  coverSize: buildCoverSize(entry.cover),
+  description: entry.description,
+  count: entry.count ?? 0,
+  playCount: entry.playCount,
+  creator: {
+    id: 0,
+    name: entry.creatorName ?? "",
+    avatarUrl: "",
+  },
+  createTime: entry.publishTime,
+  platform: entry.platform,
+  platformId: entry.platformId,
 });

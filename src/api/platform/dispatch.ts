@@ -31,31 +31,49 @@ import {
 import type { ApiPlatform } from "@/types/shared";
 import type { ArtistType, CommentType, CoverSize, CoverType, SongType } from "@/types/main";
 import {
+  kgAlbumDetail,
+  kgArtistDetail,
   kgComment,
   kgFindLikedPlaylist,
   kgPlaylistDetail,
+  kgPlaylistSquare,
+  kgPublicPlaylist,
   kgSearch,
   kgSearchAlbums,
   kgSearchArtists,
   kgSearchPlaylists,
   kgUserPlaylistList,
+  toKgAlbumEntry,
+  toKgArtistEntry,
+  toKgPlaylistEntry,
 } from "./kugou";
 import {
+  qqAlbumDetail,
+  qqArtistDetail,
   qqComment,
   qqHotSearch,
+  qqLeaderboard,
   qqPlaylistDetailPage,
+  qqPlaylistSquare,
+  qqPublicPlaylistDetail,
   qqSearch,
   qqSearchAlbums,
   qqSearchArtists,
   qqSearchPlaylists,
   qqUserLikedSongs,
   qqUserPlaylistList,
+  toQqAlbumEntry,
+  toQqArtistEntry,
+  toQqPlaylistEntry,
 } from "./qqmusic";
 import {
+  toArtistType,
+  toCoverEntry,
   toSongType,
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformPlaylist,
+  type PlatformPlaylistDetail,
 } from "./types";
 
 /** 网易云歌单详情单页曲目数 */
@@ -136,6 +154,13 @@ export interface DispatchDetailOptions {
   page?: number;
   /** 每页数量 */
   pageSize?: number;
+  /**
+   * 歌单范围
+   *
+   * 酷狗的账号云歌单与公开精选歌单是两套数据源，
+   * `public` 表示读公开歌单，其余按云歌单处理。
+   */
+  scope?: "cloud" | "public";
 }
 
 /** 喜欢歌曲列表读取参数 */
@@ -398,6 +423,40 @@ export const dispatchPlaylistDetail = async (
       songBegin: (page - 1) * pageSize,
       songNum: pageSize,
     });
+    // 歌单头缺失时回落到公开歌单端点：广场歌单只有该端点带歌单名与封面
+    if (!res.name) {
+      let publicRes: PlatformPlaylistDetail | null = null;
+      try {
+        publicRes = await qqPublicPlaylistDetail(options.id);
+      } catch (error) {
+        console.error("读取 QQ 公开歌单头部失败：", error);
+      }
+      if (publicRes?.name) {
+        const publicPlaylist: DispatchPlaylist = {
+          id: publicRes.id,
+          name: publicRes.name,
+          cover: publicRes.coverImgUrl,
+          coverSize: publicRes.coverSize,
+          count: publicRes.trackCount,
+          playCount: publicRes.playCount,
+          description: publicRes.description,
+          creatorName: publicRes.creator?.name,
+          createTime: publicRes.createTime,
+          platform: res.platform,
+          platformId: publicRes.platformId,
+          subscribed: false,
+        };
+        return {
+          detail: toCoverType(publicPlaylist),
+          // 曲目以登录态端点为准（公开端点不回曲目）
+          tracks: withTracks ? res.tracks.map(toSongType) : [],
+          count: publicPlaylist.count ?? 0,
+          hasMore: res.hasMore,
+          page,
+          pageSize,
+        };
+      }
+    }
     // 歌单名 / 封面 / 创建者在歌单列表里，详情接口不回，用列表补齐
     const entry = res.name ? null : await findPlaylistEntry(platform, options.id);
     const playlist: DispatchPlaylist = {
@@ -428,7 +487,27 @@ export const dispatchPlaylistDetail = async (
 
   const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
   const page = options.page ?? 1;
-  const res = await kgPlaylistDetail(options.id, page, pageSize);
+  // 酷狗公开精选歌单与账号云歌单是两套数据源，按范围分流
+  if (options.scope === "public") {
+    return dispatchPublicPlaylistDetail(options.id, page, pageSize);
+  }
+  let res: PlatformPlaylistDetail;
+  try {
+    res = await kgPlaylistDetail(options.id, page, pageSize);
+  } catch (error) {
+    // 云歌单读不到时，回落到公开精选歌单
+    console.error("读取酷狗云歌单失败，尝试公开歌单：", error);
+    return dispatchPublicPlaylistDetail(options.id, page, pageSize);
+  }
+  // 云歌单读不到曲目时，同样回落到公开精选歌单
+  if (res.tracks.length === 0 && options.withTracks !== false) {
+    try {
+      const publicRes = await dispatchPublicPlaylistDetail(options.id, page, pageSize);
+      if (publicRes.tracks.length > 0) return publicRes;
+    } catch (error) {
+      console.error("读取酷狗公开歌单失败：", error);
+    }
+  }
   const entry = await findPlaylistEntry(platform, options.id);
   const playlist: DispatchPlaylist = {
     id: res.id,
@@ -722,7 +801,7 @@ export const dispatchSearch = async (
         ...empty,
         total: res.total,
         hasMore: hasMore(res.total),
-        playlists: formatCoverList(res.playlists),
+        playlists: res.playlists.map(toQqPlaylistEntry).map(toCoverEntry),
       };
     }
     if (options.category === "album") {
@@ -731,7 +810,7 @@ export const dispatchSearch = async (
         ...empty,
         total: res.total,
         hasMore: hasMore(res.total),
-        albums: formatCoverList(res.albums),
+        albums: res.albums.map(toQqAlbumEntry).map(toCoverEntry),
       };
     }
     const res = await qqSearchArtists(options.keyword, page, limit);
@@ -739,7 +818,7 @@ export const dispatchSearch = async (
       ...empty,
       total: res.total,
       hasMore: hasMore(res.total),
-      artists: formatArtistsList(res.artists),
+      artists: res.artists.map(toQqArtistEntry).map(toArtistType),
     };
   }
 
@@ -758,7 +837,7 @@ export const dispatchSearch = async (
       ...empty,
       total: res.total,
       hasMore: hasMore(res.total),
-      playlists: formatCoverList(res.playlists),
+      playlists: res.playlists.map(toKgPlaylistEntry).map(toCoverEntry),
     };
   }
   if (options.category === "album") {
@@ -767,7 +846,7 @@ export const dispatchSearch = async (
       ...empty,
       total: res.total,
       hasMore: hasMore(res.total),
-      albums: formatCoverList(res.albums),
+      albums: res.albums.map(toKgAlbumEntry).map(toCoverEntry),
     };
   }
   const res = await kgSearchArtists(options.keyword, page, limit);
@@ -775,7 +854,7 @@ export const dispatchSearch = async (
     ...empty,
     total: res.total,
     hasMore: hasMore(res.total),
-    artists: formatArtistsList(res.artists),
+    artists: res.artists.map(toKgArtistEntry).map(toArtistType),
   };
 };
 
@@ -1029,4 +1108,316 @@ export const dispatchHotComments = async (
 
   const res = await kgComment(String(options.id), 1, options.pageSize ?? 20);
   return fromPlatformCommentPage(res);
+};
+
+/** 分派层歌手详情结果 */
+export interface DispatchArtistDetail {
+  /** 歌手详情（网易云形状 + 平台维度） */
+  detail: ArtistType;
+  /** 歌手单曲 */
+  songs: SongType[];
+  /** 歌手专辑 */
+  albums: CoverType[];
+}
+
+/** 分派层歌手详情读取参数 */
+export interface DispatchArtistOptions {
+  /** 歌手平台主键（QQ 音乐 mid / 酷狗 author_id） */
+  id: string | number;
+  /** 取回的单曲数 */
+  limit?: number;
+  /** 单曲偏移 */
+  offset?: number;
+}
+
+/**
+ * 读取当前平台的歌手详情
+ *
+ * QQ 音乐以歌手 mid 定位，酷狗以 author_id 定位；
+ * 两条链路都返回「详情头 + 单曲 + 专辑」三段数据。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 歌手详情、单曲与专辑
+ */
+export const dispatchArtistDetail = async (
+  platform: ApiPlatform,
+  options: DispatchArtistOptions,
+): Promise<DispatchArtistDetail> => {
+  if (platform === "qqmusic") {
+    const res = await qqArtistDetail(String(options.id), options.limit ?? 50, options.offset ?? 0);
+    return {
+      detail: toArtistType(res.artist),
+      songs: res.songs.map(toSongType),
+      albums: res.albums.map(toCoverEntry),
+    };
+  }
+  const res = await kgArtistDetail(options.id);
+  return {
+    detail: toArtistType(res.artist),
+    songs: res.songs.map(toSongType),
+    albums: res.albums.map(toCoverEntry),
+  };
+};
+
+/** 分派层专辑详情结果 */
+export interface DispatchAlbumDetail {
+  /** 专辑头部（网易云形状 + 平台维度） */
+  detail: CoverType;
+  /** 专辑曲目 */
+  tracks: SongType[];
+}
+
+/**
+ * 取专辑的歌手列表
+ *
+ * 平台侧的专辑详情接口只给歌手名，歌手的数字 id 与平台主键
+ * 统一从曲目条目里取，保证专辑页的歌手可跳转。
+ * @param songs 专辑曲目
+ * @returns 歌手列表
+ */
+const pickAlbumArtists = (songs: SongType[]): CoverType["artists"] => {
+  const artists = songs[0]?.artists;
+  if (!Array.isArray(artists)) return undefined;
+  return artists.map((artist) => ({
+    id: Number(artist.id) || 0,
+    name: artist.name,
+    cover: artist.cover,
+    platformId: artist.platformId,
+  }));
+};
+
+/**
+ * 读取当前平台的专辑详情
+ *
+ * 专辑以平台主键定位（QQ 音乐 album mid / 酷狗 album_id）。
+ * @param platform 音源平台
+ * @param id 专辑平台主键
+ * @returns 专辑详情与曲目
+ */
+export const dispatchAlbumDetail = async (
+  platform: ApiPlatform,
+  id: string | number,
+): Promise<DispatchAlbumDetail> => {
+  if (platform === "qqmusic") {
+    const res = await qqAlbumDetail(String(id));
+    const songs = res.songs.map(toSongType);
+    return {
+      detail: {
+        id: res.album.id,
+        name: res.album.name,
+        cover: res.album.cover,
+        coverSize: res.album.coverSize,
+        count: res.album.count,
+        description: res.album.description,
+        // 专辑歌手取自曲目条目，条目自带歌手数字 id 与平台主键
+        artists: pickAlbumArtists(songs),
+        createTime: res.album.publishTime,
+        platform: "qqmusic",
+        platformId: res.album.platformId,
+      },
+      tracks: songs,
+    };
+  }
+  const res = await kgAlbumDetail(id);
+  const songs = res.songs.map(toSongType);
+  return {
+    detail: {
+      id: res.album.id,
+      name: res.album.name,
+      cover: res.album.cover,
+      coverSize: res.album.coverSize,
+      count: res.album.count,
+      description: res.album.description,
+      artists: pickAlbumArtists(songs),
+      createTime: res.album.publishTime,
+      platform: "kugou",
+      platformId: res.album.platformId,
+    },
+    tracks: songs,
+  };
+};
+
+/** 分派层榜单结果 */
+export interface DispatchLeaderboardResult {
+  /** 榜单名 */
+  title: string;
+  /** 榜单副标题 */
+  subTitle: string;
+  /** 榜单封面 */
+  cover: string;
+  /** 榜单曲目总数 */
+  total: number;
+  /** 榜单曲目 */
+  songs: SongType[];
+}
+
+/**
+ * 读取当前平台的榜单
+ *
+ * QQ 音乐有榜单模块（缺省热歌榜）；酷狗没有榜单能力，返回空榜单。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 榜单信息与曲目
+ */
+export const dispatchLeaderboard = async (
+  platform: ApiPlatform,
+  options: { topid?: number; limit?: number; offset?: number } = {},
+): Promise<DispatchLeaderboardResult> => {
+  if (platform === "qqmusic") {
+    const res = await qqLeaderboard(options.topid ?? 26, options.limit ?? 50, options.offset ?? 0);
+    return {
+      title: res.title,
+      subTitle: res.subTitle,
+      cover: res.cover,
+      total: res.total,
+      songs: res.songs.map(toSongType),
+    };
+  }
+  return { title: "", subTitle: "", cover: "", total: 0, songs: [] };
+};
+
+/** 分派层歌单广场结果 */
+export interface DispatchSquareResult {
+  /** 广场歌单 */
+  playlists: CoverType[];
+  /** 广场歌单总数 */
+  total: number;
+  /** 是否还有更多 */
+  hasMore: boolean;
+}
+
+/**
+ * 读取当前平台的热门歌手
+ *
+ * 第三方平台没有「歌手列表」接口，改由榜单歌曲里出现的歌手聚合而成：
+ * QQ 音乐取热歌榜歌曲的歌手（条目自带 mid 与数字 id）。
+ * @param platform 音源平台
+ * @param limit 榜单取回的歌曲数
+ * @returns 歌手列表
+ */
+export const dispatchHotArtists = async (
+  platform: ApiPlatform,
+  limit = 100,
+): Promise<ArtistType[]> => {
+  if (platform !== "qqmusic") return [];
+  const board = await dispatchLeaderboard(platform, { limit });
+  const seen = new Set<string>();
+  const artists: ArtistType[] = [];
+  for (const song of board.songs) {
+    if (!Array.isArray(song.artists)) continue;
+    for (const artist of song.artists) {
+      const key = artist.platformId ?? String(artist.id);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      artists.push({
+        id: Number(artist.id) || 0,
+        name: artist.name,
+        cover: artist.cover ?? "",
+        platform: "qqmusic",
+        platformId: artist.platformId,
+      });
+    }
+  }
+  return artists;
+};
+
+/**
+ * 读取当前平台的歌单广场
+ *
+ * QQ 音乐走广场模块（可翻页）；酷狗按分类关键词取材精选公开歌单。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 广场歌单与总数
+ */
+export const dispatchSquarePlaylists = async (
+  platform: ApiPlatform,
+  options: { page?: number; limit?: number } = {},
+): Promise<DispatchSquareResult> => {
+  if (platform === "qqmusic") {
+    const page = options.page ?? 1;
+    const limit = options.limit ?? 30;
+    const res = await qqPlaylistSquare(page, limit);
+    return {
+      playlists: res.list.map(toCoverEntry),
+      total: res.total,
+      hasMore: page * limit < res.total,
+    };
+  }
+  const res = await kgPlaylistSquare(options.limit ?? 10);
+  return { playlists: res.list.map(toCoverEntry), total: res.total, hasMore: false };
+};
+
+/**
+ * 读取当前平台收藏（订阅）的歌单
+ *
+ * 网易云的收藏歌单由既有本地缓存维护，此处只服务第三方平台。
+ * @param platform 音源平台
+ * @returns 收藏歌单列表
+ */
+export const dispatchLikedPlaylists = async (platform: ApiPlatform): Promise<CoverType[]> => {
+  if (platform === "qqmusic") {
+    const { favorites } = await qqUserPlaylistList();
+    return favorites.map((item) =>
+      toCoverEntry({
+        id: item.id,
+        platformId: item.platformId,
+        name: item.name,
+        cover: item.coverImgUrl,
+        count: item.trackCount,
+        playCount: item.playCount,
+        creatorName: item.creator?.name,
+        description: item.description,
+        platform: "qqmusic",
+      }),
+    );
+  }
+  const { favorites } = await kgUserPlaylistList();
+  return favorites.map((item) =>
+    toCoverEntry({
+      id: item.id,
+      platformId: item.platformId,
+      name: item.name,
+      cover: item.coverImgUrl,
+      count: item.trackCount,
+      playCount: item.playCount,
+      creatorName: item.creator?.name,
+      description: item.description,
+      platform: "kugou",
+    }),
+  );
+};
+
+/**
+ * 读取酷狗公开歌单详情
+ *
+ * 公开歌单与账号云歌单是两套数据源，详情页按 `scope` 参数分流。
+ * @param id 公开歌单 id
+ * @param page 页码（从 1 开始）
+ * @param pageSize 每页条数
+ * @returns 歌单头部与曲目
+ */
+export const dispatchPublicPlaylistDetail = async (
+  id: string | number,
+  page = 1,
+  pageSize = 300,
+): Promise<DispatchPlaylistDetail> => {
+  const res = await kgPublicPlaylist(id, page, pageSize);
+  return {
+    detail: toCoverEntry({
+      id: res.playlist.id,
+      platformId: res.playlist.platformId,
+      name: res.playlist.name,
+      cover: res.playlist.cover,
+      count: res.playlist.count,
+      playCount: res.playlist.playCount,
+      creatorName: res.playlist.creatorName,
+      description: res.playlist.description,
+      platform: "kugou",
+    }),
+    tracks: res.songs.map(toSongType),
+    count: res.playlist.count ?? 0,
+    hasMore: res.hasMore,
+    page,
+    pageSize,
+  };
 };

@@ -119,7 +119,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
                 onClick: handleRefreshFM,
               }),
             ]),
-          show: isLogin() !== 0 && !settingStore.sidebarHide.hidePersonalFM,
+          show: isLogin() !== 0 && !settingStore.sidebarHide.hidePersonalFM && !isPlatformSource,
           icon: renderIcon("Radio", {
             style: {
               transform: "translateY(-1px)",
@@ -173,7 +173,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
           key: "cloud",
           link: "cloud",
           label: "我的云盘",
-          show: isLogin() === 1 && !settingStore.sidebarHide.hideCloud,
+          show: isLogin() === 1 && !settingStore.sidebarHide.hideCloud && !isPlatformSource,
           icon: renderIcon("Cloud"),
         },
         {

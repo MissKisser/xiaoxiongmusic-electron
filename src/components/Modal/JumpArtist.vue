@@ -11,7 +11,7 @@
           :key="index"
           class="ar-item"
           hoverable
-          @click="jumpArtist(item.id)"
+          @click="jumpArtist(item)"
         >
           <n-avatar :src="item.cover || '/images/artist.jpg?asset'" class="cover" round />
           <n-text class="name">{{ item.name }}</n-text>
@@ -26,7 +26,7 @@
 
 <script setup lang="ts">
 import type { SongType, MetaData } from "@/types/main";
-import { useSettingStore } from "@/stores";
+import { usePlatformStore, useSettingStore } from "@/stores";
 import { searchArtist, artistDetail } from "@/api/artist";
 import { uniq } from "lodash-es";
 
@@ -40,12 +40,26 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
 
 const artistData = ref<MetaData[]>([]);
 
 // 获取歌手信息
 const getArtistData = async () => {
   if (!props.artist) return;
+  // 第三方平台：歌手条目自带平台主键，直接使用
+  if (isPlatformSource.value && Array.isArray(props.artist)) {
+    artistData.value = props.artist.map((artist) => ({
+      id: Number(artist.id) || 0,
+      name: artist.name,
+      cover: artist.cover,
+      platformId: artist.platformId,
+    }));
+    return;
+  }
   // 写入歌手信息
   const setArtistData = (data: any, name: string) => {
     if (!data) return;
@@ -111,10 +125,17 @@ const getArtistData = async () => {
 };
 
 // 跳转至歌手
-const jumpArtist = (id: number) => {
-  if (!id) return;
+const jumpArtist = (item: MetaData) => {
+  const platformId = item.platformId;
+  if (!platformId && !item.id) return;
   emit("close");
-  router.push({ name: "artist", query: { id } });
+  router.push({
+    name: "artist",
+    query: {
+      id: platformId ?? item.id,
+      ...(platformId ? { platform: platformStore.currentPlatform } : {}),
+    },
+  });
 };
 
 onMounted(getArtistData);

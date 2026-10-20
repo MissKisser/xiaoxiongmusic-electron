@@ -39,23 +39,18 @@
             </n-text>
             <!-- 信息 -->
             <n-flex class="meta" :wrap="false">
-              <div
-                class="item"
-                @click="router.push({ name: 'artist-songs', query: { id: artistId } })"
-              >
+              <div class="item" @click="router.push({ name: 'artist-songs', query: artistQuery })">
                 <SvgIcon name="Music" :depth="3" />
                 <n-text>{{ artistDetailData.musicSize || 0 }}</n-text>
               </div>
-              <div
-                class="item"
-                @click="router.push({ name: 'artist-albums', query: { id: artistId } })"
-              >
+              <div class="item" @click="router.push({ name: 'artist-albums', query: artistQuery })">
                 <SvgIcon name="Album" :depth="3" />
                 <n-text>{{ artistDetailData.albumSize || 0 }}</n-text>
               </div>
               <div
+                v-if="!isPlatformSource"
                 class="item"
-                @click="router.push({ name: 'artist-videos', query: { id: artistId } })"
+                @click="router.push({ name: 'artist-videos', query: artistQuery })"
               >
                 <SvgIcon name="Video" :depth="3" />
                 <n-text>{{ artistDetailData.mvSize || 0 }}</n-text>
@@ -86,11 +81,12 @@
                 播放
               </n-button>
               <n-button
+                v-if="!isPlatformSource"
                 :focusable="false"
                 strong
                 secondary
                 round
-                @click="toLikeArtist(artistId, !isLikeArtist)"
+                @click="toLikeArtist(Number(artistId), !isLikeArtist)"
               >
                 <template #icon>
                   <SvgIcon :name="isLikeArtist ? 'Favorite' : 'FavoriteBorder'" />
@@ -120,7 +116,7 @@
     <n-tabs v-model:value="artistType" class="tabs" type="segment" @update:value="tabChange">
       <n-tab name="artist-songs"> 单曲 </n-tab>
       <n-tab name="artist-albums"> 专辑 </n-tab>
-      <n-tab name="artist-videos"> 视频 </n-tab>
+      <n-tab v-if="!isPlatformSource" name="artist-videos"> 视频 </n-tab>
     </n-tabs>
     <!-- 路由 -->
     <RouterView v-slot="{ Component }">
@@ -130,6 +126,7 @@
             ref="componentRef"
             :is="Component"
             :id="artistId"
+            :platform="routePlatform"
             class="router-view"
             @scroll="listScroll"
           />
@@ -139,6 +136,7 @@
           ref="componentRef"
           :is="Component"
           :id="artistId"
+          :platform="routePlatform"
           class="router-view"
           @scroll="listScroll"
         />
@@ -150,12 +148,14 @@
 <script setup lang="ts">
 import type { DropdownOption } from "naive-ui";
 import type { ArtistType } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { coverLoaded, renderIcon, copyData } from "@/utils/helper";
 import { renderToolbar } from "@/utils/meta";
 import { openDescModal, openBatchList } from "@/utils/modal";
 import { artistDetail } from "@/api/artist";
+import { dispatchArtistDetail } from "@/api/platform/dispatch";
 import { formatArtistsList } from "@/utils/format";
-import { useDataStore, useSettingStore, useStatusStore } from "@/stores";
+import { onPlatformChange, useDataStore, useSettingStore, useStatusStore } from "@/stores";
 import { toLikeArtist } from "@/utils/auth";
 import { useSwipe } from "@vueuse/core";
 import ArtistSongs from "./songs.vue";
@@ -172,8 +172,23 @@ const componentRef = ref<InstanceType<typeof ArtistSongs> | null>(null);
 // 页面元素引用
 const artistPageRef = ref<HTMLElement | null>(null);
 
-// 歌手 ID
-const artistId = computed<number>(() => Number(route.query.id));
+// 歌手 ID（网易云为数字 id，第三方平台为平台主键）
+const artistId = computed<string>(() => String(route.query.id ?? ""));
+
+// 路由指定的音源平台（第三方平台歌手带 platform 参数，网易云原路径不带）
+const routePlatform = computed<ApiPlatform | null>(() => {
+  const platform = route.query.platform as string | undefined;
+  return platform === "qqmusic" || platform === "kugou" ? platform : null;
+});
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => routePlatform.value !== null);
+
+// 歌手子页的路由参数
+const artistQuery = computed(() => ({
+  id: artistId.value,
+  ...(routePlatform.value ? { platform: routePlatform.value } : {}),
+}));
 
 // 标签页顺序
 const tabOrder = ["artist-songs", "artist-albums", "artist-videos"];
@@ -211,59 +226,87 @@ const artistDetailData = ref<ArtistType | null>(null);
 const listScrolling = ref<boolean>(false);
 
 // 更多操作
-const moreOptions = computed<DropdownOption[]>(() => [
-  {
-    label: "批量操作",
-    key: "batch",
-    show: artistType.value === "artist-songs",
-    props: {
-      onClick: () => {
-        if (componentRef.value?.songData) {
-          openBatchList(
-            componentRef.value.songData,
-            false,
-            isLikeArtist.value ? artistId.value : undefined,
-          );
-        } else {
-          window.$message.warning("暂无歌曲可操作");
-        }
+const moreOptions = computed<DropdownOption[]>(() => {
+  // 第三方平台：只保留批量操作，网易云专属的分享 / 源页面链接不适用
+  if (isPlatformSource.value) {
+    return [
+      {
+        label: "批量操作",
+        key: "batch",
+        show: artistType.value === "artist-songs",
+        props: {
+          onClick: () => {
+            if (componentRef.value?.songData) {
+              openBatchList(componentRef.value.songData, false);
+            } else {
+              window.$message.warning("暂无歌曲可操作");
+            }
+          },
+        },
+        icon: renderIcon("Batch"),
       },
-    },
-    icon: renderIcon("Batch"),
-  },
-  {
-    label: "复制分享链接",
-    key: "copy",
-    props: {
-      onClick: () =>
-        copyData(`https://music.163.com/#/artist?id=${artistId.value}`, "已复制分享链接到剪贴板"),
-    },
-    icon: renderIcon("Share"),
-  },
-  {
-    label: "打开源页面",
-    key: "open",
-    props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/artist?id=${artistId.value}`);
+    ];
+  }
+  return [
+    {
+      label: "批量操作",
+      key: "batch",
+      show: artistType.value === "artist-songs",
+      props: {
+        onClick: () => {
+          if (componentRef.value?.songData) {
+            openBatchList(
+              componentRef.value.songData,
+              false,
+              isLikeArtist.value ? Number(artistId.value) : undefined,
+            );
+          } else {
+            window.$message.warning("暂无歌曲可操作");
+          }
+        },
       },
+      icon: renderIcon("Batch"),
     },
-    icon: renderIcon("Link"),
-  },
-]);
+    {
+      label: "复制分享链接",
+      key: "copy",
+      props: {
+        onClick: () =>
+          copyData(`https://music.163.com/#/artist?id=${artistId.value}`, "已复制分享链接到剪贴板"),
+      },
+      icon: renderIcon("Share"),
+    },
+    {
+      label: "打开源页面",
+      key: "open",
+      props: {
+        onClick: () => {
+          window.open(`https://music.163.com/#/artist?id=${artistId.value}`);
+        },
+      },
+      icon: renderIcon("Link"),
+    },
+  ];
+});
 
 // 是否处于收藏歌手
 const isLikeArtist = computed(() => {
-  return dataStore.userLikeData.artists.some((ar) => ar.id === artistId.value);
+  return dataStore.userLikeData.artists.some((ar) => ar.id === Number(artistId.value));
 });
 
 // 获取歌手详情
-const getArtistDetail = async (id: number) => {
+const getArtistDetail = async (id: string) => {
   try {
     if (!id) return;
     listScrolling.value = false;
     artistDetailData.value = null;
-    const result = await artistDetail(id);
+    // 第三方平台：走平台数据层
+    if (routePlatform.value) {
+      const result = await dispatchArtistDetail(routePlatform.value, { id, limit: 1 });
+      artistDetailData.value = result.detail;
+      return;
+    }
+    const result = await artistDetail(Number(id));
     artistDetailData.value = formatArtistsList(result.data.artist)[0];
     // 附加身份
     artistDetailData.value.identify = result.data.identify?.imageDesc;
@@ -277,13 +320,13 @@ const getArtistDetail = async (id: number) => {
 const tabChange = (value: string) => {
   router.push({
     name: value,
-    query: { id: artistId.value },
+    query: artistQuery.value,
   });
 };
 
 // 播放全部歌曲
 const playAllSongs = async () => {
-  await router.push({ name: "artist-songs", query: { id: artistId.value } });
+  await router.push({ name: "artist-songs", query: artistQuery.value });
   if (componentRef.value) componentRef.value.playAllSongs();
 };
 
@@ -311,6 +354,15 @@ watch(
   },
   { immediate: true },
 );
+
+// 平台切换：重新拉取歌手详情
+const stopPlatformWatch = onPlatformChange(() => {
+  if (artistId.value) getArtistDetail(artistId.value);
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
+});
 </script>
 
 <style lang="scss" scoped>
@@ -569,7 +621,7 @@ watch(
     /* 3. 列表容器上移 */
     .router-view {
       top: 160px !important; /* 直接作用于 router-view */
-      
+
       &.artist-songs,
       &.artist-albums,
       &.artist-videos {

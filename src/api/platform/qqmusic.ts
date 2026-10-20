@@ -13,9 +13,13 @@ import {
   getAlbumName,
   getArtistNames,
   type PlatformAlbum,
+  type PlatformAlbumDetail,
   type PlatformArtist,
+  type PlatformArtistDetail,
   type PlatformComment,
   type PlatformCommentPage,
+  type PlatformCoverEntry,
+  type PlatformLeaderboard,
   type PlatformLyric,
   type PlatformLyricTarget,
   type PlatformPlaylist,
@@ -32,6 +36,12 @@ const LIKED_DIR_ID = 201;
 
 /** QQ 音乐专辑封面直链模板（album.mid 取不到时回落到 album.pmid） */
 const ALBUM_COVER_TEMPLATE = "https://y.gtimg.cn/music/photo_new/T002R300x300M000";
+
+/** QQ 音乐歌手头像直链模板（歌手 mid） */
+const ARTIST_COVER_TEMPLATE = "https://y.gtimg.cn/music/photo_new/T001R300x300M000";
+
+/** QQ 音乐热歌榜榜单号 */
+const HOT_TOPLIST_ID = 26;
 
 /** 主进程 QQ 搜索模块的原生返回 */
 interface QqSearchResponse {
@@ -168,12 +178,14 @@ const normalizeAlbum = (album: unknown, albumMid: string, albumId: string): Plat
     const mid = String(source.mid ?? source.pmid ?? albumMid ?? "");
     return {
       id: String(source.id ?? albumId ?? ""),
+      platformId: mid || undefined,
       name: String(source.name ?? source.title ?? ""),
       picUrl: mid ? `${ALBUM_COVER_TEMPLATE}${mid}.jpg` : "",
     };
   }
   return {
     id: albumId,
+    platformId: albumMid || undefined,
     name: typeof album === "string" ? album : "",
     picUrl: albumMid ? `${ALBUM_COVER_TEMPLATE}${albumMid}.jpg` : "",
   };
@@ -592,8 +604,10 @@ const QQ_SEARCH_TYPE = {
  * 渲染端再交给既有格式化函数（`formatCoverList` / `formatArtistsList`）归一。
  */
 export interface QqSearchCoverEntry {
-  /** 条目 id */
+  /** 条目 id（歌单为 dissid，专辑为 album mid） */
   id: number | string;
+  /** 专辑数字 id（仅专辑条目有） */
+  albumId?: string;
   /** 名称 */
   name: string;
   /** 封面直链 */
@@ -664,7 +678,8 @@ interface QqHotSearchResponse {
  * @returns 网易云形状的专辑条目
  */
 const normalizeQqSearchAlbum = (album: Record<string, any>): QqSearchCoverEntry => ({
-  id: album?.albumId || album?.id || "",
+  id: album?.id ?? album?.albumId ?? "",
+  albumId: String(album?.albumId ?? ""),
   name: String(album?.name ?? ""),
   cover: secureUrl(album?.cover ?? ""),
   trackCount: Number(album?.trackCount ?? 0),
@@ -787,3 +802,284 @@ export const qqHotSearch = async (): Promise<{ total: number; list: QqHotSearchE
     })),
   };
 };
+
+/** 主进程 QQ 榜单模块的原生返回 */
+interface QqLeaderboardResponse {
+  code?: number;
+  title?: string;
+  subTitle?: string;
+  cover?: string;
+  updateTime?: string;
+  total?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程 QQ 歌手模块的原生返回 */
+interface QqArtistResponse {
+  code?: number;
+  artist?: {
+    mid?: string;
+    name?: string;
+    songCount?: number;
+    albumCount?: number;
+  };
+  songs?: Array<Record<string, any>>;
+  albums?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程 QQ 专辑模块的原生返回 */
+interface QqAlbumResponse {
+  code?: number;
+  mid?: string;
+  albumMid?: string;
+  total?: number;
+  album?: { mid?: string; name?: string; artist?: string };
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程 QQ 歌单广场模块的原生返回 */
+interface QqSongListResponse {
+  code?: number;
+  mode?: string;
+  total?: number;
+  list?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程 QQ 歌单广场详情模式的原生返回 */
+interface QqSongListDetailResponse {
+  code?: number;
+  mode?: string;
+  id?: string;
+  name?: string;
+  description?: string;
+  creator?: string;
+  cover?: string;
+  createTime?: number;
+  playCount?: number;
+  commentCount?: number;
+  total?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 读取 QQ 音乐排行榜
+ *
+ * 榜单以 `topid` 定位，缺省取热歌榜（26）。
+ * @param topid 榜单号
+ * @param limit 本次取回的歌曲数
+ * @param offset 歌曲偏移
+ * @returns 归一化后的榜单
+ */
+export const qqLeaderboard = async (
+  topid = HOT_TOPLIST_ID,
+  limit = 50,
+  offset = 0,
+): Promise<PlatformLeaderboard> => {
+  const res = await platformRequest<QqLeaderboardResponse>(QQ_MUSIC, "leaderboard", {
+    topid,
+    limit,
+    offset,
+  });
+  return {
+    title: String(res?.title ?? ""),
+    subTitle: String(res?.subTitle ?? ""),
+    cover: secureUrl(res?.cover ?? ""),
+    total: Number(res?.total ?? 0),
+    songs: (res?.songs ?? []).map(normalizeQqSong),
+  };
+};
+
+/**
+ * 读取 QQ 音乐歌手详情、热门歌曲与专辑
+ *
+ * 歌手以 mid 定位；歌曲条目里的歌手同时带数字 id 与 mid，
+ * 由此可补齐歌手的数字主键。
+ * @param mid 歌手 mid
+ * @param limit 本次取回的歌曲数
+ * @param offset 歌曲偏移
+ * @returns 归一化后的歌手详情、歌曲与专辑
+ */
+export const qqArtistDetail = async (
+  mid: string,
+  limit = 50,
+  offset = 0,
+): Promise<{
+  artist: PlatformArtistDetail;
+  songs: PlatformSong[];
+  albums: PlatformCoverEntry[];
+}> => {
+  const res = await platformRequest<QqArtistResponse>(QQ_MUSIC, "artist", { mid, limit, offset });
+  const songs = (res?.songs ?? []).map(normalizeQqSong);
+  const albums: PlatformCoverEntry[] = (res?.albums ?? []).map((item) => {
+    const albumMid = String(item?.mid ?? "");
+    return {
+      id: albumMid,
+      platformId: albumMid,
+      name: String(item?.name ?? ""),
+      cover: albumMid ? `${ALBUM_COVER_TEMPLATE}${albumMid}.jpg` : "",
+      count: Number(item?.trackCount ?? 0),
+      creatorName: String(item?.artist ?? ""),
+      platform: QQ_MUSIC,
+    };
+  });
+  // 歌手的数字 id：取歌曲条目里与自身 mid 对应的歌手数字 id
+  const self = songs.flatMap((song) => song.artists).find((artist) => artist.mid === mid);
+  const artist: PlatformArtistDetail = {
+    id: Number(self?.id) || 0,
+    platformId: String(res?.artist?.mid ?? mid),
+    platform: QQ_MUSIC,
+    name: String(res?.artist?.name ?? ""),
+    cover: mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : "",
+    coverSize: buildCoverSize(mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : ""),
+    musicSize: Number(res?.artist?.songCount ?? songs.length),
+    albumSize: Number(res?.artist?.albumCount ?? albums.length),
+    mvSize: 0,
+    fansSize: 0,
+    description: "",
+  };
+  return { artist, songs, albums };
+};
+
+/**
+ * 读取 QQ 音乐专辑详情与专辑歌曲
+ * @param mid 专辑 mid
+ * @returns 归一化后的专辑详情与歌曲
+ */
+export const qqAlbumDetail = async (
+  mid: string,
+): Promise<{ album: PlatformAlbumDetail; songs: PlatformSong[] }> => {
+  const res = await platformRequest<QqAlbumResponse>(QQ_MUSIC, "album", { mid });
+  const albumMid = String(res?.albumMid ?? res?.mid ?? mid);
+  const cover = albumMid ? `${ALBUM_COVER_TEMPLATE}${albumMid}.jpg` : "";
+  const songs = (res?.songs ?? []).map(normalizeQqSong);
+  const album: PlatformAlbumDetail = {
+    id: albumMid,
+    platformId: albumMid,
+    name: String(res?.album?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    artist: String(res?.album?.artist ?? ""),
+    count: Number(res?.total ?? songs.length),
+    description: "",
+  };
+  return { album, songs };
+};
+
+/**
+ * 读取 QQ 音乐公开歌单详情（广场歌单）
+ *
+ * 广场歌单走 `song_list` 模块的详情模式，歌单名 / 封面 / 创建者都在该端点里。
+ * @param id 歌单号
+ * @returns 归一化后的歌单详情
+ */
+export const qqPublicPlaylistDetail = async (
+  id: string | number,
+): Promise<PlatformPlaylistDetail> => {
+  const res = await platformRequest<QqSongListDetailResponse>(QQ_MUSIC, "song_list", {
+    id: String(id),
+  });
+  const cover = secureUrl(res?.cover ?? "");
+  return {
+    id: String(res?.id ?? id),
+    name: String(res?.name ?? ""),
+    coverImgUrl: cover,
+    coverSize: buildCoverSize(cover),
+    trackCount: Number(res?.total ?? 0),
+    playCount: Number(res?.playCount ?? 0),
+    description: String(res?.description ?? ""),
+    creator: {
+      id: "",
+      name: String(res?.creator ?? ""),
+    },
+    createTime: Number(res?.createTime ?? 0) || undefined,
+    platform: QQ_MUSIC,
+    platformId: String(res?.id ?? id),
+    tracks: (res?.songs ?? []).map(normalizeQqSong),
+    hasMore: false,
+  };
+};
+
+/**
+ * 读取 QQ 音乐歌单广场
+ *
+ * 走 `song_list` 模块的广场模式（不传歌单号）。
+ * @param page 页码（从 1 开始）
+ * @param limit 每页条数
+ * @returns 归一化后的广场歌单与总数
+ */
+export const qqPlaylistSquare = async (
+  page = 1,
+  limit = 30,
+): Promise<{ list: PlatformCoverEntry[]; total: number }> => {
+  const res = await platformRequest<QqSongListResponse>(QQ_MUSIC, "song_list", { page, limit });
+  const list: PlatformCoverEntry[] = (res?.list ?? []).map((item) => ({
+    id: String(item?.id ?? ""),
+    platformId: String(item?.id ?? ""),
+    name: String(item?.name ?? ""),
+    cover: secureUrl(item?.cover ?? ""),
+    playCount: Number(item?.playCount ?? 0),
+    creatorName: String(item?.creator ?? ""),
+    description: String(item?.description ?? ""),
+    platform: QQ_MUSIC,
+  }));
+  return { list, total: Number(res?.total ?? list.length) };
+};
+
+/**
+ * 归一化 QQ 搜索到的歌手条目（补齐平台维度）
+ * @param artist QQ 原生歌手条目
+ * @returns 归一化歌手
+ */
+export const toQqArtistEntry = (artist: Record<string, any>): PlatformArtistDetail => {
+  const mid = String(artist?.id ?? "");
+  const cover = secureUrl(artist?.cover ?? "");
+  return {
+    id: 0,
+    platformId: mid,
+    platform: QQ_MUSIC,
+    name: String(artist?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    musicSize: Number(artist?.musicSize ?? 0),
+    albumSize: Number(artist?.albumSize ?? 0),
+    mvSize: 0,
+    fansSize: Number(artist?.fans ?? 0),
+    description: "",
+  };
+};
+
+/**
+ * 归一化 QQ 搜索到的歌单条目（补齐平台维度）
+ * @param playlist QQ 原生歌单条目
+ * @returns 归一化封面条目
+ */
+export const toQqPlaylistEntry = (playlist: QqSearchCoverEntry): PlatformCoverEntry => ({
+  id: playlist.id,
+  platformId: String(playlist.id),
+  name: playlist.name,
+  cover: playlist.cover,
+  count: playlist.trackCount,
+  playCount: playlist.playCount,
+  creatorName: playlist.creator?.nickname,
+  platform: QQ_MUSIC,
+});
+
+/**
+ * 归一化 QQ 搜索到的专辑条目（补齐平台维度）
+ * @param album QQ 原生专辑条目
+ * @returns 归一化封面条目
+ */
+export const toQqAlbumEntry = (album: QqSearchCoverEntry): PlatformCoverEntry => ({
+  id: album.id,
+  platformId: String(album.id),
+  name: album.name,
+  cover: album.cover,
+  count: album.trackCount,
+  creatorName: album.creator?.nickname,
+  platform: QQ_MUSIC,
+});

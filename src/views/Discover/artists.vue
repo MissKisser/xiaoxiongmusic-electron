@@ -1,6 +1,6 @@
 <template>
   <div class="discover-artists">
-    <div class="menu">
+    <div v-if="!isPlatformSource" class="menu">
       <!-- 字母分类 -->
       <n-flex class="initial">
         <n-tag
@@ -35,9 +35,15 @@
 <script setup lang="ts">
 import type { ArtistType } from "@/types/main";
 import { artistTypeList } from "@/api/artist";
+import { onPlatformChange, usePlatformStore } from "@/stores";
+import { dispatchHotArtists } from "@/api/platform/dispatch";
 import { formatArtistsList } from "@/utils/format";
 
 const router = useRouter();
+const platformStore = usePlatformStore();
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
 
 // 歌手标签数据
 const artistInitials = [
@@ -77,6 +83,19 @@ const artistsData = ref<ArtistType[]>([]);
 
 // 获取歌手数据
 const getArtistListData = async () => {
+  // 第三方平台：取榜单歌曲里出现的热门歌手
+  if (isPlatformSource.value) {
+    loading.value = true;
+    try {
+      artistsData.value = await dispatchHotArtists(platformStore.currentPlatform, 100);
+    } catch (error) {
+      console.error("获取平台热门歌手失败：", error);
+      artistsData.value = [];
+    }
+    hasMore.value = false;
+    loading.value = false;
+    return;
+  }
   // 获取数据
   loading.value = true;
   const result = await artistTypeList(
@@ -125,6 +144,17 @@ onBeforeRouteUpdate((to) => {
 });
 
 onMounted(getArtistListData);
+
+// 平台切换：重新拉取歌手
+const stopPlatformWatch = onPlatformChange(() => {
+  artistsData.value = [];
+  artistsOffset.value = 0;
+  getArtistListData();
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
+});
 </script>
 
 <style lang="scss" scoped>

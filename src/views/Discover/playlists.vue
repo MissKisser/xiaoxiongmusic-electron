@@ -1,6 +1,6 @@
 <template>
   <div class="discover-playlists">
-    <n-flex justify="space-between" align="center" class="menu">
+    <n-flex v-if="!isPlatformSource" justify="space-between" align="center" class="menu">
       <!-- 分类 -->
       <n-button
         :focusable="false"
@@ -94,12 +94,17 @@
 
 <script setup lang="ts">
 import type { CoverType } from "@/types/main";
-import { useDataStore } from "@/stores";
+import { onPlatformChange, useDataStore, usePlatformStore } from "@/stores";
 import { allCatlistPlaylist } from "@/api/playlist";
+import { dispatchSquarePlaylists } from "@/api/platform/dispatch";
 import { formatCoverList } from "@/utils/format";
 
 const router = useRouter();
 const dataStore = useDataStore();
+const platformStore = usePlatformStore();
+
+// 是否为第三方平台（QQ 音乐 / 酷狗）
+const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
 
 const catChangeShow = ref<boolean>(false);
 
@@ -125,6 +130,23 @@ const hasHqPlaylist = computed<boolean>(() => {
 
 // 获取歌单数据
 const getAllCatlistPlaylist = async () => {
+  // 第三方平台：走平台歌单广场
+  if (isPlatformSource.value) {
+    loading.value = true;
+    try {
+      const result = await dispatchSquarePlaylists(platformStore.currentPlatform, {
+        page: playlistOffset.value / 50 + 1,
+        limit: 50,
+      });
+      playlistCount.value = result.playlists.length;
+      hasMore.value = result.hasMore;
+      playlistData.value = playlistData.value.concat(result.playlists);
+    } catch (error) {
+      console.error("获取平台歌单广场失败：", error);
+    }
+    loading.value = false;
+    return;
+  }
   // before
   const before = playlistData.value?.at(-1)?.updateTime ?? undefined;
   // 获取数据
@@ -170,10 +192,21 @@ onBeforeRouteUpdate((to) => {
   getAllCatlistPlaylist();
 });
 
+// 平台切换：重新拉取歌单广场
+const stopPlatformWatch = onPlatformChange(() => {
+  playlistData.value = [];
+  playlistOffset.value = 0;
+  getAllCatlistPlaylist();
+});
+
 onMounted(() => {
   dataStore.getPlaylistCatList();
   // 获取歌单
   getAllCatlistPlaylist();
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
 });
 </script>
 

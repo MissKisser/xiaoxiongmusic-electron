@@ -5,7 +5,7 @@ import { CURRENT_AGREEMENT_VERSION } from "@/constants/agreement";
 import { NScrollbar } from "naive-ui";
 import { isLogin } from "./auth";
 import { isArray, isFunction } from "lodash-es";
-import { useDataStore, useSettingStore } from "@/stores";
+import { useDataStore, usePlatformStore, useSettingStore } from "@/stores";
 import router from "@/router";
 import Login from "@/components/Modal/Login/Login.vue";
 import LoginPlatformQR from "@/components/Modal/Login/LoginPlatformQR.vue";
@@ -107,9 +107,19 @@ export const openPlatformLogin = (platform: ApiPlatform) => {
  * @returns
  */
 export const openJumpArtist = (data: SongType["artists"], id?: number) => {
+  const platformStore = usePlatformStore();
   // 若 data 为数组且只有一个元素，则直接跳转
   if (isArray(data) && data.length <= 2 && id) {
-    router.push({ name: "artist", query: { id } });
+    // 第三方平台的歌手以平台主键定位
+    const target = data.find((artist) => Number(artist.id) === id);
+    const platformId = target?.platformId;
+    router.push({
+      name: "artist",
+      query: {
+        id: platformId ?? id,
+        ...(platformId ? { platform: platformStore.currentPlatform } : {}),
+      },
+    });
     return;
   }
   const modal = window.$modal.create({

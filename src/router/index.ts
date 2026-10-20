@@ -2,6 +2,8 @@ import { createRouter, createWebHashHistory, Router } from "vue-router";
 import { openUserLogin } from "@/utils/modal";
 import { isElectron } from "@/utils/env";
 import { isLogin } from "@/utils/auth";
+import { isRouteSupported } from "@/api/platform/capability";
+import { usePlatformStore } from "@/stores";
 import routes from "./routes";
 
 // 基础配置
@@ -15,8 +17,18 @@ router.beforeEach((to, from, next) => {
   if (!isElectron && to.path !== from.path) {
     window.$loadingBar.start();
   }
+  const platformStore = usePlatformStore();
+  const isPlatformSource = platformStore.currentPlatform !== "netease";
+  // 平台能力校验：第三方平台不支持的页面直接拦截
+  const routeName = to.name as string | undefined;
+  if (routeName && !isRouteSupported(platformStore.currentPlatform, routeName)) {
+    if (!isElectron) window.$loadingBar.error();
+    window.$message.warning("当前平台不支持该功能");
+    next({ path: "/" });
+    return;
+  }
   // 需要登录
-  if (to.meta.needLogin && !isLogin()) {
+  if (to.meta.needLogin && !isLogin() && !isPlatformSource) {
     if (!isElectron) window.$loadingBar.error();
     window.$message.warning("请登录后使用");
     openUserLogin();

@@ -14,9 +14,12 @@
 import { platformRequest } from "./http";
 import {
   buildCoverSize,
+  type PlatformAlbumDetail,
   type PlatformArtist,
+  type PlatformArtistDetail,
   type PlatformComment,
   type PlatformCommentPage,
+  type PlatformCoverEntry,
   type PlatformLyric,
   type PlatformLyricTarget,
   type PlatformPlaylist,
@@ -209,6 +212,7 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
     artists,
     album: {
       id: String(song?.albumId ?? song?.album_id ?? ""),
+      platformId: String(song?.albumId ?? song?.album_id ?? "") || undefined,
       name: String(song?.album ?? song?.album_name ?? ""),
       picUrl: cover,
     },
@@ -696,3 +700,264 @@ export const kgSearchPlaylists = async (
     playlists: (res?.playlists ?? []).map(normalizeKgSearchPlaylist),
   };
 };
+
+/** 主进程酷狗歌手模块的原生返回 */
+interface KgArtistResponse {
+  code?: number;
+  artist?: {
+    id?: string;
+    name?: string;
+    cover?: string;
+    avatar?: string;
+    songCount?: number;
+    albumCount?: number;
+    mvCount?: number;
+    fansCount?: number;
+    intro?: string;
+  };
+  songs?: Array<Record<string, any>>;
+  albums?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程酷狗专辑模块的原生返回 */
+interface KgAlbumResponse {
+  code?: number;
+  id?: string;
+  name?: string;
+  cover?: string;
+  artist?: string;
+  artists?: Array<Record<string, any>>;
+  publishTime?: string;
+  description?: string;
+  total?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/** 主进程酷狗公开歌单模块的原生返回 */
+interface KgPublicPlaylistResponse {
+  code?: number;
+  id?: string;
+  name?: string;
+  description?: string;
+  creator?: string;
+  cover?: string;
+  playCount?: number;
+  total?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 读取酷狗歌手详情、热门歌曲与专辑
+ *
+ * 歌手以 author_id 定位（平台侧也接受歌手名，会自动反查 id）。
+ * @param id 歌手 id
+ * @returns 归一化后的歌手详情、歌曲与专辑
+ */
+export const kgArtistDetail = async (
+  id: string | number,
+): Promise<{
+  artist: PlatformArtistDetail;
+  songs: PlatformSong[];
+  albums: PlatformCoverEntry[];
+}> => {
+  const res = await platformRequest<KgArtistResponse>(KUGOU, "artist", { id: String(id) });
+  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const albums: PlatformCoverEntry[] = (res?.albums ?? []).map((item) => {
+    const albumId = String(item?.id ?? "");
+    return {
+      id: albumId,
+      platformId: albumId,
+      name: String(item?.name ?? ""),
+      cover: fillCover(item?.cover ?? ""),
+      count: Number(item?.trackCount ?? 0),
+      creatorName: String(item?.artist ?? ""),
+      platform: KUGOU,
+    };
+  });
+  const cover = fillCover(res?.artist?.cover ?? "") || fillCover(res?.artist?.avatar ?? "");
+  const artist: PlatformArtistDetail = {
+    id: Number(res?.artist?.id ?? 0) || 0,
+    platformId: String(res?.artist?.id ?? id),
+    platform: KUGOU,
+    name: String(res?.artist?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    musicSize: Number(res?.artist?.songCount ?? songs.length),
+    albumSize: Number(res?.artist?.albumCount ?? albums.length),
+    mvSize: Number(res?.artist?.mvCount ?? 0),
+    fansSize: Number(res?.artist?.fansCount ?? 0),
+    description: String(res?.artist?.intro ?? ""),
+  };
+  return { artist, songs, albums };
+};
+
+/**
+ * 读取酷狗专辑详情与专辑歌曲
+ * @param id 专辑 id
+ * @returns 归一化后的专辑详情与歌曲
+ */
+export const kgAlbumDetail = async (
+  id: string | number,
+): Promise<{ album: PlatformAlbumDetail; songs: PlatformSong[] }> => {
+  const res = await platformRequest<KgAlbumResponse>(KUGOU, "album", { id: String(id) });
+  const albumId = String(res?.id ?? id);
+  const cover = fillCover(res?.cover ?? "");
+  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const album: PlatformAlbumDetail = {
+    id: albumId,
+    platformId: albumId,
+    name: String(res?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    artist: String(res?.artist ?? ""),
+    count: Number(res?.total ?? songs.length),
+    description: String(res?.description ?? ""),
+  };
+  return { album, songs };
+};
+
+/**
+ * 读取酷狗公开歌单（精选歌单）
+ *
+ * 走 `playlist` 模块，对外公开的精选歌单，无需登录即可访问。
+ * @param id 公开歌单 id
+ * @param page 页码（从 1 开始）
+ * @param pageSize 每页条数
+ * @returns 归一化后的公开歌单
+ */
+export const kgPublicPlaylist = async (
+  id: string | number,
+  page = 1,
+  pageSize = 100,
+): Promise<{
+  playlist: PlatformCoverEntry;
+  songs: PlatformSong[];
+  hasMore: boolean;
+}> => {
+  const res = await platformRequest<KgPublicPlaylistResponse>(KUGOU, "playlist", {
+    id: String(id),
+    page,
+    pageSize,
+  });
+  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const cover = fillCover(res?.cover ?? "");
+  const playlist: PlatformCoverEntry = {
+    id: String(res?.id ?? id),
+    platformId: String(res?.id ?? id),
+    name: String(res?.name ?? ""),
+    cover,
+    count: Number(res?.total ?? songs.length),
+    playCount: Number(res?.playCount ?? 0),
+    creatorName: String(res?.creator ?? ""),
+    description: String(res?.description ?? ""),
+    platform: KUGOU,
+  };
+  return {
+    playlist,
+    songs,
+    hasMore: songs.length >= pageSize && songs.length < Number(res?.total ?? 0),
+  };
+};
+
+/**
+ * 酷狗精选公开歌单的取材关键词
+ *
+ * 酷狗侧没有公开的「歌单广场列表」接口，
+ * 精选歌单按分类关键词从公开搜索里取材后合并去重。
+ */
+const SQUARE_KEYWORDS = ["热歌", "轻音乐", "民谣", "DJ", "钢琴", "经典"];
+
+/**
+ * 读取酷狗精选公开歌单
+ *
+ * 按分类关键词并行取材，合并去重后作为歌单广场展示。
+ * @param limit 每个关键词的取材条数
+ * @returns 归一化后的精选歌单与总数
+ */
+export const kgPlaylistSquare = async (
+  limit = 10,
+): Promise<{ list: PlatformCoverEntry[]; total: number }> => {
+  const results = await Promise.all(
+    SQUARE_KEYWORDS.map((keyword) =>
+      kgSearchPlaylists(keyword, 1, limit).catch(() => ({ total: 0, playlists: [] })),
+    ),
+  );
+  const seen = new Set<string>();
+  const list: PlatformCoverEntry[] = [];
+  for (const result of results) {
+    for (const item of result.playlists) {
+      const key = String(item.id ?? "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      list.push({
+        id: key,
+        platformId: key,
+        name: item.name,
+        cover: item.cover,
+        count: item.trackCount,
+        playCount: item.playCount,
+        creatorName: item.creator?.nickname ?? "",
+        platform: KUGOU,
+      });
+    }
+  }
+  return { list, total: list.length };
+};
+
+/**
+ * 归一化酷狗搜索到的歌手条目（补齐平台维度）
+ * @param artist 酷狗原生歌手条目
+ * @returns 归一化歌手
+ */
+export const toKgArtistEntry = (artist: Record<string, any>): PlatformArtistDetail => {
+  const authorId = String(artist?.id ?? "");
+  const cover = fillCover(artist?.cover ?? "");
+  return {
+    id: Number(authorId) || 0,
+    platformId: authorId,
+    platform: KUGOU,
+    name: String(artist?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    musicSize: Number(artist?.musicSize ?? 0),
+    albumSize: Number(artist?.albumSize ?? 0),
+    mvSize: 0,
+    fansSize: Number(artist?.fans ?? 0),
+    description: "",
+  };
+};
+
+/**
+ * 归一化酷狗搜索到的歌单条目（补齐平台维度）
+ * @param playlist 酷狗原生歌单条目
+ * @returns 归一化封面条目
+ */
+export const toKgPlaylistEntry = (playlist: KgSearchCoverEntry): PlatformCoverEntry => ({
+  id: playlist.id,
+  platformId: String(playlist.id),
+  name: playlist.name,
+  cover: playlist.cover,
+  count: playlist.trackCount,
+  playCount: playlist.playCount,
+  creatorName: playlist.creator?.nickname,
+  platform: KUGOU,
+});
+
+/**
+ * 归一化酷狗搜索到的专辑条目（补齐平台维度）
+ * @param album 酷狗原生专辑条目
+ * @returns 归一化封面条目
+ */
+export const toKgAlbumEntry = (album: KgSearchCoverEntry): PlatformCoverEntry => ({
+  id: album.id,
+  platformId: String(album.id),
+  name: album.name,
+  cover: album.cover,
+  count: album.trackCount,
+  creatorName: album.creator?.nickname,
+  publishTime: album.publishTime,
+  platform: KUGOU,
+});

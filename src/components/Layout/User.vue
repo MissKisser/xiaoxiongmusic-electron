@@ -207,15 +207,21 @@ const handlePlatform = (item: (typeof platformList.value)[number]) => {
 
 // 用户喜欢数据
 const userLikeData = computed(() => {
+  // 第三方平台：只有「收藏的歌单」有数据源，专辑 / 歌手子页已隐藏，故不展示
+  if (platformStore.currentPlatform !== "netease") {
+    return [
+      {
+        label: "歌单",
+        name: "like-playlists",
+        value: platformStore.playlists.favorites.length,
+      },
+    ];
+  }
   return [
     {
       label: "歌单",
       name: "like-playlists",
-      // 第三方平台按当前平台的歌单数量统计
-      value:
-        platformStore.currentPlatform === "netease"
-          ? dataStore.userLikeData.playlists.length
-          : platformStore.playlists.owned.length + platformStore.playlists.favorites.length,
+      value: dataStore.userLikeData.playlists.length,
     },
     {
       label: "专辑",
