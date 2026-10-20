@@ -28,6 +28,17 @@ import {
   playlist_subscribe,
   playlist_tracks,
 } from "./modules/playlist_write";
+import { song_url } from "./modules/song_url";
+import { lyric } from "./modules/lyric";
+import { comment } from "./modules/comment";
+import { search } from "./modules/search";
+import { match } from "./modules/match";
+import { hot_search } from "./modules/hot_search";
+import { leaderboard } from "./modules/leaderboard";
+import { song_info } from "./modules/song_info";
+import { song_list } from "./modules/song_list";
+import { album } from "./modules/album";
+import { artist } from "./modules/artist";
 import type { QMParams } from "./core/types";
 
 export { clearQQMusicCookies, mergeQQMusicCookies };
@@ -48,6 +59,8 @@ const NON_CACHEABLE: ReadonlySet<string> = new Set([
   "user_detail",
   "song_url",
   "comment",
+  "search",
+  "hot_search",
   "login_qr_key",
   "login_qr_check",
   "user_playlist_list",
@@ -77,6 +90,17 @@ const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
   playlist_delete,
   playlist_tracks,
   playlist_subscribe,
+  song_url,
+  lyric,
+  comment,
+  search,
+  match,
+  hot_search,
+  leaderboard,
+  song_info,
+  song_list,
+  album,
+  artist,
 };
 
 const hashParams = (params: unknown): string =>

@@ -4,7 +4,7 @@ import { serverLog } from "../main/logger";
 import { initNcmAPI } from "./netease";
 import { initUnblockAPI } from "./unblock";
 import { initControlAPI } from "./control";
-import { initQQMusicAPI } from "./qqmusic";
+import { initQQMusicPlatformAPI } from "./platform/qqmusic";
 import { initProxyAPI } from "./proxy";
 import fastifyCookie from "@fastify/cookie";
 import fastifyMultipart from "@fastify/multipart";
@@ -78,7 +78,7 @@ const initAppServer = async () => {
     server.register(initNcmAPI, { prefix: "/api" });
     server.register(initUnblockAPI, { prefix: "/api" });
     server.register(initControlAPI, { prefix: "/api" });
-    server.register(initQQMusicAPI, { prefix: "/api" });
+    server.register(initQQMusicPlatformAPI, { prefix: "/api" });
     server.register(initProxyAPI, { prefix: "/api" });
     // 启动端口
     const port = Number(process.env["VITE_SERVER_PORT"] || 25884);
