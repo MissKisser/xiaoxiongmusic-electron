@@ -12,3 +12,6 @@ export { useStreamingStore } from "./streaming";
 
 // auth
 export { useAuthStore } from "./auth";
+
+// platform
+export { usePlatformStore, PLATFORM_META, onPlatformChange } from "./platform";

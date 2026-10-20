@@ -1,4 +1,5 @@
 import { songLevelData } from "@/utils/meta";
+import type { ApiPlatform } from "@/types/shared";
 
 export type MetaData = {
   id: number;
@@ -111,6 +112,18 @@ export type SongType = {
   serverId?: string;
   /** 来源标记 */
   source?: "streaming";
+  /**
+   * 来源平台
+   *
+   * 缺省为网易云，向后兼容既有数据。
+   */
+  platform?: ApiPlatform;
+  /**
+   * 平台内字符串主键
+   *
+   * QQ 音乐为 mid，酷狗为 hash；`id` 仍是平台数字 ID。
+   */
+  platformId?: string;
 };
 
 // Cover

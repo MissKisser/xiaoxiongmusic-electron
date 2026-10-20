@@ -1,7 +1,7 @@
 <template>
   <n-popover
     :show="userMenuShow"
-    style="padding: 12px; max-width: 160px"
+    style="padding: 12px; max-width: 240px"
     trigger="manual"
     @clickoutside="userMenuShow = false"
   >
@@ -13,8 +13,8 @@
       >
         <div class="avatar">
           <n-avatar
-            v-if="dataStore.userLoginStatus"
-            :src="dataStore.userData?.avatarUrl"
+            v-if="currentLoggedIn"
+            :src="currentAvatarUrl"
             fallback-src="/images/avatar.jpg?asset"
             round
           />
@@ -24,7 +24,7 @@
         </div>
         <n-flex v-if="isDesktop" class="user-data" size="small">
           <n-text class="name">
-            {{ dataStore.userLoginStatus ? dataStore.userData.name || "未知用户名" : "未登录" }}
+            {{ currentDisplayName }}
           </n-text>
           <!-- VIP -->
           <img
@@ -37,6 +37,36 @@
       </div>
     </template>
     <div class="user-menu" @click="userMenuShow = false">
+      <!-- 平台账号 -->
+      <div class="platforms">
+        <div
+          v-for="item in platformList"
+          :key="item.platform"
+          :class="['platform-item', { active: item.active }]"
+          @click="handlePlatform(item)"
+        >
+          <n-radio
+            class="platform-radio"
+            :checked="item.active"
+            :name="item.platform"
+            @click.stop
+            @update:checked="() => handlePlatform(item)"
+          />
+          <span class="platform-badge">{{ item.short }}</span>
+          <n-text class="platform-name">{{ item.name }}</n-text>
+          <template v-if="item.loggedIn">
+            <n-avatar
+              round
+              :size="20"
+              :src="item.avatarUrl"
+              fallback-src="/images/avatar.jpg?asset"
+            />
+            <n-text class="platform-nickname" depth="3">{{ item.nickname }}</n-text>
+          </template>
+          <n-text v-else class="platform-login" depth="3">登录</n-text>
+        </div>
+      </div>
+      <n-divider />
       <!-- 用户信息 -->
       <n-flex class="user-info" align="center" justify="center" vertical>
         <n-text class="nickname text-hidden">{{ dataStore.userData.name || "未知用户名" }}</n-text>
@@ -82,9 +112,10 @@
 </template>
 
 <script setup lang="ts">
-import { useDataStore } from "@/stores";
-import { openUserLogin } from "@/utils/modal";
+import { useDataStore, usePlatformStore, PLATFORM_META } from "@/stores";
+import { openUserLogin, openPlatformLogin } from "@/utils/modal";
 import { getLoginState } from "@/api/login";
+import type { ApiPlatform } from "@/types/shared";
 import {
   toLogout,
   isLogin,
@@ -96,19 +127,82 @@ import { useMobile } from "@/composables/useMobile";
 
 const router = useRouter();
 const dataStore = useDataStore();
+const platformStore = usePlatformStore();
 
 const { isDesktop } = useMobile();
 
 // 用户菜单展示
 const userMenuShow = ref<boolean>(false);
 
+// 平台账号列表
+const platformList = computed(() => {
+  const current = platformStore.currentPlatform;
+  return (Object.keys(PLATFORM_META) as ApiPlatform[]).map((platform) => {
+    if (platform === "netease") {
+      return {
+        platform,
+        name: PLATFORM_META.netease.name,
+        short: PLATFORM_META.netease.short,
+        active: current === platform,
+        loggedIn: dataStore.userLoginStatus,
+        nickname: dataStore.userData.name || "未知用户名",
+        avatarUrl: dataStore.userData?.avatarUrl ?? "",
+      };
+    }
+    const profile = platformStore.platformProfiles[platform];
+    return {
+      platform,
+      name: PLATFORM_META[platform].name,
+      short: PLATFORM_META[platform].short,
+      active: current === platform,
+      loggedIn: !!profile,
+      nickname: profile?.nickname ?? "",
+      avatarUrl: profile?.avatarUrl ?? "",
+    };
+  });
+});
+
+// 当前平台是否已登录
+const currentLoggedIn = computed(() => {
+  if (platformStore.currentPlatform === "netease") return dataStore.userLoginStatus;
+  return !!platformStore.platformProfiles[platformStore.currentPlatform];
+});
+
+// 当前平台头像
+const currentAvatarUrl = computed(() => {
+  if (platformStore.currentPlatform === "netease") return dataStore.userData?.avatarUrl;
+  return platformStore.platformProfiles[platformStore.currentPlatform]?.avatarUrl;
+});
+
+// 当前平台显示名
+const currentDisplayName = computed(() => {
+  if (platformStore.currentPlatform === "netease") {
+    return dataStore.userLoginStatus ? dataStore.userData.name || "未知用户名" : "未登录";
+  }
+  return platformStore.platformProfiles[platformStore.currentPlatform]?.nickname || "未登录";
+});
+
 // 开启用户菜单
 const openMenu = () => {
-  if (dataStore.userLoginStatus) {
+  if (dataStore.userLoginStatus || platformStore.loggedInPlatforms.length > 0) {
     userMenuShow.value = !userMenuShow.value;
   } else {
     openUserLogin();
   }
+};
+
+// 选择平台：已登录则切换，未登录则拉起对应平台的登录弹窗
+const handlePlatform = (item: (typeof platformList.value)[number]) => {
+  userMenuShow.value = false;
+  if (!item.loggedIn) {
+    if (item.platform === "netease") {
+      openUserLogin();
+    } else {
+      openPlatformLogin(item.platform);
+    }
+    return;
+  }
+  platformStore.switchPlatform(item.platform);
 };
 
 // 用户喜欢数据
@@ -158,8 +252,23 @@ const checkLoginStatus = async () => {
   }
 };
 
-// 退出登录
+// 退出登录（作用于当前平台）
 const isLogout = () => {
+  // 第三方平台：退出当前平台的登录态
+  if (platformStore.currentPlatform !== "netease") {
+    const platform = platformStore.currentPlatform;
+    window.$dialog.warning({
+      title: "退出登录",
+      content: `确认退出${PLATFORM_META[platform].name}登录？`,
+      positiveText: "确认登出",
+      negativeText: "取消",
+      onPositiveClick: async () => {
+        await platformStore.logout(platform);
+        window.$message.success("已退出登录");
+      },
+    });
+    return;
+  }
   if (!isLogin()) {
     openUserLogin();
     return;
@@ -175,6 +284,8 @@ const isLogout = () => {
 
 onBeforeMount(() => {
   checkLoginStatus();
+  // 刷新第三方平台的账号资料
+  platformStore.refreshAllProfiles();
 });
 </script>
 
@@ -237,6 +348,56 @@ onBeforeMount(() => {
   display: flex;
   justify-content: center;
   flex-direction: column;
+  .platforms {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    .platform-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      &:hover {
+        background-color: rgba(var(--primary), 0.08);
+      }
+      &.active .platform-name {
+        font-weight: bold;
+      }
+      .platform-radio {
+        flex-shrink: 0;
+      }
+      .platform-badge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        min-width: 20px;
+        border-radius: 5px;
+        background-color: rgba(var(--primary), 0.12);
+        color: var(--primary-hex);
+        font-size: 11px;
+        line-height: 1;
+      }
+      .platform-name {
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .platform-nickname {
+        font-size: 12px;
+        max-width: 76px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .platform-login {
+        font-size: 12px;
+      }
+    }
+  }
   .user-info {
     .nickname {
       font-weight: bold;

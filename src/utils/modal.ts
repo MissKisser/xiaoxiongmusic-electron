@@ -1,5 +1,6 @@
 import { h } from "vue";
 import type { CoverType, UpdateInfoType, SettingType, SongType } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { CURRENT_AGREEMENT_VERSION } from "@/constants/agreement";
 import { NScrollbar } from "naive-ui";
 import { isLogin } from "./auth";
@@ -7,6 +8,7 @@ import { isArray, isFunction } from "lodash-es";
 import { useDataStore, useSettingStore } from "@/stores";
 import router from "@/router";
 import Login from "@/components/Modal/Login/Login.vue";
+import LoginPlatformQR from "@/components/Modal/Login/LoginPlatformQR.vue";
 import JumpArtist from "@/components/Modal/JumpArtist.vue";
 import UserAgreement from "@/components/Modal/UserAgreement.vue";
 import SongInfoEditor from "@/components/Modal/SongInfoEditor.vue";
@@ -77,6 +79,23 @@ export const openUserLogin = (showTip: boolean = false) => {
     style: { width: "400px" },
     content: () => {
       return h(Login, { onClose: () => modal.destroy() });
+    },
+  });
+};
+
+/**
+ * 第三方平台扫码登录弹窗
+ * @param platform 音源平台
+ */
+export const openPlatformLogin = (platform: ApiPlatform) => {
+  const modal = window.$modal.create({
+    preset: "card",
+    transformOrigin: "center",
+    autoFocus: false,
+    style: { width: "360px" },
+    title: platform === "qqmusic" ? "QQ 音乐登录" : "酷狗音乐登录",
+    content: () => {
+      return h(LoginPlatformQR, { platform, onClose: () => modal.destroy() });
     },
   });
 };
