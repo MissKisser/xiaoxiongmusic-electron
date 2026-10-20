@@ -5,6 +5,7 @@ import { initNcmAPI } from "./netease";
 import { initUnblockAPI } from "./unblock";
 import { initControlAPI } from "./control";
 import { initQQMusicPlatformAPI } from "./platform/qqmusic";
+import { initKugouPlatformAPI } from "./platform/kugou";
 import { initProxyAPI } from "./proxy";
 import fastifyCookie from "@fastify/cookie";
 import fastifyMultipart from "@fastify/multipart";
@@ -19,7 +20,7 @@ const initAppServer = async () => {
         ignoreTrailingSlash: true,
       },
     });
-    
+
     // 添加 CORS 支持
     server.addHook("onRequest", async (request, reply) => {
       // 设置 CORS 头
@@ -27,13 +28,13 @@ const initAppServer = async () => {
       reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
       reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
       reply.header("Access-Control-Expose-Headers", "Content-Range, Content-Length");
-      
+
       // 处理 OPTIONS 预检请求
       if (request.method === "OPTIONS") {
         return reply.code(204).send();
       }
     });
-    
+
     // 注册插件
     server.register(fastifyCookie);
     server.register(fastifyMultipart);
@@ -68,6 +69,10 @@ const initAppServer = async () => {
             url: "/api/qqmusic",
           },
           {
+            name: "KugouAPI",
+            url: "/api/kugou",
+          },
+          {
             name: "ProxyAPI",
             url: "/api/proxy",
           },
@@ -79,6 +84,7 @@ const initAppServer = async () => {
     server.register(initUnblockAPI, { prefix: "/api" });
     server.register(initControlAPI, { prefix: "/api" });
     server.register(initQQMusicPlatformAPI, { prefix: "/api" });
+    server.register(initKugouPlatformAPI, { prefix: "/api" });
     server.register(initProxyAPI, { prefix: "/api" });
     // 启动端口
     const port = Number(process.env["VITE_SERVER_PORT"] || 25884);

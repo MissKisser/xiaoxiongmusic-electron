@@ -13,6 +13,14 @@ import { getSessionCookies } from "../../../database/PlatformSessionDB";
 interface FetchOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /**
+   * 业务错误码非 0 时不抛错
+   *
+   * 酷狗把「业务失败」与「传输失败」混在同一个响应里：付费墙、无授权、
+   * 参数错误都走 HTTP 200 + 业务错误码。判据类接口需要自己读这些码，
+   * 此时不能让请求层把响应吞掉。
+   */
+  allowBusinessError?: boolean;
 }
 
 export interface KGRawBody {
@@ -47,9 +55,23 @@ export const kgRequest = async <T = unknown>(
   const body = JSON.parse(cleaned) as KGRawBody;
 
   const code = body.error_code ?? body.errcode ?? body.err_code ?? 0;
-  if (code !== 0 && code !== 200) throw new Error(`KG API error_code=${code}`);
+  if (!options.allowBusinessError && code !== 0 && code !== 200) {
+    throw new Error(`KG API error_code=${code}`);
+  }
 
   return body as T;
+};
+
+/**
+ * 读取酷狗响应里的业务错误码
+ * @param body - 响应体
+ * @returns 业务错误码，没有错误码时返回 0
+ */
+export const kgErrorCode = (body: unknown): number => {
+  if (!body || typeof body !== "object") return 0;
+  const record = body as Record<string, unknown>;
+  const code = record.error_code ?? record.errcode ?? record.err_code ?? 0;
+  return Number(code) || 0;
 };
 
 export interface GatewayRequestOptions {
@@ -60,6 +82,13 @@ export interface GatewayRequestOptions {
   headers?: Record<string, string>;
   notSignature?: boolean;
   timeoutMs?: number;
+  /**
+   * 业务错误码非 0 时不抛错
+   *
+   * 播放地址、评论、专辑等接口把「付费墙 / 无授权 / 参数错误」放在
+   * 业务错误码里，调用方需要按错误码分流，只能自己读。
+   */
+  allowBusinessError?: boolean;
 }
 
 /**
@@ -80,6 +109,7 @@ export const kgGatewayRequest = async <T = KGRawBody>(
     headers = {},
     notSignature = false,
     timeoutMs = 8000,
+    allowBusinessError = false,
   } = options;
 
   const clienttime = Math.floor(Date.now() / 1000);
@@ -151,7 +181,7 @@ export const kgGatewayRequest = async <T = KGRawBody>(
   const body = JSON.parse(cleaned) as KGRawBody;
 
   const code = body.error_code ?? body.errcode ?? body.err_code ?? 0;
-  if (code !== 0 && code !== 200) {
+  if (!allowBusinessError && code !== 0 && code !== 200) {
     throw new Error(
       `KG Gateway API error: code=${code}, msg=${body.msg || body.error || "unknown"}`,
     );

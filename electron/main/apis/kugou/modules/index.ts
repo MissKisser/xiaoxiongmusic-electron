@@ -1,7 +1,7 @@
 /**
- * KG 模块注册表（3.x 精简版）
+ * KG 模块注册表
  *
- * 只注册平台登录与歌单读取所需模块；搜索、歌词、播放地址解析等不移植。
+ * 平台数据面：登录、歌单读写、搜索、歌词、评论、播放地址、专辑、歌手、歌单详情。
  */
 
 import type { KGModule } from "../core/types";
@@ -16,6 +16,13 @@ import {
   playlist_subscribe,
   playlist_tracks,
 } from "./playlist_write";
+import { album } from "./album";
+import { artist } from "./artist";
+import { comment } from "./comment";
+import { lyric } from "./lyric";
+import { playlist } from "./playlist";
+import { search } from "./search";
+import { song_url } from "./song_url";
 
 export const modules: Record<string, KGModule> = {
   login_qr_key: loginQrKey,
@@ -29,4 +36,11 @@ export const modules: Record<string, KGModule> = {
   playlist_delete,
   playlist_tracks,
   playlist_subscribe,
+  search,
+  song_url,
+  lyric,
+  comment,
+  album,
+  artist,
+  playlist,
 };

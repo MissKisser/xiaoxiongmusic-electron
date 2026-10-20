@@ -27,12 +27,23 @@ export const clearKugouSession = (): void => {
 /** 2 分钟响应缓存 */
 const DEFAULT_TTL = 2 * 60 * 1000;
 const MAX_ENTRIES = 200;
+
+/**
+ * 不缓存的模块
+ *
+ * - 登录票据类：一次性凭据，缓存后即失效
+ * - 账号态类：随登录态变化
+ * - 播放地址：播放票据时效短
+ * - 评论与搜索：实时性要求高
+ */
 const NON_CACHEABLE = new Set([
   "login_qr_key",
   "login_qr_check",
   "user_detail",
+  "user_profile",
   "song_url",
   "comment",
+  "search",
 ]);
 
 interface CacheEntry {
