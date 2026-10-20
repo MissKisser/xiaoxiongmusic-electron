@@ -5,11 +5,14 @@ import axios from "axios";
 import getKuwoSongUrl from "./kuwo";
 import getBodianSongUrl from "./bodian";
 import getGequbaoSongUrl from "./gequbao";
+import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
 
 /**
  * 直接获取 网易云云盘 链接
  * Thank @939163156
  * Power by GD音乐台(music.gdstudio.xyz)
+ * @param id 歌曲 ID
+ * @returns 歌曲直链结果
  */
 const getNeteaseSongUrl = async (id: number | string): Promise<SongUrlResult> => {
   try {
@@ -19,12 +22,39 @@ const getNeteaseSongUrl = async (id: number | string): Promise<SongUrlResult> =>
       params: { types: "url", id },
     });
     const songUrl = result.data.url;
+    // 安全修复：解锁结果缺失时返回 404，避免返回 200 + 空 url 误导客户端
+    if (!songUrl) {
+      return { code: 404, url: null };
+    }
     serverLog.log("🔗 NeteaseSongUrl URL:", songUrl);
     return { code: 200, url: songUrl };
   } catch (error) {
     serverLog.error("❌ Get NeteaseSongUrl Error:", error);
     return { code: 404, url: null };
   }
+};
+
+/**
+ * 构造匹配信息
+ *
+ * 站外源按「歌名 + 歌手 + 时长」寻址：请求显式带 `songName` / `artist` 时优先取显式值，
+ * 否则按关键词拆分（按最后一个「-」切分并 trim，尾随空格不再导致恒 404）；
+ * `duration` 为可选的歌曲声明时长（秒），参与三重校验，不传则跳过时长校验。
+ * @param query 请求查询参数
+ * @returns 目标歌曲信息
+ */
+const buildMatchInfo = (query: { [key: string]: string }): MatchTarget => {
+  const keyword = (query.keyword || "").trim();
+  const duration = parseDurationParam(query.duration);
+  const songName = (query.songName || "").trim();
+  const artist = (query.artist || "").trim();
+  if (!songName && !artist) return buildTarget(keyword, duration);
+  const parsed = parseKeyword(keyword);
+  return {
+    title: songName || parsed.title,
+    artist: artist || parsed.artist,
+    duration,
+  };
 };
 
 // 初始化 UnblockAPI
@@ -51,21 +81,6 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
       return reply.send(result);
     },
   );
-  // 构造匹配信息（fallback 用 lastIndexOf 兼容歌名含连字符的情况）
-  const buildMatchInfo = (query: { [key: string]: string }) => {
-    let songName = query.songName || "";
-    let artist = query.artist || "";
-    if (!songName && query.keyword) {
-      const lastIdx = query.keyword.lastIndexOf("-");
-      if (lastIdx > 0) {
-        songName = query.keyword.slice(0, lastIdx).trim();
-        artist = artist || query.keyword.slice(lastIdx + 1).trim();
-      } else {
-        songName = query.keyword.trim();
-      }
-    }
-    return { keyword: query.keyword || "", songName, artist };
-  };
   // kuwo
   fastify.get(
     "/unblock/kuwo",
