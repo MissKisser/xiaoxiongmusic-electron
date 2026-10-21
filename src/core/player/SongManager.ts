@@ -47,6 +47,8 @@ export type AudioSource = {
   quality?: QualityType;
   /** 解锁源名称（如果使用了解锁服务） */
   unlockSource?: string | null;
+  /** 播放失败的用户可读原因（无源可用时给出） */
+  failureReason?: string;
 };
 
 /**
@@ -71,6 +73,22 @@ const resolveSongArtist = (song: SongType): string => {
   const artists = song.artists;
   if (Array.isArray(artists)) return artists[0]?.name ?? "";
   return artists ?? "";
+};
+
+/** 第三方平台的歌曲缺歌手时的拒绝原因（用户可读） */
+const MISSING_ARTIST_REASON = "缺少歌手信息，无法安全换源";
+
+/**
+ * 把解锁源的异常翻译成用户可读的原因
+ *
+ * 只保留错误类别，不带出异常原文（异常里可能夹带请求地址）。
+ * @param error 捕获到的异常
+ * @returns 用户可读的原因
+ */
+const describeUnlockError = (error: unknown): string => {
+  const code = (error as { code?: string } | undefined)?.code;
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return "请求超时";
+  return "请求失败";
 };
 
 /**
@@ -103,6 +121,8 @@ class SongManager {
   private lastPlatformFailure:
     | { platform: ApiPlatform; reason?: string; status?: number; privilege?: number | null }
     | undefined;
+  /** 最近一次解锁链的用户可读失败原因（用于最终失败时的用户提示） */
+  private lastUnlockFailure: string | undefined;
 
   /**
    * 预加载封面图片
@@ -447,7 +467,9 @@ class SongManager {
    * 网易云解锁源对第三方平台的歌曲只能**按关键词检索网易云曲库**（两套 id 编号空间不同，
    * 拿第三方 id 直查会静默播错歌），因此第三方歌曲在网易云源上走关键词寻址分支。
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
-   * 歌曲缺少歌手信息时按空串处理并只按歌名寻址，不会因此中断整条解锁链。
+   *
+   * 逐源隔离失败：单个源超时或报错只记失败，继续尝试下一个源，
+   * 全部源都拿不到链接时给出可读的失败原因。
    * @param songData 歌曲数据
    * @returns 解锁播放信息
    */
@@ -462,11 +484,18 @@ class SongManager {
       return { id: songId, url: undefined };
     }
     if (!artist) {
-      console.warn(`⚠️ [${songId}] 歌曲缺少歌手信息，换源将只按歌名检索：${songName}`);
+      console.warn(`⚠️ [${songId}] 歌曲缺少歌手信息：${songName}`);
     }
 
     // 第三方平台的歌曲不参与网易云按 id 寻址，改走关键词检索
     const isNeteaseSong = resolvePlatform(song) === "netease";
+    const useKeywordLookup = !isNeteaseSong;
+    if (useKeywordLookup && !artist) {
+      // 关键词寻址缺歌手时只能按歌名检索，会命中同名不同版本的曲目
+      // （实测《青花瓷》仅按歌名检索命中 95 秒的街声版），宁可不播也不播错
+      console.warn(`⚠️ [${songId}] ${MISSING_ARTIST_REASON}：${songName}`);
+      return { id: songId, url: undefined, failureReason: MISSING_ARTIST_REASON };
+    }
     const priorityOrder = [
       SongUnlockServer.NETEASE,
       SongUnlockServer.BODIAN,
@@ -506,9 +535,11 @@ class SongManager {
       );
     }
 
+    // 逐源失败原因：单个源失败只记失败，不阻断其余源
+    const failures: string[] = [];
     for (const server of sortedServers) {
+      const sourceName = this.getUnlockSourceName(server);
       try {
-        const sourceName = this.getUnlockSourceName(server);
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
         const result = await unlockSongUrl(
           songId,
@@ -517,7 +548,7 @@ class SongManager {
           song.name,
           artist,
           duration,
-          !isNeteaseSong,
+          useKeywordLookup,
         );
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {
           ...result,
@@ -562,18 +593,21 @@ class SongManager {
             quality,
             unlockSource: server,
           };
-        } else {
-          console.warn(`⚠️ [${songId}] ${sourceName} 返回失败，继续尝试下一个服务...`);
         }
+        failures.push(`${sourceName}：${result.reason || "未找到可用链接"}`);
+        console.warn(`⚠️ [${songId}] ${sourceName} 返回失败，继续尝试下一个服务...`);
       } catch (error) {
-        const sourceName = this.getUnlockSourceName(server);
+        // 单个源失败只记失败，继续尝试下一个服务
+        failures.push(`${sourceName}：${describeUnlockError(error)}`);
         console.error(`❌ [${songId}] ${sourceName} 请求失败:`, error);
-        // 继续尝试下一个服务
       }
     }
 
-    console.warn(`⚠️ [${songId}] 所有解锁服务均失败`);
-    return { id: songId, url: undefined };
+    const failureReason = failures.length
+      ? `所有解锁源均未找到可用链接（${failures.join("；")}）`
+      : "所有解锁源均未找到可用链接";
+    console.warn(`⚠️ [${songId}] ${failureReason}`);
+    return { id: songId, url: undefined, failureReason };
   };
 
   /**
@@ -606,6 +640,8 @@ class SongManager {
           console.log(`✅ [${songId}] 解锁成功，使用解锁链接播放`);
           return unlockResult;
         }
+        // 预载阶段不打扰用户，只有正式播放才记录失败原因
+        if (notify) this.lastUnlockFailure = unlockResult.failureReason;
         return undefined;
       }
       case "trial": {
@@ -715,16 +751,19 @@ class SongManager {
   }
 
   /**
-   * 播放最终失败时给用户可见提示
+   * 汇总播放最终失败的用户可读原因
    *
-   * 第三方平台的失败原因（付费 / 无授权 / 凭证异常）由平台模块给出，
-   * 这里翻译成用户可读文案，走与「当前歌曲仅可试听」同款的提示通道。
+   * 平台侧失败（付费墙 / 无授权）优先 —— 它的文案已说明「已尝试换源未成功」；
+   * 否则用解锁链逐源失败的原因。
+   * @returns 用户可读原因；无明确原因时返回 undefined
    */
-  private notifyPlaybackFailure = (): void => {
+  private takePlaybackFailureReason = (): string | undefined => {
     const failure = this.lastPlatformFailure;
     this.lastPlatformFailure = undefined;
-    if (!failure) return;
-    window.$message.warning(describePlaybackFailure(failure.platform, failure));
+    const platformReason = failure ? describePlaybackFailure(failure.platform, failure) : undefined;
+    const unlockReason = this.lastUnlockFailure;
+    this.lastUnlockFailure = undefined;
+    return platformReason || unlockReason;
   };
 
   /**
@@ -736,6 +775,10 @@ class SongManager {
   public getAudioSource = async (song: SongType): Promise<AudioSource> => {
     const settingStore = useSettingStore();
     const songId = song.type === "radio" ? song.dj?.id : song.id;
+    // 失败原因按次结算：清掉上一首（含预载路径）留下的记录，避免串到本首。
+    // 本次调用内的 getOnlineUrl 会按本曲重新写入平台侧原因，入口清空不影响取值。
+    this.lastUnlockFailure = undefined;
+    this.lastPlatformFailure = undefined;
     console.log(`🎵 [${songId || song.id}] 开始获取音频源，类型: ${song.type}`, {
       isElectron,
       song,
@@ -826,13 +869,14 @@ class SongManager {
 
       // 无可用源
       console.error(`❌ [${songId}] 所有音频源获取失败，无可用链接`);
-      this.notifyPlaybackFailure();
+      const failureReason = this.takePlaybackFailureReason();
       return {
         id: songId,
         url: undefined,
         quality: undefined,
         isUnlocked: false,
         unlockSource: null,
+        failureReason,
       };
     } catch (e) {
       console.error(`❌ [${songId}] 获取音频源异常:`, e);

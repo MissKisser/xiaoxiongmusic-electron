@@ -63,6 +63,22 @@ export const songUrl = (
 };
 
 /**
+ * 解锁请求的超时预算（毫秒）
+ *
+ * 解锁源在主进程内串行完成「检索 → 取链 → 体积校验」，单次耗时可达数十秒
+ * （网易云关键词检索源实测单次检索即达 10.6 s），
+ * 沿用网易云链路的 15 s 通用超时会直接把慢源掐断，表现为「所有音频源获取失败」。
+ * 这里只给解锁请求单独设预算，网易云请求的超时行为保持不变。
+ */
+const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
+  // 网易云关键词检索源最慢：检索 + 两级取链 + 体积校验串行
+  [SongUnlockServer.NETEASE]: 60000,
+  [SongUnlockServer.BODIAN]: 20000,
+  [SongUnlockServer.GEQUBAO]: 20000,
+  [SongUnlockServer.KUWO]: 20000,
+};
+
+/**
  * 获取解锁歌曲 URL
  *
  * 网易云解锁源按歌曲 ID 寻址，其余解锁源按「关键词 / 歌名 + 歌手」寻址；
@@ -72,6 +88,9 @@ export const songUrl = (
  * 第三方平台（QQ 音乐 / 酷狗）的歌曲在网易云侧没有对应 ID，
  * 必须走「按关键词检索网易云」的分支（`useKeywordLookup`），
  * 否则会把第三方 ID 喂给网易云接口，静默返回另一首歌。
+ *
+ * 解锁请求走独立超时预算（解锁源比普通接口慢得多），
+ * 且不在客户端层重试：解锁链按源逐个尝试，单个源失败即换下一个。
  * @param id 歌曲 ID
  * @param keyword 搜索关键词（`歌名-歌手`）
  * @param server 解锁源
@@ -97,6 +116,8 @@ export const unlockSongUrl = (
     baseURL: "/api/unblock",
     url: `/${server}`,
     params: { ...params, noCookie: true },
+    timeout: UNLOCK_TIMEOUT[server],
+    "axios-retry": { retries: 0 },
   });
 };
 
