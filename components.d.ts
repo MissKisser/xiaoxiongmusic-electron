@@ -55,6 +55,7 @@ declare module 'vue' {
     Login: typeof import('./src/components/Modal/Login/Login.vue')['default']
     LoginCookie: typeof import('./src/components/Modal/Login/LoginCookie.vue')['default']
     LoginPhone: typeof import('./src/components/Modal/Login/LoginPhone.vue')['default']
+    LoginPlatformQR: typeof import('./src/components/Modal/Login/LoginPlatformQR.vue')['default']
     LoginQRCode: typeof import('./src/components/Modal/Login/LoginQRCode.vue')['default']
     LoginUID: typeof import('./src/components/Modal/Login/LoginUID.vue')['default']
     Logo: typeof import('./src/components/Layout/Logo.vue')['default']
