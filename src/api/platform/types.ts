@@ -134,6 +134,65 @@ export interface PlatformLeaderboard {
   songs: PlatformSong[];
 }
 
+/**
+ * 归一化后的分组榜单条目
+ *
+ * QQ 音乐与酷狗的榜单清单同构：条目自带榜单号、标题、副标题、简介、
+ * 期数、更新时间、封面与曲目总数，榜单号即该平台定位榜单详情的参数
+ * （QQ 音乐为 `topid`，酷狗为 `rankid`）。
+ */
+export interface PlatformLeaderboardBoard {
+  /** 榜单号（平台内定位榜单详情用） */
+  topId: number;
+  /** 榜单名 */
+  title: string;
+  /** 榜单副标题 */
+  subTitle: string;
+  /** 榜单简介 */
+  intro: string;
+  /** 榜单期数 */
+  period: string;
+  /** 更新时间 */
+  updateTime: string;
+  /** 榜单封面 */
+  cover: string;
+  /** 榜单曲目总数 */
+  total: number;
+  /** 所属分组名 */
+  groupName: string;
+}
+
+/** 归一化后的榜单分组（分组榜单清单的一组） */
+export interface PlatformLeaderboardGroup {
+  /** 分组号 */
+  groupId: number;
+  /** 分组名 */
+  groupName: string;
+  /** 分组内榜单 */
+  toplists: PlatformLeaderboardBoard[];
+}
+
+/** 归一化后的榜单详情（单页曲目） */
+export interface PlatformLeaderboardDetail {
+  /** 榜单名 */
+  title: string;
+  /** 榜单副标题 */
+  subTitle: string;
+  /** 榜单封面 */
+  cover: string;
+  /** 榜单曲目总数 */
+  total: number;
+  /** 本页曲目 */
+  songs: PlatformSong[];
+  /**
+   * 是否还有下一页
+   *
+   * 平台一次给全量榜单曲目（无翻页概念）时为 undefined，
+   * 页面据此不显示「没有更多」页脚。
+   */
+  hasMore?: boolean;
+}
+
 /** 归一化后的专辑（网易云形状） */
 export interface PlatformAlbum {
   /** 专辑 ID */

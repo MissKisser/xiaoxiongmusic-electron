@@ -21,6 +21,9 @@ import {
   type PlatformCommentPage,
   type PlatformCoverEntry,
   type PlatformLeaderboard,
+  type PlatformLeaderboardBoard,
+  type PlatformLeaderboardDetail,
+  type PlatformLeaderboardGroup,
   type PlatformLyric,
   type PlatformLyricTarget,
   type PlatformPlaylist,
@@ -846,6 +849,95 @@ export const qqLeaderboard = async (
     title: String(res?.title ?? ""),
     subTitle: String(res?.subTitle ?? ""),
     cover: secureUrl(res?.cover ?? ""),
+    total: Number(res?.total ?? 0),
+    songs: (res?.songs ?? []).map(normalizeQqSong),
+  };
+};
+
+/** 主进程 QQ 榜单清单模块的原生返回 */
+interface QqLeaderboardListResponse {
+  code?: number;
+  total?: number;
+  groups?: Array<{
+    groupId?: number;
+    groupName?: string;
+    toplists?: Array<Record<string, any>>;
+  }>;
+  message?: string;
+}
+
+/** 主进程 QQ 榜单详情模块的原生返回 */
+interface QqLeaderboardDetailResponse {
+  code?: number;
+  topid?: number;
+  title?: string;
+  subTitle?: string;
+  intro?: string;
+  period?: string;
+  updateTime?: string;
+  cover?: string;
+  total?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 归一化 QQ 榜单条目
+ * @param board 主进程返回的榜单条目
+ * @param groupName 所属分组名
+ * @returns 归一化榜单条目
+ */
+const normalizeQqBoard = (
+  board: Record<string, any>,
+  groupName: string,
+): PlatformLeaderboardBoard => ({
+  topId: Number(board?.topId ?? 0),
+  title: String(board?.title ?? ""),
+  subTitle: String(board?.subTitle ?? ""),
+  intro: String(board?.intro ?? ""),
+  period: String(board?.period ?? ""),
+  updateTime: String(board?.updateTime ?? ""),
+  cover: String(board?.cover ?? ""),
+  total: Number(board?.total ?? 0),
+  groupName,
+});
+
+/**
+ * 读取 QQ 音乐榜单清单
+ *
+ * 榜单体系按分组下发（巅峰榜 / 地区榜 / 特色榜 / 全球榜 / 网络榜），
+ * 先取清单，再按榜单号取详情。
+ * @returns 按分组组织的榜单清单
+ */
+export const qqLeaderboardList = async (): Promise<PlatformLeaderboardGroup[]> => {
+  const res = await platformRequest<QqLeaderboardListResponse>(QQ_MUSIC, "leaderboard_list");
+  return (res?.groups ?? []).map((group) => ({
+    groupId: Number(group?.groupId ?? 0),
+    groupName: String(group?.groupName ?? ""),
+    toplists: (group?.toplists ?? []).map((board) =>
+      normalizeQqBoard(board, String(group?.groupName ?? "")),
+    ),
+  }));
+};
+
+/**
+ * 读取 QQ 音乐单个榜单的详情
+ * @param topId 榜单号
+ * @param limit 取回的曲目数
+ * @returns 榜单信息与曲目
+ */
+export const qqLeaderboardDetail = async (
+  topId: number,
+  limit = 100,
+): Promise<PlatformLeaderboardDetail> => {
+  const res = await platformRequest<QqLeaderboardDetailResponse>(QQ_MUSIC, "leaderboard_detail", {
+    topid: topId,
+    limit,
+  });
+  return {
+    title: String(res?.title ?? ""),
+    subTitle: String(res?.subTitle ?? ""),
+    cover: String(res?.cover ?? ""),
     total: Number(res?.total ?? 0),
     songs: (res?.songs ?? []).map(normalizeQqSong),
   };

@@ -21,6 +21,9 @@ import {
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformCoverEntry,
+  type PlatformLeaderboardBoard,
+  type PlatformLeaderboardDetail,
+  type PlatformLeaderboardGroup,
   type PlatformLyric,
   type PlatformLyricTarget,
   type PlatformPlaylist,
@@ -928,3 +931,139 @@ export const toKgAlbumEntry = (album: KgSearchCoverEntry): PlatformCoverEntry =>
   publishTime: album.publishTime,
   platform: KUGOU,
 });
+
+/** 酷狗默认榜单号（TOP500） */
+export const KG_DEFAULT_RANK_ID = 8888;
+
+/** 主进程酷狗榜单清单模块的原生返回 */
+interface KgLeaderboardListResponse {
+  code?: number;
+  total?: number;
+  groups?: Array<{
+    groupId?: number;
+    groupName?: string;
+    toplists?: Array<Record<string, any>>;
+  }>;
+  message?: string;
+}
+
+/** 主进程酷狗榜单详情模块的原生返回 */
+interface KgLeaderboardDetailResponse {
+  code?: number;
+  title?: string;
+  subTitle?: string;
+  intro?: string;
+  cover?: string;
+  period?: string;
+  updateTime?: string;
+  listenCount?: number;
+  total?: number;
+  page?: number;
+  limit?: number;
+  songs?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 归一化酷狗榜单条目
+ *
+ * 榜单号取 `rankid`（主进程把清单条目的 `topId` 与 `rankId` 都归一到它），
+ * 封面在主进程已替换好尺寸（300px），此处原样带出。
+ * @param board 主进程返回的榜单条目
+ * @param groupName 所属分组名
+ * @returns 归一化榜单条目
+ */
+const normalizeKgBoard = (
+  board: Record<string, any>,
+  groupName: string,
+): PlatformLeaderboardBoard => ({
+  topId: Number(board?.topId ?? board?.rankId ?? 0),
+  title: String(board?.title ?? ""),
+  subTitle: String(board?.subTitle ?? ""),
+  intro: String(board?.intro ?? ""),
+  period: String(board?.period ?? ""),
+  updateTime: String(board?.updateTime ?? ""),
+  cover: String(board?.cover ?? ""),
+  total: Number(board?.total ?? 0),
+  groupName,
+});
+
+/**
+ * 归一化酷狗榜单曲目
+ *
+ * 沿用歌单曲目的映射口径：`hash` → `platformId`（播放地址 / 歌词以它为键）、
+ * `mixSongId` → 数字 `id`、封面 / 歌手 / 时长照既有映射。
+ *
+ * 付费判据的差异：榜单曲目只给歌曲级授权位（`pay.privilege`），
+ * 不像歌单曲目那样按音质分档下发，故按歌曲级授权位判定
+ * （`0` / `8` 可免费播，其余为会员墙）。
+ * @param song 酷狗原生榜单曲目
+ * @returns 归一化曲目
+ */
+const normalizeKgLeaderboardSong = (song: Record<string, any>): PlatformSong => {
+  const normalized = normalizeKgSong(song);
+  const privilege = Number(song?.pay?.privilege ?? song?.privilege ?? Number.NaN);
+  const fee =
+    Number.isNaN(privilege) ||
+    privilege === KG_PRIVILEGE_FREE ||
+    privilege === KG_PRIVILEGE_FREE_FOR_AD
+      ? 0
+      : 1;
+  // 歌曲主键缺失时按 hash 派生稳定数字 id，保证列表内不出现重复 id
+  const id = toNumericId(
+    normalized.id || song?.mixSongId || song?.albumAudioId,
+    String(song?.hash ?? ""),
+  );
+  return { ...normalized, id, fee };
+};
+
+/**
+ * 读取酷狗音乐榜单清单
+ *
+ * 榜单体系按分组下发（巅峰榜 / 地区榜 / 特色榜 / 全球榜 / 曲风榜），
+ * 先取清单，再按榜单号取详情。
+ * @param groupId 分组号（classify），不传则返回全部分组
+ * @returns 按分组组织的榜单清单
+ */
+export const kgLeaderboardList = async (groupId?: number): Promise<PlatformLeaderboardGroup[]> => {
+  const res = await platformRequest<KgLeaderboardListResponse>(KUGOU, "leaderboard_list", {
+    groupId,
+  });
+  return (res?.groups ?? []).map((group) => ({
+    groupId: Number(group?.groupId ?? 0),
+    groupName: String(group?.groupName ?? ""),
+    toplists: (group?.toplists ?? []).map((board) =>
+      normalizeKgBoard(board, String(group?.groupName ?? "")),
+    ),
+  }));
+};
+
+/**
+ * 读取酷狗音乐单个榜单的详情
+ *
+ * 榜单以 `rankid` 定位，曲目按页取回（热门榜单动辄数百首）。
+ * @param rankId 榜单号
+ * @param page 页码（从 1 开始）
+ * @param limit 每页曲目数
+ * @returns 榜单信息与本页曲目
+ */
+export const kgLeaderboardDetail = async (
+  rankId: number,
+  page = 1,
+  limit = 100,
+): Promise<PlatformLeaderboardDetail> => {
+  const res = await platformRequest<KgLeaderboardDetailResponse>(KUGOU, "leaderboard_detail", {
+    rankid: rankId,
+    page,
+    limit,
+  });
+  const total = Number(res?.total ?? 0);
+  return {
+    title: String(res?.title ?? ""),
+    subTitle: String(res?.subTitle ?? ""),
+    cover: String(res?.cover ?? ""),
+    total,
+    songs: (res?.songs ?? []).map(normalizeKgLeaderboardSong),
+    hasMore: page * limit < total,
+  };
+};

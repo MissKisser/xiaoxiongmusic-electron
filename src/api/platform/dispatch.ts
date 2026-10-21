@@ -35,6 +35,8 @@ import {
   kgArtistDetail,
   kgComment,
   kgFindLikedPlaylist,
+  kgLeaderboardDetail,
+  kgLeaderboardList,
   kgPlaylistDetail,
   kgPlaylistSquare,
   kgPublicPlaylist,
@@ -43,6 +45,7 @@ import {
   kgSearchArtists,
   kgSearchPlaylists,
   kgUserPlaylistList,
+  KG_DEFAULT_RANK_ID,
   toKgAlbumEntry,
   toKgArtistEntry,
   toKgPlaylistEntry,
@@ -54,6 +57,8 @@ import {
   qqComment,
   qqHotSearch,
   qqLeaderboard,
+  qqLeaderboardDetail,
+  qqLeaderboardList,
   qqPlaylistDetailPage,
   qqPlaylistSquare,
   qqPublicPlaylistDetail,
@@ -74,6 +79,7 @@ import {
   toSongType,
   type PlatformComment,
   type PlatformCommentPage,
+  type PlatformLeaderboardGroup,
   type PlatformPlaylist,
   type PlatformPlaylistDetail,
 } from "./types";
@@ -1301,19 +1307,32 @@ export interface DispatchLeaderboardResult {
   total: number;
   /** 榜单曲目 */
   songs: SongType[];
+  /**
+   * 是否还有下一页
+   *
+   * 平台一次给全量榜单曲目（无翻页概念）时为 undefined，
+   * 页面据此不显示「没有更多」页脚。
+   */
+  hasMore?: boolean;
 }
 
 /**
  * 读取当前平台的榜单
  *
- * QQ 音乐有榜单模块（缺省热歌榜）；酷狗没有榜单能力，返回空榜单。
+ * QQ 音乐有榜单模块（缺省热歌榜）；酷狗的榜单按页取回，缺省 TOP500。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 榜单信息与曲目
  */
 export const dispatchLeaderboard = async (
   platform: ApiPlatform,
-  options: { topid?: number; limit?: number; offset?: number } = {},
+  options: {
+    topid?: number;
+    rankid?: number;
+    limit?: number;
+    offset?: number;
+    page?: number;
+  } = {},
 ): Promise<DispatchLeaderboardResult> => {
   if (platform === "qqmusic") {
     const res = await qqLeaderboard(options.topid ?? 26, options.limit ?? 50, options.offset ?? 0);
@@ -1324,6 +1343,72 @@ export const dispatchLeaderboard = async (
       total: res.total,
       songs: res.songs.map(toSongType),
     };
+  }
+  if (platform === "kugou") {
+    const res = await kgLeaderboardDetail(
+      options.rankid ?? KG_DEFAULT_RANK_ID,
+      options.page ?? 1,
+      options.limit ?? 50,
+    );
+    return {
+      title: res.title,
+      subTitle: res.subTitle,
+      cover: res.cover,
+      total: res.total,
+      songs: res.songs.map(toSongType),
+      hasMore: res.hasMore,
+    };
+  }
+  return { title: "", subTitle: "", cover: "", total: 0, songs: [] };
+};
+
+/**
+ * 读取当前平台的分组榜单清单
+ *
+ * QQ 音乐与酷狗的榜单体系都按分组下发（巅峰榜 / 地区榜 / 特色榜 / …），
+ * 页面按分组渲染榜单卡片，点选后再取该榜单的曲目。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 按分组组织的榜单清单
+ */
+export const dispatchLeaderboardGroups = async (
+  platform: ApiPlatform,
+  options: { groupId?: number } = {},
+): Promise<PlatformLeaderboardGroup[]> => {
+  if (platform === "qqmusic") return qqLeaderboardList();
+  if (platform === "kugou") return kgLeaderboardList(options.groupId);
+  return [];
+};
+
+/**
+ * 读取当前平台单个榜单的详情
+ *
+ * QQ 音乐一次给全量榜单曲目（无翻页概念），
+ * 酷狗榜单动辄数百首，按页取回。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 榜单信息与曲目
+ */
+export const dispatchLeaderboardDetail = async (
+  platform: ApiPlatform,
+  options: { boardId: number; page?: number; limit?: number },
+): Promise<DispatchLeaderboardResult> => {
+  if (platform === "qqmusic") {
+    const res = await qqLeaderboardDetail(options.boardId, options.limit ?? 100);
+    return {
+      title: res.title,
+      subTitle: res.subTitle,
+      cover: res.cover,
+      total: res.total,
+      songs: res.songs.map(toSongType),
+    };
+  }
+  if (platform === "kugou") {
+    return dispatchLeaderboard(platform, {
+      rankid: options.boardId,
+      page: options.page ?? 1,
+      limit: options.limit ?? 100,
+    });
   }
   return { title: "", subTitle: "", cover: "", total: 0, songs: [] };
 };
