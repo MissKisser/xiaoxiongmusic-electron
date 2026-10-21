@@ -13,6 +13,7 @@ import axios from "axios";
 import { randomBytes } from "crypto";
 import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
 import { probeContentLength } from "./audio-length";
+import { sanitizeUrl } from "./sanitize";
 
 /** 歌曲宝直链码率（kbps） */
 const GEQUBAO_BITRATE_KBPS = 128;
@@ -206,7 +207,7 @@ const getGequbaoSongUrl = async (target: MatchTarget): Promise<SongUrlResult> =>
         );
         continue;
       }
-      serverLog.log("🔗 GequbaoSong URL:", url);
+      serverLog.log("🔗 GequbaoSong URL:", sanitizeUrl(url));
       return { code: 200, url };
     }
     return { code: 404, url: null };

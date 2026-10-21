@@ -18,6 +18,7 @@ import axios from "axios";
 import NeteaseCloudMusicApi from "@neteasecloudmusicapienhanced/api";
 import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
 import { probeContentLength } from "./audio-length";
+import { sanitizeUrl } from "./sanitize";
 
 /** GD 音乐台接口地址（网易云直链） */
 const GDSTUDIO_URL = "https://music-api.gdstudio.xyz/api.php";
@@ -171,7 +172,7 @@ export const getNeteaseSearchSongUrl = async (
         if (!check.verified) {
           serverLog.warn(`⚠️ Netease 直链体积未验证 (${detail.candidate.title}): ${check.reason}`);
         }
-        serverLog.log("🔗 NeteaseSearchSong URL:", source.url);
+        serverLog.log("🔗 NeteaseSearchSong URL:", sanitizeUrl(source.url));
         return { code: 200, url: source.url, lengthVerified: check.verified };
       }
     }

@@ -8,6 +8,7 @@
 import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
 import axios from "axios";
+import { sanitizeUrl } from "./sanitize";
 
 /**
  * 直接获取网易云歌曲直链
@@ -26,7 +27,7 @@ const getNeteaseSongUrl = async (id: number | string): Promise<SongUrlResult> =>
     if (!songUrl) {
       return { code: 404, url: null };
     }
-    serverLog.log("🔗 NeteaseSongUrl URL:", songUrl);
+    serverLog.log("🔗 NeteaseSongUrl URL:", sanitizeUrl(songUrl));
     return { code: 200, url: songUrl };
   } catch (error) {
     serverLog.error("❌ Get NeteaseSongUrl Error:", error);

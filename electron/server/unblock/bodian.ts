@@ -13,6 +13,7 @@ import axios from "axios";
 import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
 import { searchKuwoCandidates } from "./kuwo-search";
 import { probeContentLength } from "./audio-length";
+import { sanitizeUrl } from "./sanitize";
 
 /** 波点直链码率（kbps） */
 const BODIAN_BITRATE_KBPS = 320;
@@ -136,7 +137,7 @@ const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => 
       if (!check.verified) {
         serverLog.warn(`⚠️ Bodian 直链体积未验证 (${detail.candidate.title}): ${check.reason}`);
       }
-      serverLog.log("🔗 BodianSong URL:", url);
+      serverLog.log("🔗 BodianSong URL:", sanitizeUrl(url));
       return { code: 200, url, lengthVerified: check.verified };
     }
     return { code: 404, url: null };

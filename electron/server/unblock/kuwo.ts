@@ -13,6 +13,7 @@ import axios from "axios";
 import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
 import { searchKuwoCandidates } from "./kuwo-search";
 import { probeContentLength } from "./audio-length";
+import { sanitizeUrl } from "./sanitize";
 
 /** 酷我直链码率（kbps） */
 const KUWO_BITRATE_KBPS = 128;
@@ -66,7 +67,7 @@ const getKuwoSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
         serverLog.warn(`⚠️ Kuwo candidate rejected (${detail.candidate.title}): ${check.reason}`);
         continue;
       }
-      serverLog.log("🔗 KuwoSong URL:", url);
+      serverLog.log("🔗 KuwoSong URL:", sanitizeUrl(url));
       return { code: 200, url };
     }
     return { code: 404, url: null };
