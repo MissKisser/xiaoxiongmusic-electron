@@ -34,9 +34,10 @@ import { comment } from "./modules/comment";
 import { search } from "./modules/search";
 import { match } from "./modules/match";
 import { hot_search } from "./modules/hot_search";
-import { leaderboard } from "./modules/leaderboard";
+import { leaderboard, leaderboard_detail, leaderboard_list } from "./modules/leaderboard";
 import { song_info } from "./modules/song_info";
 import { song_list } from "./modules/song_list";
+import { songfm } from "./modules/songfm";
 import { album } from "./modules/album";
 import { artist } from "./modules/artist";
 import type { QMParams } from "./core/types";
@@ -73,6 +74,9 @@ const NON_CACHEABLE: ReadonlySet<string> = new Set([
   "playlist_delete",
   "playlist_tracks",
   "playlist_subscribe",
+  "leaderboard_list",
+  "leaderboard_detail",
+  "songfm",
 ]);
 
 const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
@@ -97,8 +101,11 @@ const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
   match,
   hot_search,
   leaderboard,
+  leaderboard_list,
+  leaderboard_detail,
   song_info,
   song_list,
+  songfm,
   album,
   artist,
 };

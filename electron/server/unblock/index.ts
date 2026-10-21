@@ -1,38 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
-import axios from "axios";
 import getKuwoSongUrl from "./kuwo";
 import getBodianSongUrl from "./bodian";
 import getGequbaoSongUrl from "./gequbao";
+import getNeteaseSongUrl from "./netease";
+import { getNeteaseSearchSongUrl } from "./netease-search";
 import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
-
-/**
- * 直接获取 网易云云盘 链接
- * Thank @939163156
- * Power by GD音乐台(music.gdstudio.xyz)
- * @param id 歌曲 ID
- * @returns 歌曲直链结果
- */
-const getNeteaseSongUrl = async (id: number | string): Promise<SongUrlResult> => {
-  try {
-    if (!id) return { code: 404, url: null };
-    const baseUrl = "https://music-api.gdstudio.xyz/api.php";
-    const result = await axios.get(baseUrl, {
-      params: { types: "url", id },
-    });
-    const songUrl = result.data.url;
-    // 安全修复：解锁结果缺失时返回 404，避免返回 200 + 空 url 误导客户端
-    if (!songUrl) {
-      return { code: 404, url: null };
-    }
-    serverLog.log("🔗 NeteaseSongUrl URL:", songUrl);
-    return { code: 200, url: songUrl };
-  } catch (error) {
-    serverLog.error("❌ Get NeteaseSongUrl Error:", error);
-    return { code: 404, url: null };
-  }
-};
 
 /**
  * 构造匹配信息
@@ -70,13 +43,26 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
     });
   });
   // netease
+  // 两种寻址方式：
+  // - 带 id：网易云自身的歌曲，按 id 直取直链；
+  // - 带 keyword / songName：第三方平台（QQ 音乐 / 酷狗）的歌曲，
+  //   按「歌名 + 歌手 + 时长」检索网易云曲库再取直链 —— 两套 id 编号空间不同，
+  //   第三方 id 绝不能按 id 直查（会静默播错歌）。
   fastify.get(
     "/unblock/netease",
     async (
       req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
       reply: FastifyReply,
     ) => {
-      const { id } = req.query;
+      const { id, keyword, songName, artist } = req.query;
+      const useSearch = !!(keyword || songName || artist);
+      if (useSearch) {
+        const result = await getNeteaseSearchSongUrl(
+          buildMatchInfo(req.query),
+          req.cookies as Record<string, string> | undefined,
+        );
+        return reply.send(result);
+      }
       const result = await getNeteaseSongUrl(id);
       return reply.send(result);
     },

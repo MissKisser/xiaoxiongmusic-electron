@@ -109,7 +109,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
           key: "personal-fm",
           label: () =>
             h("div", { class: "user-liked roaming-label" }, [
-              h(NText, null, () => "私人漫游"),
+              h(NText, null, () => (isQqPlatform.value ? "刷歌" : "私人漫游")),
               h(NButton, {
                 type: "tertiary",
                 round: true,
@@ -119,7 +119,9 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
                 onClick: handleRefreshFM,
               }),
             ]),
-          show: isLogin() !== 0 && !settingStore.sidebarHide.hidePersonalFM && !isPlatformSource,
+          show:
+            !settingStore.sidebarHide.hidePersonalFM &&
+            (isQqPlatform.value ? isPlatformLoggedIn.value : isLogin() !== 0 && !isPlatformSource.value),
           icon: renderIcon("Radio", {
             style: {
               transform: "translateY(-1px)",
@@ -369,6 +371,9 @@ const renderPlaylist = (playlist: CoverType[], showCover: boolean) => {
 // 当前平台是否为第三方平台（QQ 音乐 / 酷狗）
 const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
 
+// 当前平台是否为 QQ 音乐（QQ 音乐下该入口切换为「刷歌」）
+const isQqPlatform = computed<boolean>(() => platformStore.currentPlatform === "qqmusic");
+
 // 当前平台是否已登录
 const isPlatformLoggedIn = computed<boolean>(
   () => !!platformStore.platformProfiles[platformStore.currentPlatform],
@@ -520,10 +525,25 @@ const openPlatformPlaylist = (key: string) => {
 };
 
 // 菜单项更改
-const menuUpdate = (key: string, item: MenuOption) => {
+const menuUpdate = async (key: string, item: MenuOption) => {
   emit("menu-click", key);
-  // 私人漫游
+  // 私人漫游 / 刷歌
   if (key === "personal-fm") {
+    // QQ 音乐：进入刷歌页并开始播放推荐流
+    if (isQqPlatform.value) {
+      await songManager.initPersonalFM();
+      if (!musicStore.personalFMSong?.id) {
+        window.$message.error("开启刷歌出错，请重试");
+        return;
+      }
+      statusStore.personalFmMode = true;
+      statusStore.shuffleMode = "off";
+      await player.playSong();
+      statusStore.showFullPlayer = true;
+      window.$message.info("已开启刷歌", { icon: renderIcon("Radio") });
+      router.push({ name: "discover", query: { fm: "song" } });
+      return;
+    }
     if (!musicStore.personalFMSong?.id) {
       window.$message.error("开启私人漫游出错，请重试");
       return;

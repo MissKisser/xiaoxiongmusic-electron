@@ -68,12 +68,17 @@ export const songUrl = (
  * 网易云解锁源按歌曲 ID 寻址，其余解锁源按「关键词 / 歌名 + 歌手」寻址；
  * 站外源额外支持可选的 `duration`（秒），参与服务端的三重校验（歌名 / 歌手 / 时长），
  * 避免匹配到同名不同版的曲目。
+ *
+ * 第三方平台（QQ 音乐 / 酷狗）的歌曲在网易云侧没有对应 ID，
+ * 必须走「按关键词检索网易云」的分支（`useKeywordLookup`），
+ * 否则会把第三方 ID 喂给网易云接口，静默返回另一首歌。
  * @param id 歌曲 ID
  * @param keyword 搜索关键词（`歌名-歌手`）
  * @param server 解锁源
  * @param songName 歌名
  * @param artist 歌手
  * @param duration 歌曲声明时长（秒）
+ * @param useKeywordLookup 是否按关键词寻址（第三方平台歌曲必须为 true）
  */
 export const unlockSongUrl = (
   id: number,
@@ -82,9 +87,12 @@ export const unlockSongUrl = (
   songName?: string,
   artist?: string,
   duration?: number,
+  useKeywordLookup = false,
 ) => {
   const params =
-    server === SongUnlockServer.NETEASE ? { id } : { keyword, songName, artist, duration };
+    server === SongUnlockServer.NETEASE && !useKeywordLookup
+      ? { id }
+      : { keyword, songName, artist, duration };
   return request({
     baseURL: "/api/unblock",
     url: `/${server}`,

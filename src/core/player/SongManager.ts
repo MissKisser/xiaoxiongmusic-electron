@@ -3,11 +3,13 @@ import { songUrl, unlockSongUrl } from "@/api/song";
 import { describePlaybackFailure } from "@/api/platform/errorText";
 import { kgSongUrl } from "@/api/platform/kugou";
 import { qqSongUrl } from "@/api/platform/qqmusic";
+import { qqSongFM } from "@/api/platform/songfm";
 import { getPlatformLevel, mapPlatformQuality, type PlatformSongUrl } from "@/api/platform/types";
 import { planPlayback, type PlaybackStep } from "@/core/player/playbackDecision";
 import {
   useDataStore,
   useMusicStore,
+  usePlatformStore,
   useSettingStore,
   useStatusStore,
   useStreamingStore,
@@ -53,6 +55,9 @@ export type AudioSource = {
  * @returns 来源平台，缺省为网易云
  */
 const resolvePlatform = (song: SongType): ApiPlatform => song.platform ?? "netease";
+
+/** 推荐流单批曲目数（QQ 音乐推荐流一批的取回数） */
+const SONG_FM_BATCH_SIZE = 20;
 
 /**
  * 生成歌曲的缓存键
@@ -424,8 +429,9 @@ class SongManager {
    * 获取解锁播放链接
    *
    * 源优先级：网易云歌曲 `网易云 → 波点 → 歌曲宝 → 酷我`；
-   * QQ 音乐 / 酷狗歌曲 `波点 → 歌曲宝 → 酷我` ——
-   * 网易云解锁源按歌曲 ID 寻址，第三方平台的歌曲 ID 在网易云侧必然错配，直接排除。
+   * QQ 音乐 / 酷狗歌曲 `网易云检索 → 波点 → 歌曲宝 → 酷我` ——
+   * 网易云解锁源对第三方平台的歌曲只能**按关键词检索网易云曲库**（两套 id 编号空间不同，
+   * 拿第三方 id 直查会静默播错歌），因此第三方歌曲在网易云源上走关键词寻址分支。
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
    * @param songData 歌曲数据
    * @returns 解锁播放信息
@@ -439,16 +445,14 @@ class SongManager {
       return { id: songId, url: undefined };
     }
 
-    // 第三方平台的歌曲不参与网易云解锁源
+    // 第三方平台的歌曲不参与网易云按 id 寻址，改走关键词检索
     const isNeteaseSong = resolvePlatform(song) === "netease";
-    const priorityOrder = isNeteaseSong
-      ? [
-          SongUnlockServer.NETEASE,
-          SongUnlockServer.BODIAN,
-          SongUnlockServer.GEQUBAO,
-          SongUnlockServer.KUWO,
-        ]
-      : [SongUnlockServer.BODIAN, SongUnlockServer.GEQUBAO, SongUnlockServer.KUWO];
+    const priorityOrder = [
+      SongUnlockServer.NETEASE,
+      SongUnlockServer.BODIAN,
+      SongUnlockServer.GEQUBAO,
+      SongUnlockServer.KUWO,
+    ];
 
     // 获取启用的音源列表，并按优先级排序
     const enabledServers = settingStore.songUnlockServer.filter((s) => s.enabled).map((s) => s.key);
@@ -486,7 +490,15 @@ class SongManager {
       try {
         const sourceName = this.getUnlockSourceName(server);
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
-        const result = await unlockSongUrl(songId, keyWord, server, song.name, artist, duration);
+        const result = await unlockSongUrl(
+          songId,
+          keyWord,
+          server,
+          song.name,
+          artist,
+          duration,
+          !isNeteaseSong,
+        );
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {
           ...result,
           url: sanitizeUrl(result.url),
@@ -821,7 +833,22 @@ class SongManager {
   };
 
   /**
-   * 初始化/播放私人 FM
+   * 读取当前平台的推荐流曲目
+   *
+   * 网易云走 `/personal_fm`（私人 FM，一次 3 首）；
+   * QQ 音乐没有等价端点，改由平台推荐流模块给出个性化推荐（一次一批，实测批次间几乎不重复）。
+   * @returns 推荐流曲目
+   */
+  private fetchSongFMList = async (): Promise<SongType[]> => {
+    if (usePlatformStore().currentPlatform === "qqmusic") {
+      return qqSongFM(SONG_FM_BATCH_SIZE);
+    }
+    const res = await personalFm();
+    return formatSongsList(res.data);
+  };
+
+  /**
+   * 初始化/播放推荐流（网易云私人 FM / QQ 音乐刷歌）
    * @param playNext 是否播放下一首
    * @returns 是否成功
    */
@@ -831,8 +858,7 @@ class SongManager {
 
     try {
       const fetchFM = async () => {
-        const res = await personalFm();
-        musicStore.personalFM.list = formatSongsList(res.data);
+        musicStore.personalFM.list = await this.fetchSongFMList();
         musicStore.personalFM.playIndex = 0;
       };
 
@@ -850,12 +876,12 @@ class SongManager {
         }
       }
     } catch (error) {
-      console.error("❌ 私人 FM 初始化失败", error);
+      console.error("❌ 推荐流初始化失败", error);
     }
   }
 
   /**
-   * 私人 FM 垃圾桶
+   * 推荐流垃圾桶（仅网易云支持，QQ 音乐无对应能力）
    */
   public async personalFMTrash(id: number) {
     if (!isLogin()) {
@@ -874,25 +900,24 @@ class SongManager {
   }
 
   /**
-   * 刷新私人 FM
+   * 刷新推荐流（网易云私人 FM / QQ 音乐刷歌）
    */
   public async refreshPersonalFM() {
     const musicStore = useMusicStore();
-    if (!isLogin()) {
+    if (!isLogin() && usePlatformStore().currentPlatform !== "qqmusic") {
       window.$message.error("请先登录");
       return;
     }
     try {
-      const res = await personalFm();
-      const newList = formatSongsList(res.data);
+      const newList = await this.fetchSongFMList();
       if (!newList || newList.length === 0) {
-        throw new Error("加载私人漫游列表失败");
+        throw new Error("加载推荐流列表失败");
       }
       musicStore.personalFM.list = newList;
       musicStore.personalFM.playIndex = 0;
       window.$message.success("刷新成功");
     } catch (error) {
-      console.error("❌ 刷新私人 FM 失败", error);
+      console.error("❌ 刷新推荐流失败", error);
       window.$message.error("刷新失败，请重试");
     }
   }
