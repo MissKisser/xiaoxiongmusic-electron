@@ -34,6 +34,11 @@ target
 # ZCode agent state
 .omc
 
+# 包管理器锁文件：仓库统一用 pnpm（packageManager 字段 + 根目录 pnpm-lock.yaml 已跟踪）
+# npm 生成的 package-lock.json 与子目录内残留的 pnpm 锁文件都是噪音，不入库（文件保留不删）
+package-lock.json
+native/*/pnpm-lock.yaml
+
 # 文档与 agent 工作文件（仅保留 README.md，不提交）
 *.md
 !README.md
