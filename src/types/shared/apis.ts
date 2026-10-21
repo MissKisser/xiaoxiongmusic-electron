@@ -45,15 +45,6 @@ export interface PlatformMusicApi {
    */
   clearSession: (platform: ApiPlatform) => Promise<void>;
   /**
-   * 手动写入 cookie 登录
-   * @param platform 音源平台
-   * @param cookie 形如 `key=xxx; key2=yyy` 的 cookie 字符串
-   */
-  setCookie: (
-    platform: ApiPlatform,
-    cookie: string,
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
-  /**
    * 列出指定平台可用的模块名
    * @param platform 音源平台
    */

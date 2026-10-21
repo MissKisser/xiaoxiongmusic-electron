@@ -6,9 +6,13 @@
  *
  * - 网易云：直调既有网易云封装（`src/api/playlist.ts` / `src/api/song.ts`），
  *   返回结构与原链路完全一致，页面行为零变化；
- * - QQ 音乐 / 酷狗：走主进程平台写模块（`playlist_create` / `playlist_rename` /
- *   `playlist_delete` / `playlist_tracks` / `playlist_subscribe`），
+ * - QQ 音乐 / 酷狗：走平台数据面（HTTP `/api/{platform}/{模块名}`，
+ *   模块为 `playlist_create` / `playlist_rename` / `playlist_delete` /
+ *   `playlist_tracks` / `playlist_subscribe`），
  *   模块内部遵循「写入 → 读回确认 → 才返回成功」。
+ *
+ * 通道口径：平台数据面只走 HTTP，渲染端不再经 `platformMusic:*` IPC 取业务数据，
+ * 该通道只保留登录 / 会话管理职责。
  *
  * 「喜欢」的平台差异（实测定案）：
  * - QQ 音乐的喜欢是系统目录（`dirId=201`），加歌走 `playlist_tracks` 指向该目录；
@@ -37,8 +41,8 @@ import { likeSong as neteaseLikeSong } from "@/api/song";
 import { useDataStore } from "@/stores/data";
 import { usePlatformStore } from "@/stores/platform";
 import { dispatchLikedSongs, type DispatchPlaylist } from "./dispatch";
-import { platformRequest } from "./http";
-import { platformCall } from "./music";
+import { describeFailure } from "./errorText";
+import { platformRequest, platformRequestBody, platformWriteRequest } from "./http";
 import { normalizeQqPlaylist } from "./qqmusic";
 import { kgFindLikedPlaylist, normalizeKgPlaylist } from "./kugou";
 import type { PlatformPlaylist } from "./types";
@@ -75,6 +79,8 @@ export interface ManageablePlaylist {
 interface PlatformWriteResult {
   code?: number;
   message?: string;
+  /** 路由层统一文案（服务端级失败时给出） */
+  error?: string;
   tid?: number | string;
   dirId?: number | string;
   id?: number | string;
@@ -91,46 +97,6 @@ interface PlatformPlaylistListResponse {
   owned?: Array<Record<string, any>>;
   favorites?: Array<Record<string, any>>;
 }
-
-/** 酷狗业务错误码 → 用户可读提示 */
-const KG_ERROR_TEXT: Record<string, string> = {
-  "20006": "请求参数不符合平台要求，请重试",
-  "20010": "请求参数不符合平台要求，请重试",
-  "20017": "登录状态已失效，请重新登录后再试",
-  "30203": "平台限制了本次操作，请稍后再试",
-};
-
-/**
- * 把平台模块的失败描述翻译成用户可读提示
- *
- * 酷狗的错误码埋在 message 里（形如 `创建歌单失败：error_code=20010`），
- * QQ 与通用失败用模块自身的 `code` 表达。
- * @param platform 音源平台
- * @param code 模块返回码
- * @param message 模块返回描述
- * @returns 用户可读提示，无可识别信息时返回原始描述
- */
-const describeFailure = (
-  platform: ApiPlatform,
-  code?: number,
-  message?: string,
-): string | undefined => {
-  // 酷狗：先从描述里抽出业务错误码
-  if (platform === "kugou") {
-    const matched = /error_code=(\d+)/.exec(message ?? "");
-    if (matched && KG_ERROR_TEXT[matched[1]]) return KG_ERROR_TEXT[matched[1]];
-    const http = /HTTP (\d{3})/.exec(message ?? "");
-    if (http) {
-      return http[1] === "404"
-        ? "平台接口路由不可用，请稍后再试"
-        : `平台请求失败（HTTP ${http[1]}），请重试`;
-    }
-  }
-  if (code === 401) return "登录状态已失效，请重新登录后再试";
-  if (code === 404) return "未找到目标歌单，或该平台暂未开放此能力";
-  if (code === 400) return message || "请求参数不符合平台要求，请重试";
-  return message || "操作失败，请重试";
-};
 
 /**
  * 把平台模块的返回整理成统一结果
@@ -152,11 +118,16 @@ const toManageResult = (
           : undefined;
     return { ok: true, data: result, playlistId };
   }
+  // 路由层统一文案（服务端级失败）：直接透出，不再二次翻译
+  if (result.error) return { ok: false, message: result.error };
   return { ok: false, message: describeFailure(platform, result.code, result.message) };
 };
 
 /**
  * 调用平台写模块并兜住异常
+ *
+ * 写操作走数据面（HTTP），与读操作同源；
+ * 业务失败由响应体里的 `code` 表达，请求本身失败才落到异常分支。
  * @param platform 音源平台
  * @param moduleName 模块名
  * @param params 业务参数
@@ -168,7 +139,7 @@ const callWriteModule = async (
   params: Record<string, unknown>,
 ): Promise<ManageResult> => {
   try {
-    const result = await platformCall<PlatformWriteResult>(platform, moduleName, params);
+    const result = await platformWriteRequest<PlatformWriteResult>(platform, moduleName, params);
     return toManageResult(platform, result);
   } catch (error) {
     return {
@@ -580,10 +551,14 @@ export const isPlaylistSubscribed = async (
   }
   if (platform === "qqmusic") {
     try {
-      const result = await platformCall<PlatformWriteResult>(platform, "subscription_status", {
-        type: "playlist",
-        ids: String(playlistId),
-      });
+      const result = await platformRequestBody<PlatformWriteResult>(
+        platform,
+        "subscription_status",
+        {
+          type: "playlist",
+          ids: String(playlistId),
+        },
+      );
       return result?.items?.[0]?.status === "subscribed";
     } catch (error) {
       console.error("查询歌单收藏状态失败：", error);
@@ -611,7 +586,7 @@ export const isPlaylistSubscribed = async (
 const readLikedTotal = async (platform: ApiPlatform): Promise<number> => {
   try {
     if (platform === "qqmusic") {
-      const res = await platformCall<{ total?: number }>(platform, "user_liked_songs", {
+      const res = await platformRequestBody<{ total?: number }>(platform, "user_liked_songs", {
         song_begin: 0,
         song_num: 1,
         _t: Date.now(),
@@ -621,7 +596,7 @@ const readLikedTotal = async (platform: ApiPlatform): Promise<number> => {
     const { owned } = await fetchFreshPlatformPlaylists(platform);
     const liked = owned.find((playlist) => playlist.isLiked === true);
     if (!liked) return 0;
-    const res = await platformCall<{ total?: number }>(platform, "playlist_detail", {
+    const res = await platformRequestBody<{ total?: number }>(platform, "playlist_detail", {
       id: liked.platformId ?? liked.id,
       page: 1,
       pageSize: 1,
@@ -643,7 +618,7 @@ const readQqSongLikedState = async (song: SongType): Promise<boolean | null> => 
   const mid = song.platformId;
   if (!mid) return null;
   try {
-    const res = await platformCall<PlatformWriteResult>("qqmusic", "subscription_status", {
+    const res = await platformRequestBody<PlatformWriteResult>("qqmusic", "subscription_status", {
       type: "song",
       ids: mid,
     });

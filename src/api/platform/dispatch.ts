@@ -1348,46 +1348,6 @@ export const dispatchSquarePlaylists = async (
 };
 
 /**
- * 读取当前平台收藏（订阅）的歌单
- *
- * 网易云的收藏歌单由既有本地缓存维护，此处只服务第三方平台。
- * @param platform 音源平台
- * @returns 收藏歌单列表
- */
-export const dispatchLikedPlaylists = async (platform: ApiPlatform): Promise<CoverType[]> => {
-  if (platform === "qqmusic") {
-    const { favorites } = await qqUserPlaylistList();
-    return favorites.map((item) =>
-      toCoverEntry({
-        id: item.id,
-        platformId: item.platformId,
-        name: item.name,
-        cover: item.coverImgUrl,
-        count: item.trackCount,
-        playCount: item.playCount,
-        creatorName: item.creator?.name,
-        description: item.description,
-        platform: "qqmusic",
-      }),
-    );
-  }
-  const { favorites } = await kgUserPlaylistList();
-  return favorites.map((item) =>
-    toCoverEntry({
-      id: item.id,
-      platformId: item.platformId,
-      name: item.name,
-      cover: item.coverImgUrl,
-      count: item.trackCount,
-      playCount: item.playCount,
-      creatorName: item.creator?.name,
-      description: item.description,
-      platform: "kugou",
-    }),
-  );
-};
-
-/**
  * 读取酷狗公开歌单详情
  *
  * 公开歌单与账号云歌单是两套数据源，详情页按 `scope` 参数分流。

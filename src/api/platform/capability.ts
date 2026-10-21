@@ -1,60 +1,22 @@
 /**
- * 平台能力矩阵
+ * 平台能力与路由可见性
  *
  * 页面层据此判断「当前平台是否支持某个功能」：
  * - 不支持的入口在侧边栏 / 标签页里隐藏；
  * - 不支持的路由由路由守卫拦截，直接输 URL 时给出提示并回到首页。
  *
- * 口径来自主进程已注册的平台模块：只有模块能真实取到数据的，
- * 才算该平台支持该能力。
+ * 真源有两处，职责不同：
+ * - **标签页可见性**：`DISCOVER_TABS` / `LIKE_TABS`，
+ *   逐平台列出该平台展示的子页，缺省不在表内即隐藏；
+ * - **路由可用性**：`NETEASE_ONLY_ROUTES`（网易云独有能力）
+ *   与 `PLATFORM_UNSUPPORTED_ROUTES`（部分平台缺数据源），
+ *   统一由 `isRouteSupported` 判定。
+ *
+ * 两张表互相独立：标签页决定「展示哪些入口」，
+ * 路由表决定「直达 URL 是否放行」，不再有第三份能力清单。
  */
 
 import type { ApiPlatform } from "@/types/shared";
-
-/** 平台能力项 */
-export type PlatformCapability =
-  /** 排行榜 */
-  | "leaderboard"
-  /** 歌单广场 */
-  | "playlistSquare"
-  /** 歌手详情（详情头 + 单曲 + 专辑） */
-  | "artistDetail"
-  /** 专辑详情（专辑头 + 曲目） */
-  | "albumDetail"
-  /** 热搜榜 */
-  | "hotSearch"
-  /** 发现页歌手列表（由榜单歌曲衍生） */
-  | "discoverArtist";
-
-/** 各平台的能力清单 */
-export const PLATFORM_CAPABILITIES: Record<ApiPlatform, PlatformCapability[]> = {
-  netease: [
-    "leaderboard",
-    "playlistSquare",
-    "artistDetail",
-    "albumDetail",
-    "hotSearch",
-    "discoverArtist",
-  ],
-  qqmusic: [
-    "leaderboard",
-    "playlistSquare",
-    "artistDetail",
-    "albumDetail",
-    "hotSearch",
-    "discoverArtist",
-  ],
-  kugou: ["playlistSquare", "artistDetail", "albumDetail"],
-};
-
-/**
- * 判断平台是否支持某项能力
- * @param platform 音源平台
- * @param capability 能力项
- * @returns 是否支持
- */
-export const hasCapability = (platform: ApiPlatform, capability: PlatformCapability): boolean =>
-  (PLATFORM_CAPABILITIES[platform] ?? []).includes(capability);
 
 /**
  * 网易云独有能力对应的路由
@@ -126,7 +88,8 @@ export interface PlatformTab {
 /**
  * 各平台在发现页的子页可见性
  *
- * 与 `PLATFORM_CAPABILITIES` 对齐，缺省隐藏不可用的子页。
+ * 标签页可见性的唯一真源：逐平台列出要展示的子页，
+ * 不在表内的子页在该平台下隐藏（路由是否放行另由 `isRouteSupported` 判定）。
  */
 export const DISCOVER_TABS: Record<ApiPlatform, PlatformTab[]> = {
   netease: [

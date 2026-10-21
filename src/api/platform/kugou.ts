@@ -11,7 +11,8 @@
  * - `platformId`：酷狗的 `hash`（字符串主键），播放地址 / 歌词等接口以它为键。
  */
 
-import { platformRequest } from "./http";
+import { normalizeArtistEntry, secureUrl, splitArtists, toNumericId } from "./common";
+import { platformRequest, platformRequestBody } from "./http";
 import {
   buildCoverSize,
   type PlatformAlbumDetail,
@@ -103,17 +104,6 @@ interface KgCommentResponse {
 }
 
 /**
- * 把 http / 协议相对地址升级为 https
- * @param url 原始地址
- * @returns 安全地址
- */
-const secureUrl = (url: unknown): string => {
-  if (typeof url !== "string" || !url) return "";
-  if (url.startsWith("//")) return `https:${url}`;
-  return url.replace(/^http:\/\//, "https://");
-};
-
-/**
  * 填充酷狗图片模板里的尺寸占位符
  *
  * 酷狗的封面地址把尺寸写成 `{size}` 占位符，直接用会 404。
@@ -129,24 +119,8 @@ const fillCover = (url: unknown, size = 300): string =>
  * @param singer 歌手条目
  * @returns 归一化歌手
  */
-const normalizeArtist = (singer: Record<string, any>): PlatformArtist => ({
-  id: String(singer?.id ?? ""),
-  name: String(singer?.name ?? ""),
-});
-
-/**
- * 把酷狗的「A / B」歌手串拆成歌手数组
- * @param artist 歌手串
- * @returns 歌手数组
- */
-const splitArtists = (artist: unknown): PlatformArtist[] => {
-  if (typeof artist !== "string" || !artist) return [];
-  return artist
-    .split(" / ")
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .map((name) => ({ id: "", name }));
-};
+const normalizeArtist = (singer: Record<string, any>): PlatformArtist =>
+  normalizeArtistEntry(singer);
 
 /** 酷狗授权位：完全免费可播 */
 const KG_PRIVILEGE_FREE = 0;
@@ -211,8 +185,8 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
     name: String(song?.name ?? song?.songname ?? ""),
     artists,
     album: {
-      id: String(song?.albumId ?? song?.album_id ?? ""),
-      platformId: String(song?.albumId ?? song?.album_id ?? "") || undefined,
+      id: String(song?.albumId ?? song?.album_id ?? song?.albumid ?? ""),
+      platformId: String(song?.albumId ?? song?.album_id ?? song?.albumid ?? "") || undefined,
       name: String(song?.album ?? song?.album_name ?? ""),
       picUrl: cover,
     },
@@ -380,15 +354,6 @@ export const kgSearch = async (
 };
 
 /**
- * 读取当前酷狗账号的歌单列表（自建 + 收藏）
- * @returns 归一化后的歌单列表
- */
-export const kgUserPlaylists = async (): Promise<PlatformPlaylist[]> => {
-  const res = await platformRequest<KgPlaylistListResponse>(KUGOU, "user_playlist_list");
-  return [...(res?.owned ?? []), ...(res?.favorites ?? [])].map(normalizeKgPlaylist);
-};
-
-/**
  * 读取当前酷狗账号的歌单列表（自建与收藏分开返回）
  *
  * 酷狗侧自建（type=0）与收藏（type=1）是两套目录语义，
@@ -460,7 +425,9 @@ export const kgSongUrl = async (
   quality = "hq",
 ): Promise<PlatformSongUrl> => {
   const hash = typeof song === "string" ? song : (song.platformId ?? String(song.id));
-  const res = await platformRequest<KgSongUrlResponse>(KUGOU, "song_url", { hash, quality });
+  // 播放状态（付费墙 / 无授权）与授权位放在响应体里，
+  // 这里取回业务体而不直接抛异常，交给播放层翻译成用户可读提示。
+  const res = await platformRequestBody<KgSongUrlResponse>(KUGOU, "song_url", { hash, quality });
   return { ...normalizeKgSongUrl(res), id: hash };
 };
 
@@ -779,7 +746,7 @@ export const kgArtistDetail = async (
   });
   const cover = fillCover(res?.artist?.cover ?? "") || fillCover(res?.artist?.avatar ?? "");
   const artist: PlatformArtistDetail = {
-    id: Number(res?.artist?.id ?? 0) || 0,
+    id: toNumericId(res?.artist?.id, String(res?.artist?.id ?? id)),
     platformId: String(res?.artist?.id ?? id),
     platform: KUGOU,
     name: String(res?.artist?.name ?? ""),
@@ -916,7 +883,7 @@ export const toKgArtistEntry = (artist: Record<string, any>): PlatformArtistDeta
   const authorId = String(artist?.id ?? "");
   const cover = fillCover(artist?.cover ?? "");
   return {
-    id: Number(authorId) || 0,
+    id: toNumericId(authorId, authorId),
     platformId: authorId,
     platform: KUGOU,
     name: String(artist?.name ?? ""),

@@ -7,7 +7,14 @@
  * 字段对照见 `src/api/platform/types.ts` 顶部表格。
  */
 
-import { platformRequest } from "./http";
+import {
+  deriveStableId,
+  normalizeArtistEntry,
+  secureUrl,
+  splitArtists,
+  toNumericId,
+} from "./common";
+import { platformRequest, platformRequestBody } from "./http";
 import {
   buildCoverSize,
   getAlbumName,
@@ -74,18 +81,6 @@ interface QqPlaylistDetailResponse {
   message?: string;
 }
 
-/** 主进程 QQ 歌曲详情模块的原生返回 */
-interface QqSongDetailResponse {
-  code?: number;
-  id?: number;
-  mid?: string;
-  name?: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-  message?: string;
-}
-
 /** 主进程 QQ 播放地址模块的原生返回 */
 interface QqSongUrlResponse {
   code?: number;
@@ -125,40 +120,12 @@ interface QqCommentResponse {
 }
 
 /**
- * 把 http / 协议相对地址升级为 https
- * @param url 原始地址
- * @returns 安全地址
- */
-const secureUrl = (url: unknown): string => {
-  if (typeof url !== "string" || !url) return "";
-  if (url.startsWith("//")) return `https:${url}`;
-  return url.replace(/^http:\/\//, "https://");
-};
-
-/**
- * 把 QQ 的「A / B」歌手串拆成歌手数组
- * @param artist 歌手串
- * @returns 歌手数组
- */
-const splitArtists = (artist: unknown): PlatformArtist[] => {
-  if (typeof artist !== "string" || !artist) return [];
-  return artist
-    .split(" / ")
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .map((name) => ({ id: "", name }));
-};
-
-/**
  * 归一化 QQ 歌手条目
  * @param singer 歌手条目
  * @returns 归一化歌手
  */
-const normalizeArtist = (singer: Record<string, any>): PlatformArtist => ({
-  id: String(singer?.id ?? ""),
-  name: String(singer?.name ?? ""),
-  mid: String(singer?.mid ?? "") || undefined,
-});
+const normalizeArtist = (singer: Record<string, any>): PlatformArtist =>
+  normalizeArtistEntry(singer, String(singer?.mid ?? ""));
 
 /**
  * 归一化 QQ 专辑
@@ -167,6 +134,9 @@ const normalizeArtist = (singer: Record<string, any>): PlatformArtist => ({
  * - 搜索模块给的是名称字符串，专辑 mid 单独放在 `albumMid`；
  * - 歌单详情模块给的是含 `id` / `mid` / `name` 的对象。
  * 两种形态统一成网易云的 `album` 形状，并按 album mid 拼出封面直链。
+ *
+ * 专辑数字 id 取上游的 `albumid` / `albumId` / `id`，
+ * 都取不到时留空，由 `toSongType` 按 mid 派生稳定数字 id。
  * @param album 原始专辑字段
  * @param albumMid 单独给出的专辑 mid
  * @param albumId 单独给出的专辑 ID
@@ -176,8 +146,9 @@ const normalizeAlbum = (album: unknown, albumMid: string, albumId: string): Plat
   if (album && typeof album === "object") {
     const source = album as Record<string, any>;
     const mid = String(source.mid ?? source.pmid ?? albumMid ?? "");
+    const numericId = source.albumid ?? source.albumId ?? source.id ?? albumId;
     return {
-      id: String(source.id ?? albumId ?? ""),
+      id: numericId === undefined || numericId === null ? "" : String(numericId),
       platformId: mid || undefined,
       name: String(source.name ?? source.title ?? ""),
       picUrl: mid ? `${ALBUM_COVER_TEMPLATE}${mid}.jpg` : "",
@@ -389,49 +360,6 @@ export const qqSearch = async (
 };
 
 /**
- * 读取当前 QQ 音乐账号的歌单列表（自建 + 收藏）
- * @returns 归一化后的歌单列表
- */
-export const qqUserPlaylists = async (): Promise<PlatformPlaylist[]> => {
-  const res = await platformRequest<QqPlaylistListResponse>(QQ_MUSIC, "user_playlist_list");
-  return [...(res?.owned ?? []), ...(res?.favorites ?? [])].map(normalizeQqPlaylist);
-};
-
-/**
- * 读取一张 QQ 音乐歌单的详情与曲目
- * @param id 歌单 tid
- * @param dirId 歌单目录号（自建歌单需要）
- * @returns 归一化后的歌单详情
- */
-export const qqPlaylistDetail = async (
-  id: string | number,
-  dirId = 0,
-): Promise<PlatformPlaylistDetail> => {
-  const res = await platformRequest<QqPlaylistDetailResponse>(QQ_MUSIC, "playlist_detail", {
-    id,
-    dirId,
-  });
-  return normalizeQqPlaylistDetail(res);
-};
-
-/**
- * 读取 QQ 音乐歌曲详情
- * @param mid 歌曲 mid
- * @returns 归一化后的歌曲
- */
-export const qqSongDetail = async (mid: string): Promise<PlatformSong> => {
-  const res = await platformRequest<QqSongDetailResponse>(QQ_MUSIC, "song_detail", { mid });
-  return normalizeQqSong({
-    id: res?.id,
-    mid: res?.mid ?? mid,
-    name: res?.name,
-    artist: res?.artist,
-    album: res?.album,
-    duration: res?.duration,
-  });
-};
-
-/**
  * 解析 QQ 音乐歌曲的播放地址
  * @param song 归一化歌曲（或直接给歌曲 mid）
  * @param level 首选音质档位
@@ -442,7 +370,9 @@ export const qqSongUrl = async (
   level = "hq",
 ): Promise<PlatformSongUrl> => {
   const mid = typeof song === "string" ? song : (song.platformId ?? String(song.id));
-  const res = await platformRequest<QqSongUrlResponse>(QQ_MUSIC, "song_url", { mid, level });
+  // 失败原因（付费 / 无授权 / 凭证异常）放在响应体里，
+  // 这里取回业务体而不直接抛异常，交给播放层翻译成用户可读提示。
+  const res = await platformRequestBody<QqSongUrlResponse>(QQ_MUSIC, "song_url", { mid, level });
   return normalizeQqSongUrl(res);
 };
 
@@ -927,10 +857,10 @@ export const qqArtistDetail = async (
       platform: QQ_MUSIC,
     };
   });
-  // 歌手的数字 id：取歌曲条目里与自身 mid 对应的歌手数字 id
+  // 歌手的数字 id：取歌曲条目里与自身 mid 对应的歌手数字 id，取不到时按 mid 派生
   const self = songs.flatMap((song) => song.artists).find((artist) => artist.mid === mid);
   const artist: PlatformArtistDetail = {
-    id: Number(self?.id) || 0,
+    id: toNumericId(self?.id, mid),
     platformId: String(res?.artist?.mid ?? mid),
     platform: QQ_MUSIC,
     name: String(res?.artist?.name ?? ""),
@@ -1039,7 +969,8 @@ export const toQqArtistEntry = (artist: Record<string, any>): PlatformArtistDeta
   const mid = String(artist?.id ?? "");
   const cover = secureUrl(artist?.cover ?? "");
   return {
-    id: 0,
+    // 搜索结果的歌手 id 就是 mid，没有平台数字 id，按 mid 派生稳定数字 id
+    id: deriveStableId(mid),
     platformId: mid,
     platform: QQ_MUSIC,
     name: String(artist?.name ?? ""),

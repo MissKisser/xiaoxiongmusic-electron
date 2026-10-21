@@ -51,8 +51,6 @@ if (process.contextIsolated) {
         call: (platform: string, name: string, params?: Record<string, unknown>) =>
           ipcRenderer.invoke("platformMusic:call", platform, name, params ?? {}),
         clearSession: (platform: string) => ipcRenderer.invoke("platformMusic:clearSession", platform),
-        setCookie: (platform: string, cookie: string) =>
-          ipcRenderer.invoke("platformMusic:setCookie", platform, cookie),
         listModules: (platform: string) => ipcRenderer.invoke("platformMusic:listModules", platform),
       },
     });

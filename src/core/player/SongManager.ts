@@ -1,5 +1,6 @@
 import { personalFm, personalFmToTrash } from "@/api/rec";
 import { songUrl, unlockSongUrl } from "@/api/song";
+import { describePlaybackFailure } from "@/api/platform/errorText";
 import { kgSongUrl } from "@/api/platform/kugou";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { getPlatformLevel, mapPlatformQuality, type PlatformSongUrl } from "@/api/platform/types";
@@ -18,6 +19,7 @@ import { isElectron } from "@/utils/env";
 import { formatSongsList } from "@/utils/format";
 import { handleSongQuality } from "@/utils/helper";
 import { openUserLogin } from "@/utils/modal";
+import { sanitizeUrl } from "@/utils/sanitize";
 
 /**
  * 歌曲解锁服务器
@@ -78,6 +80,10 @@ class SongManager {
   private nextPrefetch: AudioSource | undefined;
   /** 预载歌曲的播放标识（平台 + 数字 ID） */
   private nextPrefetchKey: string | undefined;
+  /** 最近一次第三方平台的播放失败详情（用于最终失败时的用户提示） */
+  private lastPlatformFailure:
+    | { platform: ApiPlatform; reason?: string; status?: number; privilege?: number | null }
+    | undefined;
 
   /**
    * 预加载封面图片
@@ -197,7 +203,7 @@ class SongManager {
       const encodedUrl = encodeURIComponent(url);
       return `/api/proxy/audio?url=${encodedUrl}`;
     } catch (e) {
-      console.error("❌ processUrlForWeb: URL 编码失败", e, url);
+      console.error("❌ processUrlForWeb: URL 编码失败", e, sanitizeUrl(url));
       return undefined;
     }
   }
@@ -234,7 +240,10 @@ class SongManager {
     const settingStore = useSettingStore();
     const level = isPc ? "exhigh" : settingStore.songLevel;
     const res = await songUrl(id, level);
-    console.log(`🌐 ${id} music data:`, res);
+    console.log(`🌐 ${id} music data:`, {
+      ...res,
+      data: res.data?.map((item) => ({ ...item, url: sanitizeUrl(item.url) })),
+    });
     const songData = res.data?.[0];
     // 是否有播放地址
     if (!songData || !songData?.url) {
@@ -267,10 +276,15 @@ class SongManager {
     if (!isElectron && finalUrl) {
       processedUrl = this.processUrlForWeb(finalUrl);
       if (!processedUrl) {
-        console.error(`❌ [${id}] Web 端 URL 处理失败，原始 URL:`, finalUrl);
+        console.error(`❌ [${id}] Web 端 URL 处理失败，原始 URL:`, sanitizeUrl(finalUrl));
         return { id, url: undefined, isTrial, quality };
       }
-      console.log(`🌐 [${id}] Web 端使用代理接口，原始 URL:`, finalUrl, "代理 URL:", processedUrl);
+      console.log(
+        `🌐 [${id}] Web 端使用代理接口，原始 URL:`,
+        sanitizeUrl(finalUrl),
+        "代理 URL:",
+        sanitizeUrl(processedUrl),
+      );
     }
     // 缓存对应音质音乐（仅 Electron 端；试听片段不入缓存）
     if (finalUrl && isElectron && !isTrial) {
@@ -278,7 +292,11 @@ class SongManager {
     }
     // 确保 null/undefined 转换为 undefined，保持与 AudioSource 类型一致
     const finalProcessedUrl = processedUrl || undefined;
-    console.log(`📦 [${id}] getOnlineUrl 最终返回:`, { url: finalProcessedUrl, isTrial, quality });
+    console.log(`📦 [${id}] getOnlineUrl 最终返回:`, {
+      url: sanitizeUrl(finalProcessedUrl),
+      isTrial,
+      quality,
+    });
     return { id, url: finalProcessedUrl, isTrial, quality, unlockSource: "official" };
   };
 
@@ -304,6 +322,10 @@ class SongManager {
       level: res.level,
       reason: res.reason,
     });
+    // 失败原因留给最终失败提示用（付费 / 无授权 / 凭证异常）
+    if (!res.available) {
+      this.lastPlatformFailure = { platform: "qqmusic", reason: res.reason };
+    }
     return this.buildPlatformAudioSource(song, res);
   };
 
@@ -330,6 +352,14 @@ class SongManager {
       privilege: res.privilege,
       level: res.level,
     });
+    // 播放状态与授权位留给最终失败提示用（付费墙 / 无授权）
+    if (!res.available) {
+      this.lastPlatformFailure = {
+        platform: "kugou",
+        status: res.status,
+        privilege: res.privilege,
+      };
+    }
     return this.buildPlatformAudioSource(song, res);
   };
 
@@ -368,16 +398,25 @@ class SongManager {
     if (!isElectron) {
       processedUrl = this.processUrlForWeb(rawUrl) ?? undefined;
       if (!processedUrl) {
-        console.error(`❌ [${id}] Web 端 URL 处理失败，原始 URL:`, rawUrl);
+        console.error(`❌ [${id}] Web 端 URL 处理失败，原始 URL:`, sanitizeUrl(rawUrl));
         return { id, url: undefined, isTrial, quality, unlockSource: "official" };
       }
-      console.log(`🌐 [${id}] Web 端使用代理接口，原始 URL:`, rawUrl, "代理 URL:", processedUrl);
+      console.log(
+        `🌐 [${id}] Web 端使用代理接口，原始 URL:`,
+        sanitizeUrl(rawUrl),
+        "代理 URL:",
+        sanitizeUrl(processedUrl),
+      );
     }
     // 缓存对应音质音乐（仅 Electron 端，试听片段不入缓存）
     if (!isTrial && isElectron) {
       this.triggerCacheDownload(cacheKey, rawUrl, quality);
     }
-    console.log(`📦 [${id}] getOnlineUrl 最终返回:`, { url: processedUrl, isTrial, quality });
+    console.log(`📦 [${id}] getOnlineUrl 最终返回:`, {
+      url: sanitizeUrl(processedUrl),
+      isTrial,
+      quality,
+    });
     return { id, url: processedUrl, isTrial, quality, unlockSource: "official" };
   };
 
@@ -448,7 +487,10 @@ class SongManager {
         const sourceName = this.getUnlockSourceName(server);
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
         const result = await unlockSongUrl(songId, keyWord, server, song.name, artist, duration);
-        console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, result);
+        console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {
+          ...result,
+          url: sanitizeUrl(result.url),
+        });
 
         // 检查是否成功
         if (result.code === 200 && result.url && result.url.trim() !== "") {
@@ -458,7 +500,7 @@ class SongManager {
           // Electron 端：直接使用原始 URL（MPV 不受浏览器限制）
           const unlockUrl = this.processUrlForWeb(originalUrl);
           if (!isElectron) {
-            console.log(`🌐 [${songId}] Web 端使用代理接口，原始 URL:`, originalUrl);
+            console.log(`🌐 [${songId}] Web 端使用代理接口，原始 URL:`, sanitizeUrl(originalUrl));
           }
 
           const finalUnlockUrl = unlockUrl || undefined;
@@ -473,13 +515,9 @@ class SongManager {
           console.log(`✅ [${songId}] 解锁成功！`);
           console.log(`   📍 解锁源: ${sourceName} (${server})`);
           console.log(`   🎵 音质: ${quality}`);
-          console.log(
-            `   🔗 原始 URL: ${originalUrl.substring(0, 80)}${originalUrl.length > 80 ? "..." : ""}`,
-          );
+          console.log(`   🔗 原始 URL: ${sanitizeUrl(originalUrl)}`);
           if (!isElectron) {
-            console.log(
-              `   🌐 代理 URL: ${finalUnlockUrl?.substring(0, 80)}${finalUnlockUrl && finalUnlockUrl.length > 80 ? "..." : ""}`,
-            );
+            console.log(`   🌐 代理 URL: ${sanitizeUrl(finalUnlockUrl)}`);
           }
 
           // 解锁成功后，触发下载（使用原始 URL，仅 Electron 端）
@@ -645,6 +683,19 @@ class SongManager {
   }
 
   /**
+   * 播放最终失败时给用户可见提示
+   *
+   * 第三方平台的失败原因（付费 / 无授权 / 凭证异常）由平台模块给出，
+   * 这里翻译成用户可读文案，走与「当前歌曲仅可试听」同款的提示通道。
+   */
+  private notifyPlaybackFailure = (): void => {
+    const failure = this.lastPlatformFailure;
+    this.lastPlatformFailure = undefined;
+    if (!failure) return;
+    window.$message.warning(describePlaybackFailure(failure.platform, failure));
+  };
+
+  /**
    * 获取音频源
    * 始终从此方法获取对应歌曲播放信息
    * @param song 歌曲
@@ -680,7 +731,7 @@ class SongManager {
     if (song.type === "streaming" && song.streamUrl) {
       const streamingStore = useStreamingStore();
       const finalUrl = streamingStore.getSongUrl(song);
-      console.log(`🔄 [${song.id}] Stream URL:`, finalUrl);
+      console.log(`🔄 [${song.id}] Stream URL:`, sanitizeUrl(finalUrl));
       // 验证流媒体 URL 是否有效
       if (!finalUrl || finalUrl.trim() === "") {
         console.warn(`⚠️ [${song.id}] 流媒体 URL 无效`);
@@ -723,7 +774,7 @@ class SongManager {
       // 官方链接（按来源平台分派：网易云 / QQ 音乐 / 酷狗音乐）
       const official = await this.getOnlineUrl(song, songId, !!song.pc);
       console.log(`🌐 [${songId}] 官方链接获取结果:`, {
-        url: official.url,
+        url: sanitizeUrl(official.url),
         isTrial: official.isTrial,
         quality: official.quality,
       });
@@ -743,6 +794,7 @@ class SongManager {
 
       // 无可用源
       console.error(`❌ [${songId}] 所有音频源获取失败，无可用链接`);
+      this.notifyPlaybackFailure();
       return {
         id: songId,
         url: undefined,

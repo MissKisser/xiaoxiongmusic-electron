@@ -197,14 +197,6 @@ export const fetchQQMusicSubscriptionStatus = async (
 };
 
 /**
- * 清除平台登录态
- * @param platform 音源平台
- */
-export const logoutPlatform = async (platform: ApiPlatform): Promise<void> => {
-  await window.api.platformMusic.clearSession(platform);
-};
-
-/**
  * 读取平台账号资料
  * @param platform 音源平台
  */

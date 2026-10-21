@@ -29,6 +29,7 @@ import {
   type MetaData,
   type SongType,
 } from "@/types/main";
+import { toNumericId } from "./common";
 
 /** 归一化后的歌手（网易云形状） */
 export interface PlatformArtist {
@@ -468,6 +469,10 @@ export const buildCoverSize = (url: string): CoverSize => {
  *
  * 字段口径与 `src/utils/format.ts` 的 `formatSongsList` 对齐，
  * 额外带上来源平台与平台字符串主键。
+ *
+ * 双 id 口径：应用内模型要求数字 `id`，而平台条目有时只给字符串主键
+ * （QQ 音乐 mid / 酷狗 hash）。此时按主键派生一个稳定的数字 id，
+ * 保证非 0 且同输入恒同值；`platformId` 始终是权威主键。
  * @param song 归一化歌曲
  * @returns 应用内歌曲模型
  */
@@ -475,14 +480,14 @@ export const toSongType = (song: PlatformSong): SongType => ({
   id: song.id,
   name: song.name,
   artists: song.artists.map((artist) => ({
-    id: Number(artist.id) || 0,
+    id: toNumericId(artist.id, artist.mid || artist.name),
     name: artist.name,
     cover: artist.picUrl,
     // QQ 音乐用 mid、酷狗用 author_id 作为歌手的平台主键
     platformId: artist.mid ?? (artist.id !== "" ? String(artist.id) : undefined),
   })),
   album: {
-    id: Number(song.album.id) || 0,
+    id: toNumericId(song.album.id, song.album.platformId || song.album.name),
     name: song.album.name,
     cover: song.album.picUrl,
     platformId: song.album.platformId,
