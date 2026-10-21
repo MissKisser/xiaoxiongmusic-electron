@@ -53,11 +53,11 @@ watch(
 );
 
 // 是否处于刷歌视图（菜单「刷歌」入口带 fm=song 参数进入）
-// 刷歌是 QQ 音乐的推荐流能力，网易云沿用原有「私人漫游」流程，不渲染本页
+// 刷歌是 QQ 音乐与酷狗音乐的推荐流能力，网易云沿用原有「私人漫游」流程，不渲染本页
 const isSongFM = computed<boolean>(
   () =>
     router.currentRoute.value.query.fm === "song" &&
-    platformStore.currentPlatform === "qqmusic",
+    (platformStore.currentPlatform === "qqmusic" || platformStore.currentPlatform === "kugou"),
 );
 
 // 当前平台可见的子页（平台不支持的子页隐藏）

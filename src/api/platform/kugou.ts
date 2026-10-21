@@ -206,6 +206,25 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
 };
 
 /**
+ * 归一化酷狗刷歌曲目
+ *
+ * 与 `normalizeKgSong` 的唯一差异是**付费判据**。
+ * 榜单 / 歌单等模块的 `qualities` 是音质档位名数组（`["128k","320k"]`），
+ * 而 `normalizeKgSong` 的基档授权位解析要求 `{bitrate, privilege}` 对象数组，
+ * 遇到字符串数组会恒得 privilege=0，把付费曲目误判成免费。
+ * 刷歌模块的 `pay.privilege` 是上游直给的基档授权位，这里直接按它判付费。
+ * @param song 酷狗刷歌原生歌曲
+ * @returns 归一化歌曲
+ */
+export const normalizeKgSongFM = (song: Record<string, any>): PlatformSong => {
+  const normalized = normalizeKgSong(song);
+  const privilege = Number(song?.pay?.privilege ?? Number.NaN);
+  if (!Number.isFinite(privilege)) return normalized;
+  const fee = privilege === KG_PRIVILEGE_FREE || privilege === KG_PRIVILEGE_FREE_FOR_AD ? 0 : 1;
+  return { ...normalized, fee };
+};
+
+/**
  * 归一化酷狗歌单条目
  *
  * `type` 区分目录语义：0 为自建歌单，1 为收藏歌单；

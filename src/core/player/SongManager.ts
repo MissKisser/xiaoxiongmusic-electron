@@ -3,7 +3,7 @@ import { songUrl, unlockSongUrl } from "@/api/song";
 import { describePlaybackFailure } from "@/api/platform/errorText";
 import { kgSongUrl } from "@/api/platform/kugou";
 import { qqSongUrl } from "@/api/platform/qqmusic";
-import { qqSongFM } from "@/api/platform/songfm";
+import { kgSongFM, qqSongFM } from "@/api/platform/songfm";
 import { getPlatformLevel, mapPlatformQuality, type PlatformSongUrl } from "@/api/platform/types";
 import { planPlayback, type PlaybackStep } from "@/core/player/playbackDecision";
 import {
@@ -914,13 +914,18 @@ class SongManager {
    * 读取当前平台的推荐流曲目
    *
    * 网易云走 `/personal_fm`（私人 FM，一次 3 首）；
-   * QQ 音乐没有等价端点，改由平台推荐流模块给出个性化推荐（一次一批，实测批次间几乎不重复）。
+   * QQ 音乐与酷狗音乐没有等价端点，改由平台推荐流模块给出个性化推荐（一次一批，实测批次间几乎不重复）。
+   * 第三方平台的推荐流取数失败时直接失败，**不得回落网易云 `/personal_fm`** ——
+   * 回落会让酷狗 / QQ 的刷歌页串台到网易云曲目。
    * @param platform 目标平台
    * @returns 推荐流曲目
    */
   private fetchSongFMList = async (platform: ApiPlatform): Promise<SongType[]> => {
     if (platform === "qqmusic") {
       return qqSongFM(SONG_FM_BATCH_SIZE);
+    }
+    if (platform === "kugou") {
+      return kgSongFM(SONG_FM_BATCH_SIZE);
     }
     const res = await personalFm();
     return formatSongsList(res.data);

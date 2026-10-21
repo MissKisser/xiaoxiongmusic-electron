@@ -109,7 +109,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
           key: "personal-fm",
           label: () =>
             h("div", { class: "user-liked roaming-label" }, [
-              h(NText, null, () => (isQqPlatform.value ? "刷歌" : "私人漫游")),
+              h(NText, null, () => (isSongFMPlatform.value ? "刷歌" : "私人漫游")),
               h(NButton, {
                 type: "tertiary",
                 round: true,
@@ -119,9 +119,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
                 onClick: handleRefreshFM,
               }),
             ]),
-          show:
-            !settingStore.sidebarHide.hidePersonalFM &&
-            (isQqPlatform.value ? isPlatformLoggedIn.value : isLogin() !== 0 && !isPlatformSource.value),
+          show: showPersonalFMMenu.value,
           icon: renderIcon("Radio", {
             style: {
               transform: "translateY(-1px)",
@@ -374,10 +372,30 @@ const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !
 // 当前平台是否为 QQ 音乐（QQ 音乐下该入口切换为「刷歌」）
 const isQqPlatform = computed<boolean>(() => platformStore.currentPlatform === "qqmusic");
 
+// 当前平台是否为酷狗音乐（酷狗下该入口同样是「刷歌」）
+const isKugouPlatform = computed<boolean>(() => platformStore.currentPlatform === "kugou");
+
+// 支持「刷歌」的第三方平台（QQ 音乐 / 酷狗）
+const isSongFMPlatform = computed<boolean>(() => isQqPlatform.value || isKugouPlatform.value);
+
 // 当前平台是否已登录
 const isPlatformLoggedIn = computed<boolean>(
   () => !!platformStore.platformProfiles[platformStore.currentPlatform],
 );
+
+/**
+ * 侧边栏「私人漫游 / 刷歌」入口是否可见
+ *
+ * - QQ 音乐：推荐流是登录态接口，需要登录
+ * - 酷狗：推荐流匿名可用，直接展示
+ * - 网易云：需要登录，且只在本平台下展示
+ */
+const showPersonalFMMenu = computed<boolean>(() => {
+  if (settingStore.sidebarHide.hidePersonalFM) return false;
+  if (isQqPlatform.value) return isPlatformLoggedIn.value;
+  if (isKugouPlatform.value) return true;
+  return isLogin() !== 0 && !isPlatformSource.value;
+});
 
 // 生成平台歌单列表
 const renderPlatformPlaylist = (playlist: DispatchPlaylist, showCover: boolean) => ({
@@ -529,8 +547,8 @@ const menuUpdate = async (key: string, item: MenuOption) => {
   emit("menu-click", key);
   // 私人漫游 / 刷歌
   if (key === "personal-fm") {
-    // QQ 音乐：进入刷歌页并开始播放推荐流
-    if (isQqPlatform.value) {
+    // QQ 音乐 / 酷狗：进入刷歌页并开始播放推荐流
+    if (isSongFMPlatform.value) {
       await songManager.initPersonalFM();
       if (!musicStore.personalFMSong?.id) {
         window.$message.error("开启刷歌出错，请重试");

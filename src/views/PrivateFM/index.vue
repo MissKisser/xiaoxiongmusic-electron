@@ -1,4 +1,4 @@
-<!-- 刷歌（QQ 音乐推荐流，对应网易云的「私人 FM」） -->
+<!-- 刷歌（QQ 音乐 / 酷狗音乐推荐流，对应网易云的「私人 FM」） -->
 <template>
   <div class="song-fm">
     <!-- 当前曲目 -->
@@ -82,13 +82,14 @@
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
-import { useMusicStore, useStatusStore } from "@/stores";
+import { useMusicStore, usePlatformStore, useStatusStore } from "@/stores";
 import type { MetaData } from "@/types/main";
 import { coverLoaded } from "@/utils/helper";
 import { debounce } from "lodash-es";
 
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
+const platformStore = usePlatformStore();
 
 const player = usePlayerController();
 const songManager = useSongManager();
@@ -116,7 +117,9 @@ const currentAlbum = computed<MetaData | null>(() => {
 });
 
 // 推荐来源说明
-const sourceText = "QQ 音乐推荐流";
+const sourceText = computed(() =>
+  platformStore.currentPlatform === "kugou" ? "酷狗音乐推荐流" : "QQ 音乐推荐流",
+);
 
 // 播放图标
 const playIcon = computed(() =>
