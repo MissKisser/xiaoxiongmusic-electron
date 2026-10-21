@@ -13,6 +13,13 @@ import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from 
  * 站外源按「歌名 + 歌手 + 时长」寻址：请求显式带 `songName` / `artist` 时优先取显式值，
  * 否则按关键词拆分（按最后一个「-」切分并 trim，尾随空格不再导致恒 404）；
  * `duration` 为可选的歌曲声明时长（秒），参与三重校验，不传则跳过时长校验。
+ *
+ * 歌手只认显式传入的 `artist`：调用方给了 `songName` 却没给 `artist` 时，
+ * 绝不从关键词里凭空合成歌手 —— 歌名自身带「-」时（如「夜曲-周杰伦」），
+ * 关键词按最后一个「-」拆出的后半段并不是调用方声明的歌手，
+ * 据此放行会匹配到同名不同版本的曲目，宁可不换源也不播错版本。
+ * 只有当关键词整体就是「歌名-歌手」形式（拆出的歌名与 `songName` 完全一致）时，
+ * 才沿用关键词里的歌手；否则歌手留空，由后续校验按「缺歌手」处理。
  * @param query 请求查询参数
  * @returns 目标歌曲信息
  */
@@ -21,13 +28,15 @@ const buildMatchInfo = (query: { [key: string]: string }): MatchTarget => {
   const duration = parseDurationParam(query.duration);
   const songName = (query.songName || "").trim();
   const artist = (query.artist || "").trim();
+  // 歌名与歌手都没给：按关键词整体拆分
   if (!songName && !artist) return buildTarget(keyword, duration);
   const parsed = parseKeyword(keyword);
-  return {
-    title: songName || parsed.title,
-    artist: artist || parsed.artist,
-    duration,
-  };
+  // 歌手显式给了：直接采用
+  if (artist) return { title: songName || parsed.title, artist, duration };
+  // 只给了歌名：仅当关键词拆出的歌名与 songName 完全一致时，才认为关键词是「歌名-歌手」形式；
+  // 歌名自身含「-」时拆出来的那段并不是调用方声明的歌手，按缺歌手处理
+  const keywordArtist = parsed.title === songName ? parsed.artist : "";
+  return { title: songName, artist: keywordArtist, duration };
 };
 
 // 初始化 UnblockAPI
