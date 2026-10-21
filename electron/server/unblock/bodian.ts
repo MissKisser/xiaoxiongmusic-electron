@@ -45,6 +45,19 @@ const buildHeaders = () => ({
 });
 
 /**
+ * 直链体积探测专用请求头
+ *
+ * 直链落在酷我 CDN 上，必须用 CDN 自身的请求头去探测：
+ * 带上 `host: bd-api.kuwo.cn` 会被 CDN 直接拒绝，探测结果恒为空，
+ * 体积校验会被静默跳过，残缺文件因此得以放行。
+ * @returns 只含 UA 与 Referer 的探测请求头
+ */
+const buildProbeHeaders = (): Record<string, string> => ({
+  "user-agent": "Dart/2.19 (dart:io)",
+  Referer: "https://bd-api.kuwo.cn/",
+});
+
+/**
  * 为请求地址追加签名
  * @param str 待签名地址
  * @returns 带 sign 参数的地址
@@ -109,14 +122,22 @@ const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => 
       const result = await axios.get(audioUrl, { headers, timeout: 10000 });
       if (typeof result.data !== "object" || !result.data?.data?.audioUrl) continue;
       const url = result.data.data.audioUrl as string;
-      const length = await probeContentLength(url, headers);
-      const check = isPlausibleAudioLength(length, detail.candidate.duration, BODIAN_BITRATE_KBPS);
+      const length = await probeContentLength(url, buildProbeHeaders());
+      const check = isPlausibleAudioLength(
+        length,
+        detail.candidate.duration,
+        BODIAN_BITRATE_KBPS,
+        target.duration,
+      );
       if (!check.ok) {
         serverLog.warn(`⚠️ Bodian candidate rejected (${detail.candidate.title}): ${check.reason}`);
         continue;
       }
+      if (!check.verified) {
+        serverLog.warn(`⚠️ Bodian 直链体积未验证 (${detail.candidate.title}): ${check.reason}`);
+      }
       serverLog.log("🔗 BodianSong URL:", url);
-      return { code: 200, url };
+      return { code: 200, url, lengthVerified: check.verified };
     }
     return { code: 404, url: null };
   } catch (error) {

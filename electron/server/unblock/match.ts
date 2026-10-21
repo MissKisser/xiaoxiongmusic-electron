@@ -122,6 +122,12 @@ const PLACEHOLDER_MAX_BYTES = 190000;
 /** 预期体积超过该值时才启用占位文件特征判定，避免误伤极短曲目 */
 const PLACEHOLDER_MIN_EXPECTED_BYTES = 300000;
 
+/** 体积下限：声明时长超过 LONG_DURATION_SECONDS 的歌曲，文件不可能小于该字节数 */
+const MIN_PLAUSIBLE_BYTES = 100000;
+
+/** 触发体积下限校验的时长阈值（秒） */
+const LONG_DURATION_SECONDS = 60;
+
 /**
  * 解码 HTML 实体（搜索页与详情页的歌手字段带实体转义）
  * @param text 原始文本
@@ -388,30 +394,51 @@ export const expectedAudioBytes = (duration: number, bitrateKbps: number): numbe
 
 /**
  * 判断直链返回的文件体积是否符合预期，用于拦截占位/残缺文件
+ *
+ * 体积探测失败（长度未知）不再等同于「校验通过」：此时返回未验证标记，
+ * 由调用方决定是否继续使用该直链；候选缺时长时退化为「字节下限」粗校验。
  * @param length 响应头声明的字节数；未知时为 null
  * @param duration 候选歌曲声明的时长（秒）
  * @param bitrateKbps 直链码率（kbps）
- * @returns 是否可用及判定理由
+ * @param targetDuration 请求侧声明的时长（秒），可选，用于字节下限粗校验
+ * @returns 是否可用、判定理由与体积校验是否完成
  */
 export const isPlausibleAudioLength = (
   length: number | null,
   duration?: number,
   bitrateKbps = 128,
-): { ok: boolean; reason: string } => {
-  if (length === null) return { ok: true, reason: "未知长度，跳过体积校验" };
-  if (!duration || duration <= 0) return { ok: true, reason: "候选无时长，跳过体积校验" };
+  targetDuration?: number,
+): { ok: boolean; reason: string; verified: boolean } => {
+  if (length === null) {
+    return { ok: true, verified: false, reason: "长度探测失败，未能完成体积校验" };
+  }
+  if (!duration || duration <= 0) {
+    if (targetDuration && targetDuration > LONG_DURATION_SECONDS) {
+      if (length < MIN_PLAUSIBLE_BYTES) {
+        return {
+          ok: false,
+          verified: true,
+          reason: `体积 ${length}B 小于 ${targetDuration}s 长曲目的体积下限 ${MIN_PLAUSIBLE_BYTES}B`,
+        };
+      }
+      return { ok: true, verified: true, reason: "候选无时长，已按字节下限校验" };
+    }
+    return { ok: true, verified: false, reason: "候选与请求均无时长，无法完成体积校验" };
+  }
   const expected = expectedAudioBytes(duration, bitrateKbps);
   if (length < expected * 0.5) {
     return {
       ok: false,
+      verified: true,
       reason: `体积 ${length}B 明显小于 ${duration}s@${bitrateKbps}k 的预期 ${expected}B`,
     };
   }
   if (length <= PLACEHOLDER_MAX_BYTES && expected > PLACEHOLDER_MIN_EXPECTED_BYTES) {
     return {
       ok: false,
+      verified: true,
       reason: `体积 ${length}B 命中占位文件特征（≤${PLACEHOLDER_MAX_BYTES}B）`,
     };
   }
-  return { ok: true, reason: "" };
+  return { ok: true, verified: true, reason: "" };
 };

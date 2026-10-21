@@ -67,6 +67,38 @@ const stringifyCookies = (cookies: Record<string, string>): string =>
     .map(([k, v]) => `${k}=${v}`)
     .join("; ");
 
+/** 日志中凭据值的统一占位符 */
+const REDACTED = "<redacted>";
+
+/**
+ * 脱敏 Cookie 集合：只保留键名，值统一替换为占位符
+ * @param cookies Cookie 键值对
+ * @returns 脱敏后的键值对
+ */
+const redactCookies = (cookies: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.keys(cookies).map((key) => [key, REDACTED]));
+
+/**
+ * 脱敏响应头：可能携带凭据的头只保留头名
+ * @param headers 响应头
+ * @returns 脱敏后的响应头
+ */
+const redactHeaders = (headers: Headers): Record<string, string> =>
+  Object.fromEntries(
+    [...headers.entries()].map(([key, value]) => [key, /cookie/i.test(key) ? REDACTED : value]),
+  );
+
+/**
+ * 脱敏地址中的凭据参数（授权码、票据、签名等）
+ * @param url 原始地址
+ * @returns 参数值已脱敏的地址
+ */
+const redactUrl = (url: string): string =>
+  url.replace(
+    /([?&](?:code|token|access_token|refresh_token|ticket|sig|sign|ptsig|ptsigx|ptqrtoken|key|skey|p_skey|pt4_token|session|sid)=)[^&#]*/gi,
+    `$1${REDACTED}`,
+  );
+
 /**
  * 获取二维码 Key 及图片内容
  * @param params.type 扫码类型，'qq' 或 'wx'，默认 'qq'
@@ -250,7 +282,7 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
     const initialCookies = extractCookies(res, { qrsig: key });
 
     // 请求 check_sig 校验跳转并建立会话 Cookie
-    coreLog.info("[qm-login] 正在执行 check_sig 授权...", { jumpUrl });
+    coreLog.info("[qm-login] 正在执行 check_sig 授权...", { jumpUrl: redactUrl(jumpUrl) });
     const checkSigRes = await fetch(jumpUrl, {
       headers: {
         Referer: "https://xui.ptlogin2.qq.com/",
@@ -268,8 +300,8 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
     if (!p_skey) {
       coreLog.warn("[qm-login] check_sig 未提取到 p_skey:", {
         status: checkSigRes.status,
-        headers: Object.fromEntries(checkSigRes.headers.entries()),
-        cookies: sessionCookies,
+        headers: redactHeaders(checkSigRes.headers),
+        cookies: redactCookies(sessionCookies),
       });
       throw new Error("获取 p_skey 失败");
     }
@@ -307,7 +339,7 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
     if (!codeMatch) {
       coreLog.warn("[qm-login] authorize 未返回 code:", {
         status: authRes.status,
-        location,
+        location: redactUrl(location),
       });
       throw new Error("获取 QQ 授权 code 失败");
     }
@@ -337,9 +369,7 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
       if (value) qqConnectCookies[name] = value;
     }
     if (Object.keys(qqConnectCookies).length > 0) {
-      coreLog.info(
-        `[qm-login] 已保留 QQ 互联 cookie：${Object.keys(qqConnectCookies).join(", ")}`,
-      );
+      coreLog.info(`[qm-login] 已保留 QQ 互联 cookie：${Object.keys(qqConnectCookies).join(", ")}`);
     }
 
     mergeQQMusicCookies({ ...savedCookies, ...qqConnectCookies });

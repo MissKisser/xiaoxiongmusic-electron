@@ -13,6 +13,7 @@
 import { kgGatewayRequest } from "../core/request";
 import { fillCover } from "../core/config";
 import { extractEntryTitle } from "../core/song_title";
+import { rsaEncryptKugou } from "../core/crypto";
 import { getSessionCookies } from "../../../database/PlatformSessionDB";
 import { coreLog } from "../../../logger";
 import type { KGModule, KGParams } from "../core/types";
@@ -282,14 +283,16 @@ export const user_profile: KGModule = async () => {
     return { code: 401, message: "未登录" };
   }
   try {
+    const clienttime = Math.floor(Date.now() / 1000);
     const response = await kgGatewayRequest<{ data?: Record<string, unknown> }>("/v3/get_my_info", {
       method: "POST",
       headers: { "x-router": "usercenter.kugou.com" },
       params: { plat: 1 },
       data: {
-        visit_time: Math.floor(Date.now() / 1000),
+        visit_time: clienttime,
         usertype: 1,
-        p: "",
+        // p 必须是 RSA 加密的票据，置空会被网关判为 20006（参数错误）
+        p: rsaEncryptKugou({ token: session.token, clienttime }).toUpperCase(),
         userid: Number(session.userid),
       },
     });

@@ -40,6 +40,52 @@ const POOL_BY_TYPE: Record<string, string> = {
 type RawComment = Record<string, any>;
 
 /**
+ * 跨页去重记忆：同一评论对象只记住最近一次返回的那一页的评论 id
+ *
+ * 酷狗评论接口的排序会抖动，相邻两页可能返回同一批评论。
+ * 记忆只保留最近一页且带过期时间，不会随翻页无限增长。
+ */
+const pageIdMemory = new Map<string, { page: number; ids: Set<string>; expireAt: number }>();
+
+/** 跨页去重记忆的存活时长（毫秒） */
+const PAGE_ID_MEMORY_TTL = 3 * 60 * 1000;
+
+/**
+ * 按评论 id 去重：页内去重 + 与上一页去重
+ * @param key 评论对象标识
+ * @param page 当前页码
+ * @param items 本页原始评论
+ * @returns 去重后的评论与被剔除的条数
+ */
+const dedupeComments = (
+  key: string,
+  page: number,
+  items: RawComment[],
+): { items: RawComment[]; removed: number } => {
+  const memory = pageIdMemory.get(key);
+  const previousIds =
+    memory && memory.page === page - 1 && memory.expireAt > Date.now()
+      ? memory.ids
+      : new Set<string>();
+
+  const seen = new Set<string>();
+  const kept: RawComment[] = [];
+  let removed = 0;
+  for (const item of items) {
+    const id = String(item?.id ?? "");
+    if (!id || seen.has(id) || previousIds.has(id)) {
+      removed += 1;
+      continue;
+    }
+    seen.add(id);
+    kept.push(item);
+  }
+
+  pageIdMemory.set(key, { page, ids: seen, expireAt: Date.now() + PAGE_ID_MEMORY_TTL });
+  return { items: kept, removed };
+};
+
+/**
  * 解析评论对象 id（album_audio_id 口径）
  *
  * 该 id 在不同来源里叫法不一：`mixsongid`（社区口径）、`album_audio_id`（网关返回）、
@@ -179,6 +225,11 @@ export const comment: KGModule = async (params: KGParams) => {
   const hotwords = Array.isArray(response.hot_word_list) ? response.hot_word_list : [];
   const classify = Array.isArray(response.classify_list) ? response.classify_list : [];
 
+  const { items: uniqueList, removed } = dedupeComments(`${type}:${id}`, page, list);
+  if (removed > 0) {
+    coreLog.warn(`[kg-comment] 剔除重复评论 ${removed} 条（${type}:${id} 第 ${page} 页）`);
+  }
+
   return {
     code: 200,
     id,
@@ -188,21 +239,21 @@ export const comment: KGModule = async (params: KGParams) => {
     /** 该评论对象的评论总数 */
     total: Number(response.count ?? list.length),
     /** 当前页条数 */
-    count: list.length,
+    count: uniqueList.length,
     /** 总页数 */
     maxPage: Number(response.maxPage ?? 0),
-    comments: list.map(normalizeComment),
+    comments: uniqueList.map(normalizeComment),
     /** 热词榜 */
     hotwords: hotwords.map((word: RawComment) => ({
       id: String(word.id ?? ""),
-      word: word.word ?? "",
-      count: Number(word.count ?? 0),
+      word: word.content ?? word.word ?? "",
+      count: Number(word.count ?? word.cnt ?? 0),
     })),
     /** 评论分类 */
     categories: classify.map((item: RawComment) => ({
       id: String(item.id ?? item.class_id ?? ""),
-      name: item.name ?? item.class_name ?? "",
-      count: Number(item.count ?? 0),
+      name: item.label ?? item.name ?? item.class_name ?? "",
+      count: Number(item.cnt ?? item.count ?? 0),
     })),
     raw: response,
   };

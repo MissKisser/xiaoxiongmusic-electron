@@ -246,6 +246,14 @@ export const subscription_status: QMModule = async (params: QMParams) => {
 };
 
 /**
+ * 取第一个非空字符串
+ * @param values 候选值
+ * @returns 第一个非空字符串；全为空时返回空串
+ */
+const firstNonEmpty = (...values: Array<string | undefined>): string =>
+  values.find((value) => typeof value === "string" && value.trim() !== "") ?? "";
+
+/**
  * 读取一张歌单的详情与歌曲
  * @param params.id 歌单 tid
  * @param params.dirId 歌单目录号（自己的歌单需要，普通歌单可省）
@@ -269,6 +277,14 @@ export const playlist_detail: QMModule = async (params: QMParams) => {
     total_song_num?: number;
     hasmore?: number;
     cdlist?: Array<{ dissname?: string; logo?: string; nickname?: string; desc?: string }>;
+    dirinfo?: {
+      title?: string;
+      picurl?: string;
+      picurl2?: string;
+      headurl?: string;
+      desc?: string;
+      host_nick?: string;
+    };
   }>(
     "music.srfDissInfo.DissInfo",
     "CgiGetDiss",
@@ -285,14 +301,16 @@ export const playlist_detail: QMModule = async (params: QMParams) => {
     { session: false, webComm: true },
   );
 
+  // 自建歌单的响应没有 cdlist（普通歌单才有），标题与封面在 dirinfo 里
   const cd = data?.cdlist?.[0];
+  const dirInfo = data?.dirinfo;
   return {
     code: 200,
     id,
-    name: cd?.dissname ?? "",
-    creator: cd?.nickname ?? "",
-    cover: cd?.logo ?? "",
-    description: cd?.desc ?? "",
+    name: firstNonEmpty(cd?.dissname, dirInfo?.title),
+    creator: firstNonEmpty(cd?.nickname, dirInfo?.host_nick),
+    cover: firstNonEmpty(cd?.logo, dirInfo?.picurl, dirInfo?.picurl2, dirInfo?.headurl),
+    description: firstNonEmpty(cd?.desc, dirInfo?.desc),
     total: data?.total_song_num ?? data?.songlist?.length ?? 0,
     hasmore: data?.hasmore ?? 0,
     songs: (data?.songlist ?? []).map((song) => ({

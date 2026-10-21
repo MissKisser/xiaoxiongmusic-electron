@@ -76,6 +76,24 @@ const readOwnedList = async (): Promise<unknown[]> => {
 };
 
 /**
+ * 读取歌曲的红心状态
+ *
+ * 「我喜欢」是系统目录，目录号固定为 201，没有可供请求侧比对的歌单 tid；
+ * 写入后只能按歌曲粒度读回红心状态来确认写入是否真的生效。
+ * @param songIds 歌曲数字 id 列表
+ * @returns 以歌曲 id 为键的红心状态
+ */
+const readSongFavStatus = async (songIds: number[]): Promise<Record<string, boolean>> => {
+  const data = await qmRequest<{ m_fan?: Record<string, boolean> }>(
+    "music.musicasset.SongFavRead",
+    "IsSongFanById",
+    { v_songId: songIds },
+    { session: false, referer: WRITE_REFERER },
+  );
+  return data?.m_fan ?? {};
+};
+
+/**
  * 创建歌单
  * @param params.name 歌单名（最多 20 字）
  */
@@ -103,7 +121,9 @@ export const playlist_create: QMModule = async (params: QMParams) => {
   // 读回确认：歌单应出现在自建列表中
   const list = await readOwnedList();
   const read = list.find(
-    (item) => (item as Record<string, unknown>) && positiveInt((item as Record<string, unknown>).tid) === tid,
+    (item) =>
+      (item as Record<string, unknown>) &&
+      positiveInt((item as Record<string, unknown>).tid) === tid,
   ) as Record<string, unknown> | undefined;
   if (!read || positiveInt(read.dirId) !== dirId) {
     return { code: 502, message: "创建后读回校验失败", tid, dirId };
@@ -218,7 +238,9 @@ export const playlist_delete: QMModule = async (params: QMParams) => {
   // 读回确认：歌单应已不在列表中
   const list = await readOwnedList();
   const still = list.find(
-    (item) => (item as Record<string, unknown>) && positiveInt((item as Record<string, unknown>).tid) === tid,
+    (item) =>
+      (item as Record<string, unknown>) &&
+      positiveInt((item as Record<string, unknown>).tid) === tid,
   );
   if (still) return { code: 502, message: "删除后读回校验失败：歌单仍存在" };
 
@@ -248,6 +270,7 @@ export const playlist_tracks: QMModule = async (params: QMParams) => {
     }
     return { songId: id, songType: 0 };
   });
+  const songIds = v_songInfo.map((song) => song.songId);
 
   const like = params.like === true;
   let dirId: number;
@@ -275,11 +298,24 @@ export const playlist_tracks: QMModule = async (params: QMParams) => {
     return { code: 502, message: "写歌曲失败", retCode: data?.retCode };
   }
 
-  const changed =
-    data.result.dirId === dirId && positiveInt(data.result.tid) === tid;
-  const cleared = data.result.dirId === 0 && (data.result.tid === 0 || data.result.tid === "0");
-  if (!changed && !cleared) {
-    return { code: 502, message: "写歌曲返回的 dirId/tid 不匹配" };
+  if (like) {
+    // 「我喜欢」是系统目录，响应里的 dirId/tid 描述的是该目录自身而非请求侧歌单，
+    // 因此红心路径改用「按歌曲 id 读回红心状态」判定写入结果。
+    const status = await readSongFavStatus(songIds);
+    const expected = op === "add";
+    const mismatched = songIds.filter((id) => Boolean(status[String(id)]) !== expected);
+    if (mismatched.length > 0) {
+      return {
+        code: 502,
+        message: `红心状态读回校验失败：${mismatched.length} 首与预期不符`,
+      };
+    }
+  } else {
+    const changed = data.result.dirId === dirId && positiveInt(data.result.tid) === tid;
+    const cleared = data.result.dirId === 0 && (data.result.tid === 0 || data.result.tid === "0");
+    if (!changed && !cleared) {
+      return { code: 502, message: "写歌曲返回的 dirId/tid 不匹配" };
+    }
   }
 
   return { code: 200, changed: true, dirId, tid: tid ?? null, verified: true };
