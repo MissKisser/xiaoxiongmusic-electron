@@ -54,7 +54,11 @@ const resolvePlatform = (song: SongType): ApiPlatform => song.platform ?? "netea
 const SONG_FM_BATCH_SIZE = 20;
 
 /**
- * 取歌曲的首个歌手名
+ * 取歌曲的歌手名
+ *
+ * 多个歌手时全部取用（用 ` / ` 连接）：换源源的站外候选常把原唱写进歌名字段，
+ * 只传首位歌手会让「歌手组合」类的候选匹配不上；实测传全部歌手后
+ * 网易云检索源命中数不降反升，酷我 / 波点源命中不变。
  *
  * 上游可能给出空的歌手数组（如 QQ 音乐推荐流缺失 `singer` 字段），
  * 此时按空串处理，避免取歌手时抛异常导致整条解锁链崩掉。
@@ -63,7 +67,12 @@ const SONG_FM_BATCH_SIZE = 20;
  */
 const resolveSongArtist = (song: SongType): string => {
   const artists = song.artists;
-  if (Array.isArray(artists)) return artists[0]?.name ?? "";
+  if (Array.isArray(artists)) {
+    return artists
+      .map((artist) => artist?.name ?? "")
+      .filter(Boolean)
+      .join(" / ");
+  }
   return artists ?? "";
 };
 

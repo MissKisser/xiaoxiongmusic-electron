@@ -16,7 +16,17 @@ import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
 import axios from "axios";
 import NeteaseCloudMusicApi from "@neteasecloudmusicapienhanced/api";
-import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
+import {
+  FETCH_FAILED_REASON,
+  MATCH_FAILED_REASON,
+  MISSING_ARTIST_REASON,
+  MISSING_TITLE_REASON,
+  NO_CANDIDATE_REASON,
+  UPSTREAM_UNAVAILABLE_REASON,
+  isPlausibleAudioLength,
+  rankCandidates,
+  type MatchTarget,
+} from "./match";
 import { probeContentLength } from "./audio-length";
 import { sanitizeUrl } from "./sanitize";
 
@@ -32,9 +42,6 @@ const NETEASE_BITRATE_KBPS = 128;
 /** 单次换源最多尝试的候选数 */
 const MAX_CANDIDATE_TRY = 3;
 
-/** 目标缺歌手时的拒绝原因（用户可读） */
-const MISSING_ARTIST_REASON = "缺少歌手信息，无法安全换源";
-
 /** 网易云检索请求头 */
 const SEARCH_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
@@ -44,6 +51,9 @@ const SEARCH_UA =
  *
  * 目标缺歌手时直接返回空列表：仅按歌名检索会命中同名不同版本的曲目
  * （实测《青花瓷》仅按歌名检索会命中 95 秒的街声版），宁可不换源也不播错歌。
+ *
+ * 检索词取「歌名 + 歌手」与「裸歌名」两组并集：站外源的曲目标题常把歌手写进歌名字段，
+ * 只按「歌名 + 歌手」检索会漏掉这类候选。
  * @param title 歌名
  * @param artist 歌手；为空时不检索
  * @param cookie 网易云登录态，可为空
@@ -55,29 +65,31 @@ const searchNeteaseCandidates = async (
   cookie?: Record<string, string>,
 ): Promise<Array<{ id: string; title: string; artist: string; duration?: number }>> => {
   if (!artist.trim()) return [];
-  const keyword = `${title} ${artist}`;
-  const response = await NeteaseCloudMusicApi.cloudsearch({
-    keywords: keyword,
-    type: 1,
-    limit: SEARCH_LIMIT,
-    ...(cookie && Object.keys(cookie).length ? { cookie } : {}),
-  } as any);
-  const songs = (response as any)?.body?.result?.songs || [];
+  const keywords = [`${title} ${artist}`, title];
   const candidates: Array<{ id: string; title: string; artist: string; duration?: number }> = [];
   const seen = new Set<string>();
-  for (const song of songs) {
-    const id = String(song?.id ?? "");
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    const duration = Math.round(Number(song?.dt ?? song?.duration ?? 0) / 1000);
-    candidates.push({
-      id,
-      title: String(song?.name ?? ""),
-      artist: (song?.ar || song?.artists || [])
-        .map((item: any) => String(item?.name ?? ""))
-        .join(" / "),
-      duration: duration > 0 ? duration : undefined,
-    });
+  for (const keyword of keywords) {
+    const response = await NeteaseCloudMusicApi.cloudsearch({
+      keywords: keyword,
+      type: 1,
+      limit: SEARCH_LIMIT,
+      ...(cookie && Object.keys(cookie).length ? { cookie } : {}),
+    } as any);
+    const songs = (response as any)?.body?.result?.songs || [];
+    for (const song of songs) {
+      const id = String(song?.id ?? "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const duration = Math.round(Number(song?.dt ?? song?.duration ?? 0) / 1000);
+      candidates.push({
+        id,
+        title: String(song?.name ?? ""),
+        artist: (song?.ar || song?.artists || [])
+          .map((item: any) => String(item?.name ?? ""))
+          .join(" / "),
+        duration: duration > 0 ? duration : undefined,
+      });
+    }
   }
   return candidates;
 };
@@ -142,14 +154,14 @@ export const getNeteaseSearchSongUrl = async (
   cookie?: Record<string, string>,
 ): Promise<SongUrlResult> => {
   try {
-    if (!target.title) return { code: 404, url: null };
+    if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
     if (!target.artist.trim()) {
       return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
     }
     const candidates = await searchNeteaseCandidates(target.title, target.artist, cookie);
-    if (!candidates.length) return { code: 404, url: null };
+    if (!candidates.length) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
     const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
-    if (!ranked.length) return { code: 404, url: null };
+    if (!ranked.length) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
 
     for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
       const id = detail.candidate.id;
@@ -176,9 +188,10 @@ export const getNeteaseSearchSongUrl = async (
         return { code: 200, url: source.url, lengthVerified: check.verified };
       }
     }
-    return { code: 404, url: null };
+    serverLog.warn(`⚠️ Netease 候选通过校验但取不到直链（${target.title} / ${target.artist}）`);
+    return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get NeteaseSearchSong URL Error:", error);
-    return { code: 404, url: null };
+    return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };

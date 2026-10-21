@@ -10,7 +10,17 @@ import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
 import { createHash } from "crypto";
 import axios from "axios";
-import { isPlausibleAudioLength, rankCandidates, type MatchTarget } from "./match";
+import {
+  FETCH_FAILED_REASON,
+  MATCH_FAILED_REASON,
+  MISSING_ARTIST_REASON,
+  MISSING_TITLE_REASON,
+  NO_CANDIDATE_REASON,
+  UPSTREAM_UNAVAILABLE_REASON,
+  isPlausibleAudioLength,
+  rankCandidates,
+  type MatchTarget,
+} from "./match";
 import { searchKuwoCandidates } from "./kuwo-search";
 import { probeContentLength } from "./audio-length";
 import { sanitizeUrl } from "./sanitize";
@@ -110,11 +120,14 @@ const sendAdFreeRequest = () => {
  */
 const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
   try {
-    if (!target.title) return { code: 404, url: null };
-    const candidates = await searchKuwoCandidates(target.title, target.artist);
-    if (!candidates.length) return { code: 404, url: null };
+    if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
+    if (!target.artist.trim()) return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
+    const candidates = await searchKuwoCandidates(target.title, target.artist, (message) =>
+      serverLog.warn(`⚠️ ${message}`),
+    );
+    if (!candidates.length) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
     const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
-    if (!ranked.length) return { code: 404, url: null };
+    if (!ranked.length) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
     const headers = buildHeaders();
     await sendAdFreeRequest();
     for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
@@ -140,10 +153,10 @@ const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => 
       serverLog.log("🔗 BodianSong URL:", sanitizeUrl(url));
       return { code: 200, url, lengthVerified: check.verified };
     }
-    return { code: 404, url: null };
+    return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get BodianSong URL Error:", error);
-    return { code: 404, url: null };
+    return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };
 
