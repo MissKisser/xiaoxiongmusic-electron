@@ -1,11 +1,28 @@
 /**
- * 第三方音源平台统一类型
+ * 共享的音源契约类型
  *
- * 与网易云（ncm-api 体系）完全独立，仅描述 QQ 音乐 / 酷狗等平台。
+ * 本模块只描述主进程与渲染进程共用的数据契约，不依赖任何其他模块，
+ * 因此可作为叶子模块被任意模块安全引用。
  */
 
 /** 支持的音源平台 */
 export type ApiPlatform = "netease" | "qqmusic" | "kugou";
+
+/**
+ * 歌曲解锁服务器
+ *
+ * 标识获取歌曲播放地址时可用的站外解锁源，决定解锁链的尝试顺序与各源的超时预算。
+ */
+export enum SongUnlockServer {
+  /** 网易云音乐（按歌曲 ID 寻址） */
+  NETEASE = "netease",
+  /** 波点音乐 */
+  BODIAN = "bodian",
+  /** 酷我音乐 */
+  KUWO = "kuwo",
+  /** 歌曲宝 */
+  GEQUBAO = "gequbao",
+}
 
 /** 通用响应包装 */
 export type ApiCallResponse =

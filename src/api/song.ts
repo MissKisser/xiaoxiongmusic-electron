@@ -1,6 +1,6 @@
 import { isElectron } from "@/utils/env";
 import { defaultAMLLDbServer, songLevelData } from "@/utils/meta";
-import { SongUnlockServer } from "@/core/player/SongManager";
+import { SongUnlockServer } from "@/types/shared";
 import { useSettingStore } from "@/stores";
 import request from "@/utils/request";
 
@@ -69,6 +69,10 @@ export const songUrl = (
  * （网易云关键词检索源实测单次检索即达 10.6 s），
  * 沿用网易云链路的 15 s 通用超时会直接把慢源掐断，表现为「所有音频源获取失败」。
  * 这里只给解锁请求单独设预算，网易云请求的超时行为保持不变。
+ *
+ * 本常量的计算属性键会在模块求值期立即解引用 `SongUnlockServer` 的成员，
+ * 因此该枚举必须来自不参与任何循环依赖的叶子模块（`@/types/shared`）；
+ * 调整 `SongUnlockServer` 的导入来源时，需确认不会与本模块形成循环引用。
  */
 const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   // 网易云关键词检索源最慢：检索 + 两级取链 + 体积校验串行

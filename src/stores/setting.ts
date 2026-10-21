@@ -7,7 +7,7 @@
  *         shared/types/settings.ts (ExternalApiSettings.allowLan) / shared/defaults/settings.ts
  */
 import { TimeFormat } from "@/composables/useTimeFormat";
-import { SongUnlockServer } from "@/core/player/SongManager";
+import { SongUnlockServer } from "@/types/shared";
 import type { SongLevelType } from "@/types/main";
 import { defaultAMLLDbServer } from "@/utils/meta";
 import { defineStore } from "pinia";

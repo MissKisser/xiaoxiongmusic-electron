@@ -9,7 +9,7 @@ import { kgSongUrl } from "@/api/platform/kugou";
 import { qqLyric } from "@/api/platform/qqmusic";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { getPlatformLevel } from "@/api/platform/types";
-import { SongUnlockServer } from "@/core/player/SongManager";
+import { SongUnlockServer } from "@/types/shared";
 
 import { songLevelData } from "@/utils/meta";
 import { getPlayerInfoObj } from "@/utils/format";

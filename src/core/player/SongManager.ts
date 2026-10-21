@@ -15,7 +15,7 @@ import {
   useStreamingStore,
 } from "@/stores";
 import { QualityType, type SongType } from "@/types/main";
-import type { ApiPlatform } from "@/types/shared";
+import { SongUnlockServer, type ApiPlatform } from "@/types/shared";
 import { isLogin } from "@/utils/auth";
 import { isElectron } from "@/utils/env";
 import { formatSongsList } from "@/utils/format";
@@ -24,16 +24,8 @@ import { openUserLogin } from "@/utils/modal";
 import { sanitizeUrl } from "@/utils/sanitize";
 
 /**
- * 歌曲解锁服务器
+ * 歌曲播放地址信息
  */
-export enum SongUnlockServer {
-  NETEASE = "netease",
-  BODIAN = "bodian",
-  KUWO = "kuwo",
-  GEQUBAO = "gequbao",
-}
-
-/** 歌曲播放地址信息 */
 export type AudioSource = {
   /** 歌曲id */
   id: number;
