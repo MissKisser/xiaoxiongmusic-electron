@@ -11,13 +11,14 @@
               <n-grid cols="1 600:2" x-gap="20" y-gap="20">
                 <n-gi v-for="board in group.toplists" :key="board.topId">
                   <SongListCard
+                    class="board-card"
                     :cover="board.cover"
                     :title="board.title || '排行榜'"
                     :height="160"
                     :description="board.subTitle || board.updateTime"
                     size="normal"
                     :class="{ active: board.topId === activeTopId }"
-                    @click="openBoard(board)"
+                    @click="handleBoardClick(board)"
                   >
                     <template #info>
                       <div class="board-meta">
@@ -44,7 +45,7 @@
           </n-gi>
         </n-grid>
         <!-- 榜单详情 -->
-        <div v-if="activeBoard" class="board-detail">
+        <div v-if="activeBoard" ref="boardDetailRef" class="board-detail">
           <n-text class="detail-title">{{ activeBoard.title }}</n-text>
           <n-text v-if="activeBoard.subTitle" class="detail-subtitle" depth="3">
             {{ activeBoard.subTitle }}
@@ -53,6 +54,7 @@
             :data="boardSongs"
             :loading="detailLoading"
             :loadMore="boardHasMore"
+            :height="detailListHeight"
             @reachBottom="loadMoreBoardSongs"
             disabledSort
           />
@@ -111,13 +113,14 @@
 import { topPlaylist } from "@/api/playlist";
 import type { CoverType, SongType } from "@/types/main";
 import type { ApiPlatform } from "@/types/shared";
-import { onPlatformChange, usePlatformStore } from "@/stores";
+import { onPlatformChange, usePlatformStore, useStatusStore } from "@/stores";
 import { dispatchLeaderboardDetail, dispatchLeaderboardGroups } from "@/api/platform/dispatch";
 import type { PlatformLeaderboardBoard, PlatformLeaderboardGroup } from "@/api/platform/types";
 import { formatCoverList } from "@/utils/format";
 
 const router = useRouter();
 const platformStore = usePlatformStore();
+const statusStore = useStatusStore();
 
 /** 提供分组榜单的平台（QQ 音乐 / 酷狗） */
 const GROUPED_BOARD_PLATFORMS: ApiPlatform[] = ["qqmusic", "kugou"];
@@ -162,8 +165,22 @@ const boardHasMore = ref<boolean | undefined>(undefined);
 // 榜单详情加载状态
 const detailLoading = ref<boolean>(false);
 
+// 榜单详情区元素
+const boardDetailRef = ref<HTMLElement | null>(null);
+
 // 榜单详情请求序号：只有最后一次请求的结果会被采纳，避免连点时标题与曲目错位
 let boardRequestId = 0;
+
+/**
+ * 榜单详情曲目表高度
+ *
+ * 曲目表是虚拟列表，必须有确定高度才能渲染出内容，
+ * 这里跟随主内容区高度自适应，给标题与副标题留出空间。
+ */
+const detailListHeight = computed<number>(() => {
+  const contentHeight = statusStore.mainContentHeight || 720;
+  return Math.max(240, contentHeight - 160);
+});
 
 /**
  * 打开某个榜单：加载并展示该榜单的曲目
@@ -199,6 +216,28 @@ const openBoard = async (board: PlatformLeaderboardBoard, page = 1) => {
   } finally {
     if (requestId === boardRequestId) detailLoading.value = false;
   }
+};
+
+/**
+ * 滚动到榜单详情区
+ *
+ * 详情区排在榜单卡片网格之后，不主动滚动的话用户看不到刚打开的榜单曲目。
+ */
+const scrollToBoardDetail = () => {
+  nextTick(() => {
+    boardDetailRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+};
+
+/**
+ * 点击榜单卡片：打开该榜单并把详情区滚动到视野内
+ *
+ * 打开动作不等待接口返回，先滚动给出即时反馈，曲目到达后自动填入列表。
+ * @param board 榜单条目
+ */
+const handleBoardClick = (board: PlatformLeaderboardBoard) => {
+  openBoard(board);
+  scrollToBoardDetail();
 };
 
 /**
@@ -285,6 +324,8 @@ onUnmounted(() => {
   }
   .board-detail {
     margin-top: 24px;
+    // 滚动到详情区时与内容区顶部留出间距
+    scroll-margin-top: 12px;
     .detail-title {
       display: block;
       font-size: 20px;
@@ -296,6 +337,11 @@ onUnmounted(() => {
       font-size: 13px;
       margin-bottom: 12px;
     }
+  }
+  // 选中的榜单卡片
+  .official-list .board-card.active {
+    border-color: rgb(var(--primary));
+    background-color: rgba(var(--primary), 0.06);
   }
   .loading {
     height: 160px;
