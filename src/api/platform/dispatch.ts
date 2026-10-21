@@ -35,6 +35,7 @@ import {
   kgArtistDetail,
   kgComment,
   kgFindLikedPlaylist,
+  kgHotArtists,
   kgLeaderboardDetail,
   kgLeaderboardList,
   kgPlaylistDetail,
@@ -1423,20 +1424,44 @@ export interface DispatchSquareResult {
   hasMore: boolean;
 }
 
+/** 分派层歌手分类项 */
+export interface DispatchArtistType {
+  /** 分类标识（平台内分类主键） */
+  id: string;
+  /** 分类名 */
+  name: string;
+}
+
+/** 分派层热门歌手结果 */
+export interface DispatchHotArtistsResult {
+  /** 歌手列表 */
+  artists: ArtistType[];
+  /** 分类清单（平台没有分类维度时为空） */
+  types: DispatchArtistType[];
+}
+
 /**
  * 读取当前平台的热门歌手
  *
- * 第三方平台没有「歌手列表」接口，改由榜单歌曲里出现的歌手聚合而成：
- * QQ 音乐取热歌榜歌曲的歌手（条目自带 mid 与数字 id）。
+ * 各平台数据源不同：
+ * - QQ 音乐没有「歌手列表」接口，改由榜单歌曲里出现的歌手聚合而成
+ *   （条目自带 mid 与数字 id）；
+ * - 酷狗直接取原生歌手列表接口，并透出上游分类清单供页面切换筛选。
  * @param platform 音源平台
- * @param limit 榜单取回的歌曲数
- * @returns 歌手列表
+ * @param options 读取参数（分类标识、页码、条数）
+ * @returns 歌手列表与分类清单
  */
 export const dispatchHotArtists = async (
   platform: ApiPlatform,
-  limit = 100,
-): Promise<ArtistType[]> => {
-  if (platform !== "qqmusic") return [];
+  options: { type?: string; page?: number; limit?: number } = {},
+): Promise<DispatchHotArtistsResult> => {
+  const limit = options.limit ?? 100;
+  // 酷狗：原生歌手列表接口，自带分类维度
+  if (platform === "kugou") {
+    const res = await kgHotArtists(options.type, options.page ?? 1, limit);
+    return { artists: res.artists.map(toArtistType), types: res.types };
+  }
+  if (platform !== "qqmusic") return { artists: [], types: [] };
   const board = await dispatchLeaderboard(platform, { limit });
   const seen = new Set<string>();
   const artists: ArtistType[] = [];
@@ -1455,7 +1480,7 @@ export const dispatchHotArtists = async (
       });
     }
   }
-  return artists;
+  return { artists, types: [] };
 };
 
 /**

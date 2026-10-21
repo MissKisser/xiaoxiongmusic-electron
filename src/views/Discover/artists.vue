@@ -28,6 +28,21 @@
         </n-tag>
       </n-flex>
     </div>
+    <!-- 酷狗歌手分类（上游分类清单） -->
+    <div v-else-if="isKugouSource && artistTypes.length" class="menu">
+      <n-flex class="category">
+        <n-tag
+          v-for="(item, index) in artistTypes"
+          :key="item.id"
+          :type="index === artistTypeChoose ? 'primary' : 'default'"
+          :bordered="index === artistTypeChoose"
+          round
+          @click="artistTypeChange(index)"
+        >
+          {{ item.name }}
+        </n-tag>
+      </n-flex>
+    </div>
     <ArtistList :data="artistsData" :loading="loading" :loadMore="hasMore" @loadMore="loadMore" />
   </div>
 </template>
@@ -36,7 +51,7 @@
 import type { ArtistType } from "@/types/main";
 import { artistTypeList } from "@/api/artist";
 import { onPlatformChange, usePlatformStore } from "@/stores";
-import { dispatchHotArtists } from "@/api/platform/dispatch";
+import { dispatchHotArtists, type DispatchArtistType } from "@/api/platform/dispatch";
 import { formatArtistsList } from "@/utils/format";
 
 const router = useRouter();
@@ -44,6 +59,9 @@ const platformStore = usePlatformStore();
 
 // 是否为第三方平台（QQ 音乐 / 酷狗）
 const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
+
+// 是否为酷狗平台（只有酷狗歌手列表带分类维度）
+const isKugouSource = computed<boolean>(() => platformStore.currentPlatform === "kugou");
 
 // 歌手标签数据
 const artistInitials = [
@@ -81,13 +99,22 @@ const loading = ref<boolean>(true);
 const artistsOffset = ref<number>(0);
 const artistsData = ref<ArtistType[]>([]);
 
+// 酷狗歌手分类（上游下发）与当前选中项
+const artistTypes = ref<DispatchArtistType[]>([]);
+const artistTypeChoose = ref<number>(0);
+
 // 获取歌手数据
 const getArtistListData = async () => {
-  // 第三方平台：取榜单歌曲里出现的热门歌手
+  // 第三方平台：取平台歌手列表
   if (isPlatformSource.value) {
     loading.value = true;
     try {
-      artistsData.value = await dispatchHotArtists(platformStore.currentPlatform, 100);
+      const result = await dispatchHotArtists(platformStore.currentPlatform, {
+        type: artistTypes.value[artistTypeChoose.value]?.id,
+        limit: 100,
+      });
+      artistsData.value = result.artists;
+      artistTypes.value = result.types;
     } catch (error) {
       console.error("获取平台热门歌手失败：", error);
       artistsData.value = [];
@@ -125,6 +152,13 @@ const artistQueryChange = (initial: number | string, type: number) => {
   });
 };
 
+// 酷狗分类切换
+const artistTypeChange = (index: number) => {
+  artistTypeChoose.value = index;
+  artistsData.value = [];
+  getArtistListData();
+};
+
 // 加载更多
 const loadMore = () => {
   artistsOffset.value += 50;
@@ -149,6 +183,8 @@ onMounted(getArtistListData);
 const stopPlatformWatch = onPlatformChange(() => {
   artistsData.value = [];
   artistsOffset.value = 0;
+  artistTypes.value = [];
+  artistTypeChoose.value = 0;
   getArtistListData();
 });
 

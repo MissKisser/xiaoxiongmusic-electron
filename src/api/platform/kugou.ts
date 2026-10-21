@@ -1067,3 +1067,85 @@ export const kgLeaderboardDetail = async (
     hasMore: page * limit < total,
   };
 };
+
+/** 酷狗歌手分类项 */
+export interface KgArtistType {
+  /** 分类标识（上游分类键，音乐人维度非 0 时带 `:musician` 后缀） */
+  id: string;
+  /** 分类名 */
+  name: string;
+}
+
+/** 酷狗热门歌手列表结果 */
+export interface KgHotArtistsResult {
+  /** 分类清单（上游下发，页面据此切换筛选） */
+  types: KgArtistType[];
+  /** 歌手条目 */
+  artists: PlatformArtistDetail[];
+}
+
+/** 主进程酷狗热门歌手模块的原生返回 */
+interface KgHotArtistsResponse {
+  code?: number;
+  total?: number;
+  page?: number;
+  limit?: number;
+  types?: Array<{ id?: string; name?: string }>;
+  artists?: Array<Record<string, any>>;
+  message?: string;
+}
+
+/**
+ * 归一化酷狗热门歌手条目（补齐平台维度）
+ *
+ * 歌手以 `singerid` 为主键，可直接定位酷狗歌手详情；
+ * 列表接口不下发曲目数与专辑数（上游恒为 0），故不填。
+ * @param artist 酷狗原生歌手条目
+ * @returns 归一化歌手
+ */
+export const toKgHotArtistEntry = (artist: Record<string, any>): PlatformArtistDetail => {
+  const singerId = String(artist?.platformId ?? artist?.id ?? "");
+  const cover = fillCover(artist?.cover ?? "");
+  return {
+    id: toNumericId(singerId, singerId),
+    platformId: singerId,
+    platform: KUGOU,
+    name: String(artist?.name ?? ""),
+    cover,
+    coverSize: buildCoverSize(cover),
+    musicSize: 0,
+    albumSize: 0,
+    mvSize: 0,
+    fansSize: Number(artist?.fansCount ?? 0),
+    description: "",
+  };
+};
+
+/**
+ * 读取酷狗音乐热门歌手列表
+ *
+ * 分类标识取主进程下发的 `types[].id`（上游分类键，
+ * 音乐人维度非 0 时形如 `0:3`），不传则取「全部」。
+ * @param type 分类标识
+ * @param page 页码（从 1 开始）
+ * @param limit 每页条数
+ * @returns 分类清单与歌手条目
+ */
+export const kgHotArtists = async (
+  type?: string,
+  page = 1,
+  limit = 100,
+): Promise<KgHotArtistsResult> => {
+  const res = await platformRequest<KgHotArtistsResponse>(KUGOU, "hot_artists", {
+    type,
+    page,
+    limit,
+  });
+  return {
+    types: (res?.types ?? []).map((item) => ({
+      id: String(item?.id ?? ""),
+      name: String(item?.name ?? ""),
+    })),
+    artists: (res?.artists ?? []).map(toKgHotArtistEntry),
+  };
+};

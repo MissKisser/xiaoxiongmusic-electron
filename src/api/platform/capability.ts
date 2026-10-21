@@ -54,13 +54,13 @@ export const NETEASE_ONLY_ROUTES: string[] = [
 /**
  * 平台级路由限制
  *
- * 某些子页只在部分平台有数据源（如酷狗没有歌手列表），
+ * 某些子页只在部分平台有数据源，
  * 这些平台下对应入口已隐藏，路由守卫同样拦截直达。
  */
 export const PLATFORM_UNSUPPORTED_ROUTES: Record<ApiPlatform, string[]> = {
   netease: [],
   qqmusic: [],
-  kugou: ["discover-artists"],
+  kugou: [],
 };
 
 /**
@@ -106,6 +106,7 @@ export const DISCOVER_TABS: Record<ApiPlatform, PlatformTab[]> = {
   kugou: [
     { name: "discover-playlists", label: "歌单广场" },
     { name: "discover-toplists", label: "排行榜" },
+    { name: "discover-artists", label: "歌手" },
   ],
 };
 

@@ -36,6 +36,7 @@ const MAX_ENTRIES = 200;
  * - 播放地址：播放票据时效短
  * - 评论与搜索：实时性要求高
  * - 排行榜：榜单随期数滚动更新，与 QQ 榜单口径一致，按实时数据取
+ * - 热门歌手：歌手热度榜实时变动（`heat` 排序、总数持续漂移），与榜单口径一致，按实时数据取
  */
 const NON_CACHEABLE = new Set([
   "login_qr_key",
@@ -47,6 +48,7 @@ const NON_CACHEABLE = new Set([
   "search",
   "leaderboard_list",
   "leaderboard_detail",
+  "hot_artists",
 ]);
 
 interface CacheEntry {
