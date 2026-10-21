@@ -7,13 +7,7 @@
  * 字段对照见 `src/api/platform/types.ts` 顶部表格。
  */
 
-import {
-  deriveStableId,
-  normalizeArtistEntry,
-  secureUrl,
-  splitArtists,
-  toNumericId,
-} from "./common";
+import { deriveStableId, secureUrl, splitArtists, toNumericId } from "./common";
 import { platformRequest, platformRequestBody } from "./http";
 import {
   buildCoverSize,
@@ -49,6 +43,14 @@ const ARTIST_COVER_TEMPLATE = "https://y.gtimg.cn/music/photo_new/T001R300x300M0
 
 /** QQ 音乐热歌榜榜单号 */
 const HOT_TOPLIST_ID = 26;
+
+/**
+ * QQ 音乐搜索单页条数上限
+ *
+ * 上游移动端搜索在 `num_per_page` 超过该值时不再返回结果（总数也归零），
+ * 页面按 50 条一页请求会拿到空结果，故在数据层收敛到上游可用上限。
+ */
+export const QQ_SEARCH_PAGE_LIMIT = 40;
 
 /** 主进程 QQ 搜索模块的原生返回 */
 interface QqSearchResponse {
@@ -120,12 +122,36 @@ interface QqCommentResponse {
 }
 
 /**
+ * 拼 QQ 音乐歌手头像直链
+ *
+ * QQ 的歌手条目（歌曲条目 / 榜单条目 / 歌单条目）只带 `id` / `mid` / `name`，
+ * 头像直链需按歌手 mid 从 CDN 拼出；上游给了直链时优先用上游的。
+ * @param mid 歌手 mid
+ * @param rawCover 上游给出的头像直链
+ * @returns 头像直链，取不到时为空串
+ */
+const buildArtistCover = (mid: string, rawCover?: unknown): string => {
+  const upstream = secureUrl(rawCover ?? "");
+  if (upstream) return upstream;
+  return mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : "";
+};
+
+/**
  * 归一化 QQ 歌手条目
+ *
+ * 歌手头像按 mid 拼 CDN 直链，保证歌曲卡片与歌手列表都有头像。
  * @param singer 歌手条目
  * @returns 归一化歌手
  */
-const normalizeArtist = (singer: Record<string, any>): PlatformArtist =>
-  normalizeArtistEntry(singer, String(singer?.mid ?? ""));
+const normalizeArtist = (singer: Record<string, any>): PlatformArtist => {
+  const mid = String(singer?.mid ?? "");
+  return {
+    id: String(singer?.id ?? ""),
+    name: String(singer?.name ?? ""),
+    mid: mid || undefined,
+    picUrl: buildArtistCover(mid, singer?.cover),
+  };
+};
 
 /**
  * 归一化 QQ 专辑
@@ -350,7 +376,7 @@ export const qqSearch = async (
   const res = await platformRequest<QqSearchResponse>(QQ_MUSIC, "search", {
     keywords,
     page,
-    limit,
+    limit: Math.min(limit, QQ_SEARCH_PAGE_LIMIT),
     type: 0,
   });
   return {
@@ -638,7 +664,8 @@ const normalizeQqSearchPlaylist = (playlist: Record<string, any>): QqSearchCover
 const normalizeQqSearchArtist = (artist: Record<string, any>): QqSearchArtistEntry => ({
   id: artist?.id ?? "",
   name: String(artist?.name ?? ""),
-  cover: secureUrl(artist?.cover ?? ""),
+  // 上游给了 singerPic 直链时优先用上游的，否则按歌手 mid 拼 CDN 直链
+  cover: buildArtistCover(String(artist?.id ?? ""), artist?.cover),
   albumSize: Number(artist?.albumCount ?? 0),
   musicSize: Number(artist?.songCount ?? 0),
 });
@@ -658,7 +685,7 @@ export const qqSearchAlbums = async (
   const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
     keywords,
     page,
-    limit,
+    limit: Math.min(limit, QQ_SEARCH_PAGE_LIMIT),
     type: QQ_SEARCH_TYPE.album,
   });
   return {
@@ -682,7 +709,7 @@ export const qqSearchArtists = async (
   const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
     keywords,
     page,
-    limit,
+    limit: Math.min(limit, QQ_SEARCH_PAGE_LIMIT),
     type: QQ_SEARCH_TYPE.artist,
   });
   return {
@@ -706,7 +733,7 @@ export const qqSearchPlaylists = async (
   const res = await platformRequest<QqSearchCategoryResponse>(QQ_MUSIC, "search", {
     keywords,
     page,
-    limit,
+    limit: Math.min(limit, QQ_SEARCH_PAGE_LIMIT),
     type: QQ_SEARCH_TYPE.playlist,
   });
   return {
@@ -859,13 +886,14 @@ export const qqArtistDetail = async (
   });
   // 歌手的数字 id：取歌曲条目里与自身 mid 对应的歌手数字 id，取不到时按 mid 派生
   const self = songs.flatMap((song) => song.artists).find((artist) => artist.mid === mid);
+  const cover = buildArtistCover(mid);
   const artist: PlatformArtistDetail = {
     id: toNumericId(self?.id, mid),
     platformId: String(res?.artist?.mid ?? mid),
     platform: QQ_MUSIC,
     name: String(res?.artist?.name ?? ""),
-    cover: mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : "",
-    coverSize: buildCoverSize(mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : ""),
+    cover,
+    coverSize: buildCoverSize(cover),
     musicSize: Number(res?.artist?.songCount ?? songs.length),
     albumSize: Number(res?.artist?.albumCount ?? albums.length),
     mvSize: 0,

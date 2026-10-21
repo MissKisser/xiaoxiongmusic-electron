@@ -45,7 +45,11 @@ import type { DropdownOption, MessageReactive } from "naive-ui";
 import type { CoverType, SongType } from "@/types/main";
 import { songDetail } from "@/api/song";
 import { playlistAllSongs } from "@/api/playlist";
-import { dispatchLikedSongs, dispatchPlaylistDetail } from "@/api/platform/dispatch";
+import {
+  dispatchLikedSongs,
+  dispatchLikedSongIds,
+  dispatchPlaylistDetail,
+} from "@/api/platform/dispatch";
 import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isObject, uniqBy } from "lodash-es";
@@ -90,6 +94,9 @@ const listPlayListId = computed<number>(() => (isPlatformSource.value ? 0 : play
 
 // 当前正在请求的歌单 ID，用于防止竞态条件
 const currentRequestId = ref<number>(0);
+
+// 网易云喜欢歌曲 id 快照：切到第三方平台时暂存，切回时还原
+const neteaseLikedIds = ref<number[] | null>(null);
 
 // 加载提示
 const loadingMsg = ref<MessageReactive | null>(null);
@@ -298,12 +305,39 @@ const getPlatformLikedSongs = async (refresh = false) => {
     } while (page <= 50);
     setDetailData(detail);
     if (refresh) setListData(tracks);
+    // 按平台的红心判据同步全局喜欢集合
+    await syncLikedState(tracks);
     setLoading(false);
   } catch (error) {
     console.error("获取平台喜欢歌曲失败：", error);
     setLoading(false);
     window.$message.error("获取我喜欢的音乐失败，请重试");
   }
+};
+
+/**
+ * 同步第三方平台的红心状态到全局喜欢集合
+ *
+ * 歌曲卡片与播放器的红心按 `dataStore.isLikeSong` 取值，
+ * 而该集合原本只维护网易云数据；第三方平台按「我喜欢的音乐」歌单的曲目集合覆盖，
+ * 切回网易云时还原原集合。
+ * @param tracks 平台「我喜欢的音乐」的曲目
+ */
+const syncLikedState = async (tracks: SongType[]) => {
+  if (!neteaseLikedIds.value) {
+    neteaseLikedIds.value = [...dataStore.userLikeData.songs];
+  }
+  const likedIds = await dispatchLikedSongIds(platformStore.currentPlatform, tracks);
+  dataStore.userLikeData.songs = [...likedIds];
+};
+
+/**
+ * 还原网易云的红心集合
+ */
+const restoreNeteaseLikedState = () => {
+  if (!neteaseLikedIds.value) return;
+  dataStore.userLikeData.songs = neteaseLikedIds.value;
+  neteaseLikedIds.value = null;
 };
 
 // 加载缓存
@@ -444,6 +478,8 @@ const offPlatformChange = onPlatformChange(() => {
     void getPlatformLikedSongs(true);
     return;
   }
+  // 切回网易云：还原网易云的红心集合
+  restoreNeteaseLikedState();
   void getPlaylistDetail(playlistId.value, { getList: true, refresh: true });
 });
 

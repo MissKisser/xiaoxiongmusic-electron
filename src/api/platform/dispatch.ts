@@ -48,6 +48,7 @@ import {
   toKgPlaylistEntry,
 } from "./kugou";
 import {
+  QQ_SEARCH_PAGE_LIMIT,
   qqAlbumDetail,
   qqArtistDetail,
   qqComment,
@@ -67,6 +68,7 @@ import {
   toQqPlaylistEntry,
 } from "./qqmusic";
 import {
+  buildCoverSize,
   toArtistType,
   toCoverEntry,
   toSongType,
@@ -574,11 +576,14 @@ export const dispatchLikedSongs = async (
   if (platform === "qqmusic") {
     const page = options.page ?? 1;
     const res = await qqUserLikedSongs((page - 1) * pageSize, pageSize);
+    // 「我喜欢的音乐」是系统目录，曲目模块不回封面，封面只在「我的歌单列表」里给出
+    const entry = res.coverImgUrl ? null : await findPlaylistEntry(platform, res.id);
+    const cover = res.coverImgUrl || entry?.cover || "";
     const playlist: DispatchPlaylist = {
       id: res.id,
       name: res.name,
-      cover: res.coverImgUrl,
-      coverSize: res.coverSize,
+      cover,
+      coverSize: cover ? buildCoverSize(cover) : res.coverSize,
       count: res.trackCount,
       playCount: res.playCount,
       description: res.description,
@@ -641,6 +646,50 @@ export const dispatchLikedSongs = async (
     page,
     pageSize,
   };
+};
+
+/**
+ * 分页取回平台「我喜欢的音乐」的全部曲目
+ * @param platform 音源平台
+ * @returns 曲目列表
+ */
+const fetchAllLikedTracks = async (platform: ApiPlatform): Promise<SongType[]> => {
+  const pageSize = DEFAULT_PAGE_SIZE;
+  const tracks: SongType[] = [];
+  let count = 0;
+  let page = 1;
+  do {
+    const res = await dispatchLikedSongs(platform, { page, pageSize });
+    count = res.count;
+    tracks.push(...res.tracks);
+    page += 1;
+    if (res.tracks.length === 0 || tracks.length >= count) break;
+  } while (page <= 50);
+  return tracks;
+};
+
+/**
+ * 读取当前平台「我喜欢的音乐」的曲目 id 集合（红心判据）
+ *
+ * 判据来源：平台「我喜欢的音乐」歌单的曲目集合——
+ * 歌单内的曲目判定为已红心，歌单外的曲目判定为未红心。
+ * 网易云的红心集合由本地缓存维护，此处返回空集。
+ * @param platform 音源平台
+ * @param tracks 已取回的曲目，缺省时按平台自身分页取回
+ * @returns 歌曲 id 集合
+ */
+export const dispatchLikedSongIds = async (
+  platform: ApiPlatform,
+  tracks?: SongType[],
+): Promise<Set<number>> => {
+  if (platform === "netease") return new Set<number>();
+  const ids = new Set<number>();
+  const collected = tracks?.length ? tracks : await fetchAllLikedTracks(platform);
+  for (const track of collected) {
+    const id = Number(track.id);
+    if (Number.isFinite(id) && id > 0) ids.add(id);
+  }
+  return ids;
 };
 
 /** 搜索结果分类 */
@@ -769,7 +818,10 @@ export const dispatchSearch = async (
   options: DispatchSearchOptions,
 ): Promise<DispatchSearchResult> => {
   const page = options.page ?? 1;
-  const limit = options.limit ?? DEFAULT_SEARCH_LIMIT;
+  const requestedLimit = options.limit ?? DEFAULT_SEARCH_LIMIT;
+  // QQ 音乐搜索上游单页上限为 40，超过后返回空结果，分页口径按上限收敛
+  const limit =
+    platform === "qqmusic" ? Math.min(requestedLimit, QQ_SEARCH_PAGE_LIMIT) : requestedLimit;
   const empty: DispatchSearchResult = {
     total: 0,
     hasMore: false,

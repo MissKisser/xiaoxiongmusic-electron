@@ -69,18 +69,36 @@
       <n-divider />
       <!-- 用户信息 -->
       <n-flex class="user-info" align="center" justify="center" vertical>
-        <n-text class="nickname text-hidden">{{ dataStore.userData.name || "未知用户名" }}</n-text>
-        <n-flex align="center" size="small">
-          <n-tag :bordered="false" size="small" round type="warning">
-            Lv.{{ dataStore.userData.level ?? 0 }}
-          </n-tag>
-          <!-- VIP -->
-          <img
-            v-if="dataStore.userLoginStatus && dataStore.userData.vipType !== 0"
-            class="vip-img"
-            src="/images/vip.png?asset"
+        <!-- 第三方平台：头像 + 昵称 + 会员标记 -->
+        <template v-if="!isNetease">
+          <n-avatar
+            v-if="currentProfile?.avatarUrl"
+            round
+            :size="40"
+            :src="currentProfile.avatarUrl"
+            fallback-src="/images/avatar.jpg?asset"
           />
-        </n-flex>
+          <n-text class="nickname text-hidden">{{ currentProfileName }}</n-text>
+          <!-- VIP -->
+          <img v-if="currentProfile?.isVip" class="vip-img" src="/images/vip.png?asset" />
+        </template>
+        <!-- 网易云：昵称 + 等级 + 会员标记 -->
+        <template v-else>
+          <n-text class="nickname text-hidden">{{
+            dataStore.userData.name || "未知用户名"
+          }}</n-text>
+          <n-flex align="center" size="small">
+            <n-tag :bordered="false" size="small" round type="warning">
+              Lv.{{ dataStore.userData.level ?? 0 }}
+            </n-tag>
+            <!-- VIP -->
+            <img
+              v-if="dataStore.userLoginStatus && dataStore.userData.vipType !== 0"
+              class="vip-img"
+              src="/images/vip.png?asset"
+            />
+          </n-flex>
+        </template>
       </n-flex>
       <n-divider />
       <!-- 喜欢数量 -->
@@ -112,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { useDataStore, usePlatformStore, PLATFORM_META } from "@/stores";
+import { useDataStore, usePlatformStore, onPlatformChange, PLATFORM_META } from "@/stores";
 import { openUserLogin, openPlatformLogin } from "@/utils/modal";
 import { getLoginState } from "@/api/login";
 import type { ApiPlatform } from "@/types/shared";
@@ -130,6 +148,16 @@ const dataStore = useDataStore();
 const platformStore = usePlatformStore();
 
 const { isDesktop } = useMobile();
+
+/** 用户喜欢数据条目 */
+interface UserLikeItem {
+  /** 数量标签 */
+  label: string;
+  /** 跳转路由名 */
+  name: string;
+  /** 数量 */
+  value: number;
+}
 
 // 用户菜单展示
 const userMenuShow = ref<boolean>(false);
@@ -156,7 +184,8 @@ const platformList = computed(() => {
       short: PLATFORM_META[platform].short,
       active: current === platform,
       loggedIn: !!profile,
-      nickname: profile?.nickname ?? "",
+      // 上游昵称可能是空白串，取不到时给出占位
+      nickname: String(profile?.nickname ?? "").trim() || "未知用户名",
       avatarUrl: profile?.avatarUrl ?? "",
     };
   });
@@ -166,6 +195,20 @@ const platformList = computed(() => {
 const currentLoggedIn = computed(() => {
   if (platformStore.currentPlatform === "netease") return dataStore.userLoginStatus;
   return !!platformStore.platformProfiles[platformStore.currentPlatform];
+});
+
+/** 当前是否为网易云平台 */
+const isNetease = computed(() => platformStore.currentPlatform === "netease");
+
+/** 当前平台的账号资料（网易云走既有登录态，不经平台资料） */
+const currentProfile = computed(() =>
+  isNetease.value ? null : platformStore.platformProfiles[platformStore.currentPlatform],
+);
+
+/** 当前平台的昵称 */
+const currentProfileName = computed(() => {
+  const nickname = String(currentProfile.value?.nickname ?? "").trim();
+  return nickname || "未知用户名";
 });
 
 // 当前平台头像
@@ -179,7 +222,10 @@ const currentDisplayName = computed(() => {
   if (platformStore.currentPlatform === "netease") {
     return dataStore.userLoginStatus ? dataStore.userData.name || "未知用户名" : "未登录";
   }
-  return platformStore.platformProfiles[platformStore.currentPlatform]?.nickname || "未登录";
+  const profile = platformStore.platformProfiles[platformStore.currentPlatform];
+  if (!profile) return "未登录";
+  // 上游昵称可能是空白串，取不到时给出占位
+  return String(profile.nickname ?? "").trim() || "未知用户名";
 });
 
 // 开启用户菜单
@@ -206,16 +252,26 @@ const handlePlatform = (item: (typeof platformList.value)[number]) => {
 };
 
 // 用户喜欢数据
-const userLikeData = computed(() => {
-  // 第三方平台：只有「收藏的歌单」有数据源，专辑 / 歌手子页已隐藏，故不展示
+const userLikeData = computed<UserLikeItem[]>(() => {
+  // 第三方平台：只有「收藏的歌单」与「我喜欢的音乐」有数据源，
+  // 专辑 / 歌手子页已隐藏，故不展示（没有的能力不显示 0）
   if (platformStore.currentPlatform !== "netease") {
-    return [
+    const items: UserLikeItem[] = [
       {
         label: "歌单",
         name: "like-playlists",
         value: platformStore.playlists.favorites.length,
       },
     ];
+    const liked = platformStore.playlists.owned.find((item) => item.isLiked);
+    if (liked) {
+      items.push({
+        label: "喜欢",
+        name: "like-songs",
+        value: liked.count,
+      });
+    }
+    return items;
   }
   return [
     {
@@ -296,6 +352,31 @@ onBeforeMount(() => {
   checkLoginStatus();
   // 刷新第三方平台的账号资料
   platformStore.refreshAllProfiles();
+});
+
+/**
+ * 刷新指定平台的账号资料
+ *
+ * 平台 store 的 refreshProfile 在读取失败时会把资料清空，
+ * 这里保留旧资料，避免一次网络抖动就把界面显示成「未登录」。
+ * @param platform 音源平台
+ */
+const refreshPlatformProfile = async (platform: ApiPlatform) => {
+  const previous = platformStore.platformProfiles[platform];
+  const profile = await platformStore.refreshProfile(platform);
+  if (!profile && previous) {
+    platformStore.platformProfiles[platform] = previous;
+  }
+};
+
+// 平台切换：刷新目标平台的账号资料
+const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  if (platform === "netease") return;
+  void refreshPlatformProfile(platform);
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
 });
 </script>
 
