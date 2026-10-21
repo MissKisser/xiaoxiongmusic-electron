@@ -1486,7 +1486,8 @@ export const dispatchHotArtists = async (
 /**
  * 读取当前平台的歌单广场
  *
- * QQ 音乐走广场模块（可翻页）；酷狗按分类关键词取材精选公开歌单。
+ * QQ 音乐走广场模块（可翻页）；酷狗按分类关键词轮换取材，
+ * 每页对应上游歌单搜索的一页，翻页真实推进。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 广场歌单与总数
@@ -1505,8 +1506,14 @@ export const dispatchSquarePlaylists = async (
       hasMore: page * limit < res.total,
     };
   }
-  const res = await kgPlaylistSquare(options.limit ?? 10);
-  return { playlists: res.list.map(toCoverEntry), total: res.total, hasMore: false };
+  const page = options.page ?? 1;
+  const limit = options.limit ?? 30;
+  const res = await kgPlaylistSquare(page, limit);
+  return {
+    playlists: res.list.map(toCoverEntry),
+    total: res.total,
+    hasMore: res.hasMore && page * limit < res.total,
+  };
 };
 
 /**

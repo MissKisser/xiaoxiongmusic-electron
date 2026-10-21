@@ -851,49 +851,49 @@ export const kgPublicPlaylist = async (
   };
 };
 
-/**
- * 酷狗精选公开歌单的取材关键词
- *
- * 酷狗侧没有公开的「歌单广场列表」接口，
- * 精选歌单按分类关键词从公开搜索里取材后合并去重。
- */
-const SQUARE_KEYWORDS = ["热歌", "轻音乐", "民谣", "DJ", "钢琴", "经典"];
+/** 主进程酷狗歌单广场模块的原生返回 */
+interface KgPlaylistSquareResponse {
+  code?: number;
+  total?: number;
+  hasMore?: boolean;
+  keyword?: string;
+  keywordIndex?: number;
+  playlists?: Array<Record<string, any>>;
+  message?: string;
+}
 
 /**
- * 读取酷狗精选公开歌单
+ * 读取酷狗歌单广场
  *
- * 按分类关键词并行取材，合并去重后作为歌单广场展示。
- * @param limit 每个关键词的取材条数
- * @returns 归一化后的精选歌单与总数
+ * 酷狗侧没有公开的广场列表端点，广场按「分类关键词 + 上游真实分页」轮换取材，
+ * 页码与条数由主进程模块统一换算，渲染端只负责按页码递进取数。
+ * @param page 页码（从 1 开始）
+ * @param limit 每页条数
+ * @returns 归一化后的广场歌单、总数与是否还有更多
  */
 export const kgPlaylistSquare = async (
-  limit = 10,
-): Promise<{ list: PlatformCoverEntry[]; total: number }> => {
-  const results = await Promise.all(
-    SQUARE_KEYWORDS.map((keyword) =>
-      kgSearchPlaylists(keyword, 1, limit).catch(() => ({ total: 0, playlists: [] })),
-    ),
-  );
-  const seen = new Set<string>();
-  const list: PlatformCoverEntry[] = [];
-  for (const result of results) {
-    for (const item of result.playlists) {
-      const key = String(item.id ?? "");
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      list.push({
-        id: key,
-        platformId: key,
-        name: item.name,
-        cover: item.cover,
-        count: item.trackCount,
-        playCount: item.playCount,
-        creatorName: item.creator?.nickname ?? "",
-        platform: KUGOU,
-      });
-    }
-  }
-  return { list, total: list.length };
+  page = 1,
+  limit = 30,
+): Promise<{ list: PlatformCoverEntry[]; total: number; hasMore: boolean }> => {
+  const res = await platformRequest<KgPlaylistSquareResponse>(KUGOU, "playlist_square", {
+    page,
+    limit,
+  });
+  const list: PlatformCoverEntry[] = (res?.playlists ?? []).map((item) => ({
+    id: String(item?.id ?? ""),
+    platformId: String(item?.id ?? ""),
+    name: String(item?.name ?? ""),
+    cover: String(item?.cover ?? ""),
+    count: Number(item?.trackCount ?? 0),
+    playCount: Number(item?.playCount ?? 0),
+    creatorName: String(item?.creator ?? ""),
+    platform: KUGOU,
+  }));
+  return {
+    list,
+    total: Number(res?.total ?? list.length),
+    hasMore: res?.hasMore === true,
+  };
 };
 
 /**

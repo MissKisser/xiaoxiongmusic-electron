@@ -140,7 +140,18 @@ const getAllCatlistPlaylist = async () => {
       });
       playlistCount.value = result.playlists.length;
       hasMore.value = result.hasMore;
-      playlistData.value = playlistData.value.concat(result.playlists);
+      // 平台广场按分类轮换取材，跨分类可能出现同一歌单，追加前先去重
+      const seen = new Set(
+        playlistData.value.map((item) => `${item.platform ?? ""}:${item.platformId ?? item.id}`),
+      );
+      const merged = playlistData.value.slice();
+      for (const item of result.playlists) {
+        const key = `${item.platform ?? ""}:${item.platformId ?? item.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+      playlistData.value = merged;
     } catch (error) {
       console.error("获取平台歌单广场失败：", error);
     }

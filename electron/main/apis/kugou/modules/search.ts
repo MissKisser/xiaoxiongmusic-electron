@@ -7,6 +7,9 @@
  * - 9 / "artist" / "author"：歌手（网关 /v1/search/author）
  * - 2 / "playlist" / "special"：歌单（网关 /v1/search/special）
  *
+ * 分页口径与 QQ 音乐搜索一致：每页返回上游分页窗口原样的一页，
+ * 条数与请求的 limit 对齐，页与页之间既不重合也不跳页。
+ *
  * 公开读接口，不依赖登录态，免登录即可调用；本机已登录时凭据随请求透传给网关。
  */
 
@@ -180,6 +183,10 @@ const normalizeFromLegacy = (raw: RawEntry) => {
 
 /**
  * 走 mobilecdn 搜索歌曲
+ *
+ * 只取上游分页窗口本身：`data.info` 是上游按 `pagesize` 切好的一页，
+ * 每条附带的 `group` 是同一首歌的关联版本，不属于分页窗口，
+ * 展开它会让每页条数超过请求的 limit，也会让相邻两页出现重复条目。
  * @param keywords - 关键词
  * @param page - 页码
  * @param limit - 每页数量
@@ -197,15 +204,11 @@ const searchSongsMobile = async (keywords: string, page: number, limit: number) 
 
   const songs: ReturnType<typeof normalizeFromMobile>[] = [];
   const seen = new Set<string>();
-  const push = (item: RawEntry) => {
+  for (const item of Array.isArray(raw) ? raw : []) {
     const key = `${item.audio_id ?? ""}_${item.hash ?? ""}`;
-    if (seen.has(key)) return;
+    if (seen.has(key)) continue;
     seen.add(key);
     songs.push(normalizeFromMobile(item));
-  };
-  for (const item of Array.isArray(raw) ? raw : []) {
-    push(item);
-    for (const sub of item.group || []) push(sub);
   }
 
   return { total: Number(body?.data?.total || songs.length), songs, raw: body };
@@ -213,6 +216,9 @@ const searchSongsMobile = async (keywords: string, page: number, limit: number) 
 
 /**
  * 走兜底 songsearch 搜索歌曲
+ *
+ * 与 mobilecdn 同口径：`data.lists` 是上游分页窗口本身，
+ * 每条附带的 `Grp` 是关联版本，不计入分页窗口。
  * @param keywords - 关键词
  * @param page - 页码
  * @param limit - 每页数量
@@ -231,35 +237,67 @@ const searchSongsLegacy = async (keywords: string, page: number, limit: number) 
 
   const songs: ReturnType<typeof normalizeFromLegacy>[] = [];
   const seen = new Set<string>();
-  const push = (item: RawEntry) => {
+  for (const item of Array.isArray(raw) ? raw : []) {
     const key = `${item.Audioid}_${item.FileHash}`;
-    if (seen.has(key)) return;
+    if (seen.has(key)) continue;
     seen.add(key);
     songs.push(normalizeFromLegacy(item));
-  };
-  for (const item of Array.isArray(raw) ? raw : []) {
-    push(item);
-    for (const sub of item.Grp || []) push(sub);
   }
 
   return { total: Number(body?.data?.total || songs.length), songs, raw: body };
 };
 
+/** 歌曲搜索单次尝试的结果 */
+interface SongSearchAttempt {
+  total: number;
+  songs: Array<Record<string, unknown>>;
+  raw: unknown;
+}
+
 /**
  * 搜索歌曲，mobilecdn 失败时回落到 songsearch
+ *
+ * 两条通道都空、而上游声称该页仍有数据时，判定为上游偶发空结果，
+ * 再重试一次主通道；两条通道都空且上游也声称没有数据时，按真实空结果返回。
  * @param keywords - 关键词
  * @param page - 页码
  * @param limit - 每页数量
  * @returns 歌曲、总数与上游原始响应
  */
 const searchSongs = async (keywords: string, page: number, limit: number) => {
-  try {
-    const result = await searchSongsMobile(keywords, page, limit);
-    if (result.songs.length > 0) return result;
-  } catch {
-    // 落到兜底通道
+  const attempt = async (): Promise<SongSearchAttempt> => {
+    let mobile: SongSearchAttempt | null = null;
+    try {
+      mobile = await searchSongsMobile(keywords, page, limit);
+    } catch {
+      mobile = null;
+    }
+    if (mobile && mobile.songs.length > 0) return mobile;
+
+    let legacy: SongSearchAttempt | null = null;
+    try {
+      legacy = await searchSongsLegacy(keywords, page, limit);
+    } catch {
+      legacy = null;
+    }
+    if (legacy && legacy.songs.length > 0) return legacy;
+
+    return mobile ?? legacy ?? { total: 0, songs: [], raw: null };
+  };
+
+  const first = await attempt();
+  if (first.songs.length > 0) return first;
+
+  if (first.total > 0) {
+    try {
+      const retry = await searchSongsMobile(keywords, page, limit);
+      if (retry.songs.length > 0) return retry;
+    } catch {
+      // 重试仍失败时按空结果返回
+    }
   }
-  return searchSongsLegacy(keywords, page, limit);
+
+  return first;
 };
 
 /**
@@ -272,6 +310,49 @@ const pickList = (res: any): RawEntry[] => {
   if (Array.isArray(data.lists)) return data.lists;
   if (Array.isArray(data.info)) return data.info;
   return [];
+};
+
+/**
+ * 调用网关搜索接口取一页条目
+ *
+ * 网关偶尔会返回「总数非零但本页列表为空」，判定为偶发空结果后重试一次。
+ * @param path - 网关相对路径
+ * @param keywords - 搜索关键词
+ * @param page - 页码
+ * @param limit - 每页数量
+ * @param extraParams - 分类专属查询参数
+ * @returns 网关响应体与本页条目
+ */
+const searchGatewayList = async (
+  path: string,
+  keywords: string,
+  page: number,
+  limit: number,
+  extraParams: Record<string, unknown> = {},
+): Promise<{ res: any; list: RawEntry[] }> => {
+  const request = () =>
+    kgGatewayRequest<{ data?: { total?: number; lists?: RawEntry[]; info?: RawEntry[] } }>(path, {
+      method: "GET",
+      params: {
+        keyword: keywords,
+        page,
+        pagesize: limit,
+        platform: "AndroidFilter",
+        iscorrection: 1,
+        ...extraParams,
+      },
+      headers: { "x-router": SEARCH_ROUTER },
+      allowBusinessError: true,
+    });
+
+  let res = await request();
+  let list = pickList(res);
+  const total = Number(res?.data?.total ?? 0);
+  if (list.length === 0 && total > 0) {
+    res = await request();
+    list = pickList(res);
+  }
+  return { res, list: list.slice(0, limit) };
 };
 
 /**
@@ -297,14 +378,15 @@ export const search: KGModule = async (params: KGParams) => {
   try {
     if (type === "song") {
       const result = await searchSongs(keywords, page, limit);
+      const songs = result.songs.slice(0, limit);
       return {
         code: 200,
         type,
         page,
         limit,
         total: result.total,
-        songs: result.songs,
-        items: result.songs,
+        songs,
+        items: songs,
         raw: result.raw,
       };
     }
@@ -316,21 +398,13 @@ export const search: KGModule = async (params: KGParams) => {
           ? "/v1/search/author"
           : "/v1/search/special";
 
-    const res = await kgGatewayRequest<{
-      data?: { total?: number; lists?: RawEntry[]; info?: RawEntry[] };
-    }>(path, {
-      method: "GET",
-      params: {
-        keyword: keywords,
-        page,
-        pagesize: limit,
-        platform: "AndroidFilter",
-        iscorrection: 1,
-        ...(type === "album" ? { albumhide: 0, nocollect: 0 } : {}),
-      },
-      headers: { "x-router": SEARCH_ROUTER },
-      allowBusinessError: true,
-    });
+    const { res, list } = await searchGatewayList(
+      path,
+      keywords,
+      page,
+      limit,
+      type === "album" ? { albumhide: 0, nocollect: 0 } : {},
+    );
 
     const errCode = kgErrorCode(res);
     if (errCode !== 0) {
@@ -343,8 +417,6 @@ export const search: KGModule = async (params: KGParams) => {
         raw: res,
       };
     }
-
-    const list = pickList(res);
 
     if (type === "album") {
       const albums = list.map((raw) => {
