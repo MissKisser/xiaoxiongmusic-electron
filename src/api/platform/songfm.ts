@@ -23,7 +23,6 @@ interface SongFMResponse {
   code?: number;
   total?: number;
   songs?: Array<Record<string, any>>;
-  shelves?: Array<{ id?: number; title?: string; template?: string }>;
   message?: string;
 }
 

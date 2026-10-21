@@ -180,8 +180,11 @@ const platformList = computed(() => {
       short: PLATFORM_META[platform].short,
       active: current === platform,
       loggedIn: !!profile,
-      // 上游昵称可能是空白串，取不到时给出占位
-      nickname: String(profile?.nickname ?? "").trim() || "未知用户名",
+      // 上游昵称可能是空白串，取不到时退到用户 ID，再退到平台名
+      nickname:
+        String(profile?.nickname ?? "").trim() ||
+        String(profile?.userId ?? "").trim() ||
+        PLATFORM_META[platform].name,
       avatarUrl: profile?.avatarUrl ?? "",
     };
   });
@@ -204,7 +207,10 @@ const currentProfile = computed(() =>
 /** 当前平台的昵称 */
 const currentProfileName = computed(() => {
   const nickname = String(currentProfile.value?.nickname ?? "").trim();
-  return nickname || "未知用户名";
+  if (nickname) return nickname;
+  // 上游昵称可能为空串（QQ 已知），退到用户 ID，再退到平台名
+  const userId = String(currentProfile.value?.userId ?? "").trim();
+  return userId || PLATFORM_META[platformStore.currentPlatform].name;
 });
 
 /**
@@ -233,8 +239,8 @@ const currentDisplayName = computed(() => {
   }
   const profile = platformStore.platformProfiles[platformStore.currentPlatform];
   if (!profile) return "未登录";
-  // 上游昵称可能是空白串，取不到时给出占位
-  return String(profile.nickname ?? "").trim() || "未知用户名";
+  // 上游昵称可能是空白串，取不到时退到用户 ID 或平台名
+  return currentProfileName.value;
 });
 
 // 开启用户菜单
