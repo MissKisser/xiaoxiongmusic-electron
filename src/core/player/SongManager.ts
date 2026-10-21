@@ -70,6 +70,15 @@ const resolveSongArtist = (song: SongType): string => {
 /** 第三方平台的歌曲缺歌手时的拒绝原因（用户可读） */
 const MISSING_ARTIST_REASON = "缺少歌手信息，无法安全换源";
 
+/** 歌曲缺少编号时的拒绝原因（用户可读） */
+const MISSING_SONG_ID_REASON = "缺少编号信息，无法获取播放链接";
+
+/** 歌曲缺少歌名时的拒绝原因（用户可读） */
+const MISSING_SONG_NAME_REASON = "缺少歌名，无法检索播放链接";
+
+/** 未启用任何解锁源时的拒绝原因（用户可读） */
+const NO_UNLOCK_SERVER_REASON = "未启用任何解锁源，无法获取播放链接";
+
 /**
  * 把解锁源的异常翻译成用户可读的原因
  *
@@ -473,7 +482,11 @@ class SongManager {
     // 歌手缺失时只按歌名寻址，避免关键词尾部留下分隔符导致检索恒空
     const keyWord = artist ? `${songName}-${artist}` : songName;
     if (!songId || !keyWord) {
-      return { id: songId, url: undefined };
+      return {
+        id: songId,
+        url: undefined,
+        failureReason: !songId ? MISSING_SONG_ID_REASON : MISSING_SONG_NAME_REASON,
+      };
     }
     if (!artist) {
       console.warn(`⚠️ [${songId}] 歌曲缺少歌手信息：${songName}`);
@@ -499,7 +512,7 @@ class SongManager {
     const enabledServers = settingStore.songUnlockServer.filter((s) => s.enabled).map((s) => s.key);
 
     if (enabledServers.length === 0) {
-      return { id: songId, url: undefined };
+      return { id: songId, url: undefined, failureReason: NO_UNLOCK_SERVER_REASON };
     }
 
     // 按优先级顺序排序启用的服务器
