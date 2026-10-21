@@ -35,16 +35,12 @@
                 <div
                   v-if="musicStore.playSong.type !== 'radio'"
                   class="action-btn"
-                  @click="
-                    toLikeSong(musicStore.playSong, !dataStore.isLikeSong(musicStore.playSong.id))
-                  "
+                  @click="toggleSongLiked(musicStore.playSong)"
                 >
                   <SvgIcon
-                    :name="
-                      dataStore.isLikeSong(musicStore.playSong.id) ? 'Favorite' : 'FavoriteBorder'
-                    "
+                    :name="isSongLikedNow(musicStore.playSong) ? 'Favorite' : 'FavoriteBorder'"
                     :size="26"
-                    :class="{ liked: dataStore.isLikeSong(musicStore.playSong.id) }"
+                    :class="{ liked: isSongLikedNow(musicStore.playSong) }"
                   />
                 </div>
                 <!-- 设置按钮 -->
@@ -155,14 +151,12 @@
           <div
             v-if="musicStore.playSong.type !== 'radio'"
             class="action-btn"
-            @click.stop="
-              toLikeSong(musicStore.playSong, !dataStore.isLikeSong(musicStore.playSong.id))
-            "
+            @click.stop="toggleSongLiked(musicStore.playSong)"
           >
             <SvgIcon
-              :name="dataStore.isLikeSong(musicStore.playSong.id) ? 'Favorite' : 'FavoriteBorder'"
+              :name="isSongLikedNow(musicStore.playSong) ? 'Favorite' : 'FavoriteBorder'"
               :size="24"
-              :class="{ liked: dataStore.isLikeSong(musicStore.playSong.id) }"
+              :class="{ liked: isSongLikedNow(musicStore.playSong) }"
             />
           </div>
         </div>
@@ -190,21 +184,21 @@
 <script setup lang="ts">
 import { useRouter } from "vue-router";
 import { useSwipe } from "@vueuse/core";
-import { useMusicStore, useStatusStore, useDataStore, useSettingStore } from "@/stores";
+import { useMusicStore, useStatusStore, useSettingStore } from "@/stores";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useTimeFormat } from "@/composables/useTimeFormat";
-import { toLikeSong } from "@/utils/auth";
 import { openPlaylistAdd } from "@/utils/modal";
 import { removeBrackets } from "@/utils/format";
+import { useSongLiked } from "@/composables/useSongLiked";
 import PlayerSettingsModal from "./PlayerSettingsModal.vue";
 
 const router = useRouter();
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
-const dataStore = useDataStore();
 const player = usePlayerController();
 const { timeDisplay, toggleTimeFormat } = useTimeFormat();
+const { isSongLikedNow, toggleSongLiked } = useSongLiked();
 
 const mobileStart = ref<HTMLElement | null>(null);
 const pageIndex = ref(0);

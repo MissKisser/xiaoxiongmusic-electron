@@ -132,9 +132,9 @@
         <!-- 喜欢歌曲 -->
         <SvgIcon
           v-if="!isSmallScreen"
-          :name="dataStore.isLikeSong(song.id) ? 'Favorite' : 'FavoriteBorder'"
+          :name="isSongLikedNow(song) ? 'Favorite' : 'FavoriteBorder'"
           :size="20"
-          @click.stop="toLikeSong(song, !dataStore.isLikeSong(song.id))"
+          @click.stop="toggleSongLiked(song)"
           @delclick.stop
         />
         <!-- 移动端菜单 -->
@@ -160,17 +160,17 @@
 
 <script setup lang="ts">
 import { QualityType, type SongType } from "@/types/main";
-import { useStatusStore, useMusicStore, useDataStore, useSettingStore } from "@/stores";
+import { useStatusStore, useMusicStore, useSettingStore } from "@/stores";
 import { formatNumber } from "@/utils/helper";
 import { openJumpArtist } from "@/utils/modal";
 import { removeBrackets } from "@/utils/format";
-import { toLikeSong } from "@/utils/auth";
 import { isObject } from "lodash-es";
 import { formatTimestamp, msToTime } from "@/utils/time";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { isElectron } from "@/utils/env";
 import { useBlobURLManager } from "@/core/resource/BlobURLManager";
 import { useMobile } from "@/composables/useMobile";
+import { useSongLiked } from "@/composables/useSongLiked";
 
 const props = defineProps<{
   // 歌曲
@@ -189,10 +189,10 @@ const emit = defineEmits<{
 
 const { isSmallScreen } = useMobile();
 const router = useRouter();
-const dataStore = useDataStore();
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const { isSongLikedNow, toggleSongLiked } = useSongLiked();
 
 const player = usePlayerController();
 const blobURLManager = useBlobURLManager();

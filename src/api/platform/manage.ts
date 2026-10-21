@@ -40,7 +40,7 @@ import {
 import { likeSong as neteaseLikeSong } from "@/api/song";
 import { useDataStore } from "@/stores/data";
 import { usePlatformStore } from "@/stores/platform";
-import { dispatchLikedSongs, type DispatchPlaylist } from "./dispatch";
+import { type DispatchPlaylist } from "./dispatch";
 import { describeFailure } from "./errorText";
 import { platformRequest, platformRequestBody, platformWriteRequest } from "./http";
 import { normalizeQqPlaylist } from "./qqmusic";
@@ -257,29 +257,17 @@ const toKgSongEntry = (song: SongType) => {
   };
 };
 
-/** 各平台「喜欢」歌曲 id 缓存 */
-const likedSongIds = new Map<ApiPlatform, Set<number>>();
-
 /**
  * 读取某平台「我喜欢的音乐」里的歌曲 id 集合
  *
- * QQ 音乐走系统目录模块，酷狗按「我喜欢」歌单定位后取曲。
+ * 集合由平台 store 持有：平台可用时即全局装载，装载过程带 in-flight 去重，
+ * 未装载时按需触发一次装载，因此任意页面的红心状态都可判定。
  * @param platform 音源平台
  * @returns 歌曲 id 集合
  */
 export const getPlatformLikedSongIds = async (platform: ApiPlatform): Promise<Set<number>> => {
   if (platform === "netease") return new Set<number>();
-  const cached = likedSongIds.get(platform);
-  if (cached) return cached;
-  try {
-    const result = await dispatchLikedSongs(platform, { pageSize: 300 });
-    const ids = new Set<number>(result.tracks.map((song) => Number(song.id)).filter(Boolean));
-    likedSongIds.set(platform, ids);
-    return ids;
-  } catch (error) {
-    console.error("读取平台喜欢歌曲失败：", error);
-    return new Set<number>();
-  }
+  return usePlatformStore().ensureLikedSongs(platform);
 };
 
 /**
@@ -292,8 +280,7 @@ export const getPlatformLikedSongIds = async (platform: ApiPlatform): Promise<Se
  */
 export const isSongLiked = (platform: ApiPlatform, song: SongType): boolean => {
   if (platform === "netease") return false;
-  const ids = likedSongIds.get(platform);
-  return ids ? ids.has(Number(song.id)) : false;
+  return usePlatformStore().isLikedSong(platform, Number(song.id));
 };
 
 /**
@@ -304,10 +291,7 @@ export const isSongLiked = (platform: ApiPlatform, song: SongType): boolean => {
  */
 const patchLikedSongCache = (platform: ApiPlatform, song: SongType, liked: boolean): void => {
   if (platform === "netease") return;
-  const ids = likedSongIds.get(platform) ?? new Set<number>();
-  if (liked) ids.add(Number(song.id));
-  else ids.delete(Number(song.id));
-  likedSongIds.set(platform, ids);
+  usePlatformStore().patchLikedSong(platform, Number(song.id), liked);
 };
 
 /**
