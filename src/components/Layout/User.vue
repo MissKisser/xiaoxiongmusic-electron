@@ -27,11 +27,7 @@
             {{ currentDisplayName }}
           </n-text>
           <!-- VIP -->
-          <img
-            v-if="dataStore.userLoginStatus && dataStore.userData.vipType !== 0"
-            class="vip-img"
-            src="/images/vip.png?asset"
-          />
+          <img v-if="showVipBadge" class="vip-img" src="/images/vip.png?asset" />
           <SvgIcon :class="['down', { open: userMenuShow }]" name="DropDown" :depth="3" />
         </n-flex>
       </div>
@@ -209,6 +205,19 @@ const currentProfile = computed(() =>
 const currentProfileName = computed(() => {
   const nickname = String(currentProfile.value?.nickname ?? "").trim();
   return nickname || "未知用户名";
+});
+
+/**
+ * 顶栏会员标记
+ *
+ * 网易云按既有登录态与会员类型判定，第三方平台按平台账号资料判定，
+ * 避免切到其它平台后仍显示网易云的会员标识。
+ */
+const showVipBadge = computed<boolean>(() => {
+  if (isNetease.value) {
+    return dataStore.userLoginStatus && dataStore.userData.vipType !== 0;
+  }
+  return !!currentProfile.value?.isVip;
 });
 
 // 当前平台头像

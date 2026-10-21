@@ -544,6 +544,8 @@ const menuUpdate = async (key: string, item: MenuOption) => {
       router.push({ name: "discover", query: { fm: "song" } });
       return;
     }
+    // 网易云私人漫游：确保推荐流列表属于当前平台，避免复用其它平台的缓存列表
+    await songManager.ensurePersonalFMPlatform();
     if (!musicStore.personalFMSong?.id) {
       window.$message.error("开启私人漫游出错，请重试");
       return;

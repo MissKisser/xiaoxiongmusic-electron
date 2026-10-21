@@ -140,9 +140,8 @@ const fmPlayOrPause = async () => {
 const startSongFM = async () => {
   loading.value = true;
   try {
-    if (musicStore.personalFM.list.length === 0) {
-      await songManager.initPersonalFM();
-    }
+    // 推荐流按平台取数：列表为空或不属于当前平台时由管理器重新拉取
+    await songManager.initPersonalFM();
     if (!musicStore.personalFMSong?.id) {
       window.$message.error("开启刷歌出错，请重试");
       return;
@@ -180,13 +179,11 @@ const fmRefresh = debounce(async () => {
 }, 300);
 
 onMounted(async () => {
-  if (musicStore.personalFM.list.length === 0) {
-    loading.value = true;
-    try {
-      await songManager.initPersonalFM();
-    } finally {
-      loading.value = false;
-    }
+  loading.value = true;
+  try {
+    await songManager.initPersonalFM();
+  } finally {
+    loading.value = false;
   }
 });
 </script>

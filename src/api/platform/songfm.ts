@@ -36,21 +36,3 @@ export const qqSongFM = async (limit = 20): Promise<SongType[]> => {
   const res = await platformRequest<SongFMResponse>(QQ_MUSIC, "songfm", { limit });
   return (res?.songs ?? []).map(normalizeQqSong).map(toSongType);
 };
-
-/**
- * 读取 QQ 音乐推荐流并带回推荐来源信息
- * @param limit 本次取回的曲目数
- * @returns 曲目列表与推荐货架标题
- */
-export const qqSongFMWithShelves = async (
-  limit = 20,
-): Promise<{ songs: SongType[]; shelves: Array<{ id: number; title: string }> }> => {
-  const res = await platformRequest<SongFMResponse>(QQ_MUSIC, "songfm", { limit });
-  return {
-    songs: (res?.songs ?? []).map(normalizeQqSong).map(toSongType),
-    shelves: (res?.shelves ?? []).map((shelf) => ({
-      id: Number(shelf?.id ?? 0),
-      title: String(shelf?.title ?? ""),
-    })),
-  };
-};

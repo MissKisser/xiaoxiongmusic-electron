@@ -60,6 +60,20 @@ const resolvePlatform = (song: SongType): ApiPlatform => song.platform ?? "netea
 const SONG_FM_BATCH_SIZE = 20;
 
 /**
+ * 取歌曲的首个歌手名
+ *
+ * 上游可能给出空的歌手数组（如 QQ 音乐推荐流缺失 `singer` 字段），
+ * 此时按空串处理，避免取歌手时抛异常导致整条解锁链崩掉。
+ * @param song 歌曲
+ * @returns 歌手名，取不到时为空串
+ */
+const resolveSongArtist = (song: SongType): string => {
+  const artists = song.artists;
+  if (Array.isArray(artists)) return artists[0]?.name ?? "";
+  return artists ?? "";
+};
+
+/**
  * 生成歌曲的缓存键
  *
  * 平台歌曲用「平台-数字 ID」做键，避免与网易云同数字 ID 的歌曲互相覆盖缓存。
@@ -433,16 +447,22 @@ class SongManager {
    * 网易云解锁源对第三方平台的歌曲只能**按关键词检索网易云曲库**（两套 id 编号空间不同，
    * 拿第三方 id 直查会静默播错歌），因此第三方歌曲在网易云源上走关键词寻址分支。
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
+   * 歌曲缺少歌手信息时按空串处理并只按歌名寻址，不会因此中断整条解锁链。
    * @param songData 歌曲数据
    * @returns 解锁播放信息
    */
   public getUnlockSongUrl = async (song: SongType): Promise<AudioSource> => {
     const settingStore = useSettingStore();
     const songId = song.id;
-    const artist = Array.isArray(song.artists) ? song.artists[0].name : song.artists;
-    const keyWord = song.name + "-" + artist;
+    const artist = resolveSongArtist(song);
+    const songName = song.name ?? "";
+    // 歌手缺失时只按歌名寻址，避免关键词尾部留下分隔符导致检索恒空
+    const keyWord = artist ? `${songName}-${artist}` : songName;
     if (!songId || !keyWord) {
       return { id: songId, url: undefined };
+    }
+    if (!artist) {
+      console.warn(`⚠️ [${songId}] 歌曲缺少歌手信息，换源将只按歌名检索：${songName}`);
     }
 
     // 第三方平台的歌曲不参与网易云按 id 寻址，改走关键词检索
@@ -837,15 +857,52 @@ class SongManager {
    *
    * 网易云走 `/personal_fm`（私人 FM，一次 3 首）；
    * QQ 音乐没有等价端点，改由平台推荐流模块给出个性化推荐（一次一批，实测批次间几乎不重复）。
+   * @param platform 目标平台
    * @returns 推荐流曲目
    */
-  private fetchSongFMList = async (): Promise<SongType[]> => {
-    if (usePlatformStore().currentPlatform === "qqmusic") {
+  private fetchSongFMList = async (platform: ApiPlatform): Promise<SongType[]> => {
+    if (platform === "qqmusic") {
       return qqSongFM(SONG_FM_BATCH_SIZE);
     }
     const res = await personalFm();
     return formatSongsList(res.data);
   };
+
+  /**
+   * 判断缓存的推荐流是否属于当前平台
+   *
+   * 推荐流列表随音乐 store 持久化，切换平台后旧列表仍然在；
+   * 不校验平台时，QQ 音乐「刷歌」会复用网易云「私人漫游」的曲目。
+   * 列表为空时返回 false（没有可复用的列表）。
+   * @returns 缓存列表是否属于当前平台
+   */
+  private isPersonalFMPlaformMatched = (): boolean => {
+    const musicStore = useMusicStore();
+    if (!musicStore.personalFM.list.length) return false;
+    return musicStore.personalFMPlaform === usePlatformStore().currentPlatform;
+  };
+
+  /**
+   * 确保推荐流列表属于当前平台
+   *
+   * 仅在「列表非空但属于其它平台」时重新取数（如网易云「私人漫游」的列表
+   * 被 QQ 音乐「刷歌」复用）；列表为空时保持原状，由各入口自行决定是否取数。
+   */
+  public async ensurePersonalFMPlatform(): Promise<void> {
+    const musicStore = useMusicStore();
+    if (!musicStore.personalFM.list.length) return;
+    if (this.isPersonalFMPlaformMatched()) return;
+    const platform = usePlatformStore().currentPlatform;
+    // 先丢弃属于其它平台的旧列表，避免取数失败时继续播放别的平台的曲目
+    musicStore.personalFM.list = [];
+    musicStore.personalFM.playIndex = 0;
+    try {
+      musicStore.personalFM.list = await this.fetchSongFMList(platform);
+      musicStore.personalFM.platform = platform;
+    } catch (error) {
+      console.error("❌ 切换平台后重新获取推荐流失败", error);
+    }
+  }
 
   /**
    * 初始化/播放推荐流（网易云私人 FM / QQ 音乐刷歌）
@@ -858,12 +915,19 @@ class SongManager {
 
     try {
       const fetchFM = async () => {
-        musicStore.personalFM.list = await this.fetchSongFMList();
+        const platform = usePlatformStore().currentPlatform;
+        musicStore.personalFM.list = await this.fetchSongFMList(platform);
+        musicStore.personalFM.platform = platform;
         musicStore.personalFM.playIndex = 0;
       };
 
-      // 若列表为空或已播放到最后，获取新列表
-      if (musicStore.personalFM.list.length === 0) await fetchFM();
+      // 列表为空、或列表不属于当前平台（如网易云「私人漫游」切到 QQ 音乐「刷歌」）时重新取数
+      if (!this.isPersonalFMPlaformMatched()) {
+        // 取新列表前丢弃属于其它平台的旧列表，避免取数失败时继续播放别的平台的曲目
+        musicStore.personalFM.list = [];
+        musicStore.personalFM.playIndex = 0;
+        await fetchFM();
+      }
       // 如果需要播放下一首
       if (playNext) {
         statusStore.personalFmMode = true;
@@ -909,11 +973,13 @@ class SongManager {
       return;
     }
     try {
-      const newList = await this.fetchSongFMList();
+      const platform = usePlatformStore().currentPlatform;
+      const newList = await this.fetchSongFMList(platform);
       if (!newList || newList.length === 0) {
         throw new Error("加载推荐流列表失败");
       }
       musicStore.personalFM.list = newList;
+      musicStore.personalFM.platform = platform;
       musicStore.personalFM.playIndex = 0;
       window.$message.success("刷新成功");
     } catch (error) {

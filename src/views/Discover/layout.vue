@@ -44,6 +44,14 @@ const discoverType = ref<string>(
   (router.currentRoute.value?.name as string) || "discover-playlists",
 );
 
+// 路由变化时同步标签高亮：平台切换、前进后退都会走到这里
+watch(
+  () => router.currentRoute.value.name,
+  (name) => {
+    if (typeof name === "string" && name) discoverType.value = name;
+  },
+);
+
 // 是否处于刷歌视图（菜单「刷歌」入口带 fm=song 参数进入）
 // 刷歌是 QQ 音乐的推荐流能力，网易云沿用原有「私人漫游」流程，不渲染本页
 const isSongFM = computed<boolean>(

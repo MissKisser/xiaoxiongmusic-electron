@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import type { SongType } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { isElectron } from "@/utils/env";
 import { cloneDeep } from "lodash-es";
 import { SongLyric } from "@/types/lyric";
@@ -13,6 +14,13 @@ interface MusicState {
   personalFM: {
     playIndex: number;
     list: SongType[];
+    /**
+     * 推荐流的来源平台
+     *
+     * 取数时记录，用于判定缓存列表能否在当前平台复用；
+     * 旧版本持久化数据没有该字段，取值由列表内容推断。
+     */
+    platform?: ApiPlatform;
   };
   dailySongsData: {
     timestamp: number | null;
@@ -79,6 +87,19 @@ export const useMusicStore = defineStore("music", {
     // 私人FM播放歌曲
     personalFMSong(state): SongType {
       return state.personalFM.list?.[state.personalFM.playIndex] || defaultMusicData;
+    },
+    /**
+     * 缓存推荐流的来源平台
+     *
+     * 优先取取数时记录的来源平台；旧版本持久化数据没有该字段，
+     * 按列表内歌曲的平台推断（网易云歌曲不带平台标记，按网易云处理）。
+     */
+    personalFMPlaform(state): ApiPlatform | undefined {
+      const list = state.personalFM.list ?? [];
+      if (!list.length) return undefined;
+      if (state.personalFM.platform) return state.personalFM.platform;
+      const songPlatform = list.find((song) => song.platform)?.platform;
+      return songPlatform ?? "netease";
     },
   },
   actions: {

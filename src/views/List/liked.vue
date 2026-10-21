@@ -43,6 +43,7 @@
 <script setup lang="ts">
 import type { DropdownOption, MessageReactive } from "naive-ui";
 import type { CoverType, SongType } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { songDetail } from "@/api/song";
 import { playlistAllSongs } from "@/api/playlist";
 import { dispatchLikedSongs, dispatchPlaylistDetail } from "@/api/platform/dispatch";
@@ -64,16 +65,8 @@ const platformStore = usePlatformStore();
 // 是否激活
 const isActivated = ref<boolean>(false);
 
-const {
-  detailData,
-  listData,
-  loading,
-  getSongListHeight,
-  setDetailData,
-  setListData,
-  appendListData,
-  setLoading,
-} = useListDetail();
+const { detailData, listData, loading, getSongListHeight, setDetailData, setListData, setLoading } =
+  useListDetail();
 const { searchValue, searchData, displayData, clearSearch, performSearch } =
   useListSearch(listData);
 const { listScrolling, handleListScroll, resetScroll } = useListScroll();
@@ -90,6 +83,9 @@ const listPlayListId = computed<number>(() => (isPlatformSource.value ? 0 : play
 
 // 当前正在请求的歌单 ID，用于防止竞态条件
 const currentRequestId = ref<number>(0);
+
+// 第三方平台列表的请求序号，用于防止竞态条件
+const platformRequestId = ref<number>(0);
 
 // 加载提示
 const loadingMsg = ref<MessageReactive | null>(null);
@@ -272,9 +268,17 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
   setLoading(false);
 };
 
-// 获取第三方平台的「我喜欢的音乐」
+/**
+ * 获取第三方平台的「我喜欢的音乐」
+ *
+ * 请求按序号守卫：只有最后一次请求的结果可以写入列表与红心集合，
+ * 请求期间平台被切换时，本次结果整体丢弃，避免两个平台的曲目混排。
+ * 列表采用覆盖语义：每次写入都是本次请求已取回曲目的去重结果。
+ * @param refresh 是否为刷新（刷新时保留旧列表直至新数据到达）
+ */
 const getPlatformLikedSongs = async (refresh = false) => {
   const platform = platformStore.currentPlatform;
+  const requestId = ++platformRequestId.value;
   const pageSize = 300;
   const tracks: SongType[] = [];
   let detail: CoverType | null = null;
@@ -283,25 +287,33 @@ const getPlatformLikedSongs = async (refresh = false) => {
   setLoading(true);
   clearSearch();
   if (!refresh) resetPlaylistData(true);
+  // 请求是否已失效（序号落后或平台已切换）
+  const isStale = () =>
+    platformRequestId.value !== requestId || platformStore.currentPlatform !== platform;
   try {
     // 逐页取回曲目，行为与网易云链路一致
     do {
       const result = await dispatchLikedSongs(platform, { page, pageSize });
+      // 请求已失效时丢弃本次结果：不写列表，也不写红心集合
+      if (isStale()) return;
       detail = result.detail;
       count = result.count;
       if (result.tracks.length) {
         tracks.push(...result.tracks);
-        appendListData(result.tracks);
+        // 覆盖写入：列表始终是本次请求已取回曲目的去重结果
+        setListData(uniqBy(tracks, "id"));
       }
       page += 1;
       if (result.tracks.length === 0 || tracks.length >= count) break;
     } while (page <= 50);
     setDetailData(detail);
-    if (refresh) setListData(tracks);
+    setListData(uniqBy(tracks, "id"));
     // 按平台的红心判据同步全局喜欢集合
-    syncLikedState(tracks);
+    syncLikedState(platform, tracks);
     setLoading(false);
   } catch (error) {
+    // 请求已失效时不提示失败，由接管本次请求的新请求给出结果
+    if (isStale()) return;
     console.error("获取平台喜欢歌曲失败：", error);
     setLoading(false);
     window.$message.error("获取我喜欢的音乐失败，请重试");
@@ -314,10 +326,15 @@ const getPlatformLikedSongs = async (refresh = false) => {
  * 歌曲卡片与播放器的红心按平台判定：网易云沿用既有本地缓存，
  * 第三方平台按「我喜欢的音乐」歌单的曲目集合判定，
  * 该集合由平台 store 持有，切回网易云无需还原（网易云集合未被覆盖）。
+ *
+ * 写入的是**请求发起时捕获的平台**，不是实时平台；
+ * 且只有当前平台仍是该平台时才写，避免把某个平台的曲目写进另一个平台的红心桶。
+ * @param platform 请求发起时捕获的平台
  * @param tracks 平台「我喜欢的音乐」的曲目
  */
-const syncLikedState = (tracks: SongType[]) => {
-  platformStore.setLikedSongs(platformStore.currentPlatform, tracks);
+const syncLikedState = (platform: ApiPlatform, tracks: SongType[]) => {
+  if (platformStore.currentPlatform !== platform) return;
+  platformStore.setLikedSongs(platform, tracks);
 };
 
 // 加载缓存

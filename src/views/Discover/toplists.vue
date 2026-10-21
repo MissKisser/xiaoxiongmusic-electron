@@ -184,24 +184,35 @@ const boardSongs = ref<SongType[]>([]);
 // 榜单详情加载状态
 const detailLoading = ref<boolean>(false);
 
+// 榜单详情请求序号：只有最后一次请求的结果会被采纳，避免连点时标题与曲目错位
+let boardRequestId = 0;
+
 // 加载状态
 const loading = ref<boolean>(true);
 
 /**
  * 打开某个榜单：加载并展示该榜单的曲目
+ *
+ * 请求带序号守卫：连点不同榜单时，先发后到的旧结果会被丢弃，
+ * 列表内容始终与当前打开的榜单一致。
  * @param board 榜单条目
  */
 const openBoard = async (board: LeaderboardBoard) => {
+  const requestId = ++boardRequestId;
   activeBoard.value = board;
   detailLoading.value = true;
   try {
     const detail = await qqLeaderboardDetail(board.topId, 100);
+    // 已有更新的请求，本次结果作废
+    if (requestId !== boardRequestId) return;
     boardSongs.value = detail.songs;
   } catch (error) {
+    if (requestId !== boardRequestId) return;
     console.error("获取 QQ 榜单详情失败：", error);
     boardSongs.value = [];
+  } finally {
+    if (requestId === boardRequestId) detailLoading.value = false;
   }
-  detailLoading.value = false;
 };
 
 /**
@@ -224,6 +235,8 @@ const getTopPlaylistData = async () => {
     activeBoard.value = null;
     boardSongs.value = [];
     await loadBoardGroups();
+    // 平台已切换时丢弃本次清单
+    if (!isQqSource.value) return;
     const first = boardGroups.value[0]?.toplists?.[0];
     if (first) await openBoard(first);
     loading.value = false;
@@ -267,6 +280,9 @@ const firstArtistName = (song: SongType): string => {
 
 // 平台切换：重新拉取榜单
 const stopPlatformWatch = onPlatformChange(() => {
+  // 作废进行中的榜单详情请求，避免旧平台的曲目落到新平台的页面上
+  boardRequestId++;
+  detailLoading.value = false;
   getTopPlaylistData();
 });
 
