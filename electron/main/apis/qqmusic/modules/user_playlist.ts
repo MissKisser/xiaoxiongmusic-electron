@@ -54,7 +54,7 @@ const positiveInt = (value: unknown): number | undefined => {
 /**
  * 读取当前账号的自建 + 收藏歌单列表
  */
-export const user_playlist_list: QMModule = async (_params: QMParams) => {
+export const user_playlist_list: QMModule = async () => {
   const uin = getQQMusicUin();
   if (!uin || uin === "0") {
     return { code: 401, message: "未登录" };

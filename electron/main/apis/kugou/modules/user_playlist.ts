@@ -153,7 +153,7 @@ const mapCloudSong = (song: KgSongItem) => {
 /**
  * 读取当前账号的云端歌单列表（自建 + 收藏）
  */
-export const user_playlist_list: KGModule = async (_params: KGParams) => {
+export const user_playlist_list: KGModule = async () => {
   const session = getSessionCookies("kugou");
   if (!session.token || !session.userid) {
     return { code: 401, message: "未登录" };
@@ -276,7 +276,7 @@ export const playlist_detail: KGModule = async (params: KGParams) => {
 /**
  * 读取账号资料
  */
-export const user_profile: KGModule = async (_params: KGParams) => {
+export const user_profile: KGModule = async () => {
   const session = getSessionCookies("kugou");
   if (!session.token || !session.userid) {
     return { code: 401, message: "未登录" };

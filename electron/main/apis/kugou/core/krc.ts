@@ -39,9 +39,9 @@ const ENTITY_MAP: Record<string, string> = {
 /** KRC 头部的 id 标记行 */
 const HEAD_ID_REG = /^.*\[id:\$\w+\]\n/;
 /** 翻译 / 罗马音承载行 */
-const LANGUAGE_REG = /\[language:([\w=\/+=]+)\]/;
+const LANGUAGE_REG = /\[language:([\w=/+=]+)\]/;
 /** 承载行的整行匹配 */
-const LANGUAGE_LINE_REG = /\[language:[\w=\/+=]+\]\n?/;
+const LANGUAGE_LINE_REG = /\[language:[\w=/+=]+\]\n?/;
 /** 行首时间标签（全局） */
 const LINE_TIME_REG = /\[((\d+),\d+)\].*/g;
 /** 行首时间标签（单行） */

@@ -359,7 +359,7 @@ export const createPlaylist = async (
         message: result?.code === 200 ? undefined : result?.message || "新建歌单失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "新建歌单失败，请重试" };
     }
   }
@@ -396,7 +396,7 @@ export const renamePlaylist = async (
         message: result?.code === 200 ? undefined : result?.message || "歌单编辑失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "歌单编辑失败，请重试" };
     }
   }
@@ -433,7 +433,7 @@ export const deletePlaylist = async (
         message: result?.code === 200 ? undefined : result?.message || "歌单删除失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "歌单删除失败，请重试" };
     }
   }
@@ -466,7 +466,7 @@ export const addSongsToPlaylist = async (
         message: ok ? undefined : result?.body?.message || "添加失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "添加失败，请重试" };
     }
   }
@@ -510,7 +510,7 @@ export const removeSongsFromPlaylist = async (
         message: ok ? undefined : result?.body?.message || "删除失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "删除失败，请重试" };
     }
   }
@@ -551,7 +551,7 @@ export const subscribePlaylist = async (
         message: result?.code === 200 ? undefined : result?.message || "收藏歌单失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "收藏歌单失败，请重试" };
     }
   }
@@ -684,7 +684,7 @@ export const likeSong = async (
         message: result?.code === 200 ? undefined : result?.message || "操作失败，请重试",
         data: result,
       };
-    } catch (error) {
+    } catch {
       return { ok: false, message: "操作失败，请重试" };
     }
   }
