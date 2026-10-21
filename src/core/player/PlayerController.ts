@@ -1,5 +1,6 @@
 import { AudioErrorCode } from "@/core/audio-player/BaseAudioPlayer";
 import { useBlobURLManager } from "@/core/resource/BlobURLManager";
+import { PLAYBACK_FAILED_TEXT } from "@/api/platform/errorText";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { type SongType } from "@/types/main";
 import { RepeatModeType, ShuffleModeType } from "@/types/shared";
@@ -135,13 +136,15 @@ class PlayerController {
         return;
       }
       if (!audioSource.url) {
-        // 所有音频源都拿不到链接：给出可读文案与重试入口
+        // 所有音频源都拿不到链接：toast 提示后跳过
         // 解锁链已按优先级逐源试过（每个源有独立超时预算），立即重跑同一条链不会更快，
-        // 因此不再走播放层的自动重试，改由用户显式选择重试或跳过。
+        // 因此不走播放层的自动重试，直接提示并跳到下一首。
         console.error(`❌ [${playSongData.id}] 所有音频源获取失败，无可用链接`);
         songManager.clearPrefetch();
         statusStore.playLoading = false;
-        this.showPlaybackFailureDialog(audioSource.failureReason);
+        this.retryInfo.count = 0;
+        window.$message.error(audioSource.failureReason || PLAYBACK_FAILED_TEXT);
+        await this.skipToNextWithDelay();
         return;
       }
       console.log(`🎧 [${playSongData.id}] 最终播放信息:`, audioSource);
@@ -180,39 +183,6 @@ class PlayerController {
         this.handlePlaybackError(undefined);
       }
     }
-  }
-
-  /**
-   * 无可用音频源时给出可读文案与重试入口
-   *
-   * 失败原因来自平台侧（付费墙 / 无授权）或解锁链逐源失败的原因，
-   * 「重试」重新取一次音频源，「跳过」切到下一首；
-   * 直接关闭弹窗（点遮罩 / ESC / 关闭按钮）按「跳过」处理。
-   * @param reason 失败原因（用户可读）
-   */
-  private showPlaybackFailureDialog(reason?: string) {
-    const content = reason || "所有音频源均未找到可用链接，可重试或跳过这首歌曲。";
-    window.$dialog.warning({
-      title: "无法播放",
-      content,
-      positiveText: "重试",
-      negativeText: "跳过",
-      onPositiveClick: () => {
-        void this.playSong({ autoPlay: true });
-      },
-      onNegativeClick: () => {
-        void this.skipToNextWithDelay();
-      },
-      onClose: () => {
-        void this.skipToNextWithDelay();
-      },
-      onMaskClick: () => {
-        void this.skipToNextWithDelay();
-      },
-      onEsc: () => {
-        void this.skipToNextWithDelay();
-      },
-    });
   }
 
   /**
