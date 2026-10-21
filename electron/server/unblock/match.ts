@@ -1469,7 +1469,8 @@ const titleForms = (title: string): string[] =>
  * 取出候选歌名中「请求歌名之外」的剩余文本
  *
  * 站外源常把歌手写进歌名字段（「春娇与志明 街道办GDC / 欧阳耀莹」、
- * 「《春娇与志明》：街道办GDC、欧阳耀莹」），这段剩余文本即内嵌的歌手信息。
+ * 「《春娇与志明》：街道办GDC、欧阳耀莹」），这段剩余文本有两个用途：
+ * 判定「候选歌名包含请求歌名」（子串分），以及扫描版本标记（翻自 / 翻奏 / rmx 等）。
  * @param requestTitle 请求歌名
  * @param candidateTitle 候选歌名
  * @returns 归一化后的剩余文本；候选歌名不含请求歌名时返回空串
@@ -1481,25 +1482,6 @@ export const extractEmbeddedText = (requestTitle: string, candidateTitle: string
   const index = candidateNorm.indexOf(requestNorm);
   if (index < 0) return "";
   return candidateNorm.slice(0, index) + candidateNorm.slice(index + requestNorm.length);
-};
-
-/**
- * 计算歌名内嵌歌手的命中情况
- *
- * 候选的歌手字段常是上传者或翻唱者（「A12」「青柠」），真正的原唱只写在歌名尾部；
- * 此时若歌名剩余文本命中请求歌手，视为歌手一致。
- * @param requestArtist 请求歌手
- * @param embeddedText 歌名内嵌的剩余文本
- * @returns 命中时为 1，否则为 0
- */
-const embeddedArtistScore = (requestArtist: string, embeddedText: string): number => {
-  if (!embeddedText) return 0;
-  const tokens = requestArtist
-    .split(ARTIST_SEPARATOR)
-    .map((token) => normalizeText(token))
-    .filter(Boolean);
-  if (!tokens.length) return 0;
-  return tokens.some((token) => embeddedText.includes(token)) ? 1 : 0;
 };
 
 /**
@@ -1538,20 +1520,18 @@ const isVersionVariant = (
  * 取多种形态里的最高分：
  * 1. 主标题形态（剥离全部括号内容）的编辑距离相似度；
  * 2. 保留书名号《》内容的形态的编辑距离相似度 —— 剥离《》会把主标题一起删掉；
- * 3. 子串分 —— 候选歌名包含请求歌名（或反之），且歌名剩余文本内嵌了请求歌手时，
- *    视为同一首歌（站外源常把歌手写进歌名字段）。
+ * 3. 子串分 —— 候选歌名包含请求歌名时视为同一首歌（站外源常把歌手写进歌名字段，
+ *    如「春娇与志明 街道办GDC / 欧阳耀莹」）。
+ *
+ * 歌名分只回答「是不是同一首歌」，版本对不对由歌手维度把关：
+ * 歌名里内嵌了原唱歌手，不代表候选就是原唱（搬运版 / 翻唱版的歌名里同样写着原唱）。
  *
  * 命中版本变体标记时整体折半。
  * @param requestTitle 请求歌名
  * @param candidateTitle 候选歌名
- * @param requestArtist 请求歌手；用于识别歌名内嵌的歌手
  * @returns 0~1 的相似度
  */
-export const titleSimilarity = (
-  requestTitle: string,
-  candidateTitle: string,
-  requestArtist = "",
-): number => {
+export const titleSimilarity = (requestTitle: string, candidateTitle: string): number => {
   const requestForms = titleForms(requestTitle);
   const candidateForms = titleForms(candidateTitle);
   if (!requestForms.length || !candidateForms.length) return 0;
@@ -1562,7 +1542,7 @@ export const titleSimilarity = (
     }
   }
   const embeddedText = extractEmbeddedText(requestTitle, candidateTitle);
-  if (embeddedArtistScore(requestArtist, embeddedText)) base = 1;
+  if (embeddedText) base = 1;
   if (isVersionVariant(candidateTitle, requestTitle, embeddedText)) return base * 0.5;
   return base;
 };
@@ -1573,6 +1553,12 @@ export const titleSimilarity = (
  * 请求侧没有歌手信息时返回 0（不放行）：空歌手退化为纯歌名匹配会命中同名不同版本的曲目
  * （实测《青花瓷》仅按歌名检索会命中 95 秒的街声版），
  * 宁可换源失败也不播错歌。
+ *
+ * 只认候选的**歌手栏位**：站外源常把原唱写进歌名字段、把搬运者 / 翻唱者写进歌手栏位
+ * （「春娇与志明 街道办GDC / 欧阳耀莹」+ 歌手「A12」「青柠」「RYO凉夜 / MIYA米娅」），
+ * 若因歌名里出现原唱就放行歌手维度，播出来的就是搬运版或翻唱版。
+ * 参照网易云平台的解锁口径：网易云歌曲按 id 精确寻址，命中即原曲；
+ * 走到模糊检索的站外源时同样要求歌手栏位严格命中。
  *
  * 只有**主歌手**（候选歌手栏位的第一位）命中才给满分：副歌手（合作 / feat）单独命中
  * 说明候选是别人的版本，按 Jaccard 口径计分并压到 ARTIST_SCORE_LIMIT 之下。
@@ -1642,10 +1628,8 @@ export const durationSimilarity = (
  * @returns 校验明细与综合得分
  */
 export const scoreCandidate = (candidate: MatchCandidate, target: MatchTarget): CandidateScore => {
-  const embeddedText = extractEmbeddedText(target.title, candidate.title);
-  const embeddedArtist = embeddedArtistScore(target.artist, embeddedText);
-  const titleScore = titleSimilarity(target.title, candidate.title, target.artist);
-  const artistScore = Math.max(artistSimilarity(target.artist, candidate.artist), embeddedArtist);
+  const titleScore = titleSimilarity(target.title, candidate.title);
+  const artistScore = artistSimilarity(target.artist, candidate.artist);
   const durationScore = durationSimilarity(candidate.duration, target.duration);
   const passed =
     titleScore >= TITLE_SCORE_LIMIT &&
