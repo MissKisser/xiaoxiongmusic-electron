@@ -9,6 +9,64 @@ import { qmRequest } from "../core/request";
 import { coreLog } from "../../../logger";
 import type { QMModule, QMParams } from "../core/types";
 
+/** 上游「资源不存在」判据：请求层以 inner=404 表达模块内的资源缺失 */
+const UPSTREAM_NOT_FOUND_PATTERN = /inner=404/;
+
+/** 歌手不存在时的失败文案 */
+const SINGER_NOT_FOUND_MESSAGE = "读取歌手失败: 歌手不存在或 mid 无效";
+
+/** 单次上游调用的结果 */
+interface CallOutcome<T> {
+  /** 调用是否成功 */
+  ok: boolean;
+  /** 成功时的数据 */
+  data: T | null;
+  /** 失败时的错误 */
+  error: Error | null;
+}
+
+/**
+ * 发起一次上游调用并保留失败信息
+ *
+ * 歌曲与专辑两个接口要分别判定成败，
+ * 才能把「歌手不存在」与「上游整体故障」区分开。
+ * @param promise - 待发起的请求
+ * @returns 调用结果
+ */
+const attempt = async <T>(promise: Promise<T>): Promise<CallOutcome<T>> => {
+  try {
+    return { ok: true, data: await promise, error: null };
+  } catch (err) {
+    return { ok: false, data: null, error: err as Error };
+  }
+};
+
+/**
+ * 判定上游错误是否为「歌手不存在」
+ *
+ * 专辑接口对不存在的歌手返回 404，歌曲接口则返回空列表，
+ * 因此只有专辑接口报错时才拿得到这个信号。
+ * @param error - 上游错误
+ * @returns 是否为歌手不存在
+ */
+const isSingerNotFound = (error: Error | null): boolean =>
+  Boolean(error && UPSTREAM_NOT_FOUND_PATTERN.test(error.message));
+
+/**
+ * 解析「是否同时读取专辑」开关
+ *
+ * 路由层的查询参数值恒为字符串，
+ * 所以 "false" / "0" / "no" 都要判为关闭。
+ * @param value - 原始参数值
+ * @returns 是否同时读取专辑
+ */
+const parseIncludeAlbums = (value: unknown): boolean => {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "boolean") return value;
+  const text = String(value).trim().toLowerCase();
+  return !(text === "false" || text === "0" || text === "no");
+};
+
 /**
  * 拼接歌手名
  * @param singers - 歌手数组
@@ -95,26 +153,58 @@ export const artist: QMModule = async (params: QMParams) => {
 
   const offset = Math.max(0, Number(params.offset ?? 0) || 0);
   const limit = Math.min(200, Math.max(1, Number(params.limit ?? 50) || 50));
-  const includeAlbums = params.includeAlbums !== false;
+  const includeAlbums = parseIncludeAlbums(params.includeAlbums);
 
   try {
-    const songsPromise = qmRequest<any>("musichall.song_list_server", "GetSingerSongList", {
-      singerMid: mid,
-      order: 1,
-      begin: offset,
-      num: limit,
+    const songsPromise = attempt(
+      qmRequest<any>("musichall.song_list_server", "GetSingerSongList", {
+        singerMid: mid,
+        order: 1,
+        begin: offset,
+        num: limit,
+      }),
+    );
+    let albumsPromise: Promise<CallOutcome<any>> = Promise.resolve({
+      ok: true,
+      data: null,
+      error: null,
     });
-    const albumsPromise = includeAlbums
-      ? qmRequest<any>("music.web_singer_info_svr", "get_singer_album", {
+    if (includeAlbums) {
+      albumsPromise = attempt(
+        qmRequest<any>("music.web_singer_info_svr", "get_singer_album", {
           singermid: mid,
           order: "time",
           begin: 0,
           num: 200,
           exstatus: 1,
-        })
-      : Promise.resolve(null);
+        }),
+      );
+    }
 
-    const [songsData, albumsData] = await Promise.all([songsPromise, albumsPromise]);
+    const [songsOutcome, albumsOutcome] = await Promise.all([songsPromise, albumsPromise]);
+
+    // 歌手不存在：专辑接口对不存在的歌手返回 404，歌曲接口则返回空列表
+    if (!albumsOutcome.ok && isSingerNotFound(albumsOutcome.error)) {
+      coreLog.warn("[qm-artist] 歌手不存在:", mid);
+      return { code: 502, message: SINGER_NOT_FOUND_MESSAGE };
+    }
+    if (!songsOutcome.ok) {
+      coreLog.error("[qm-artist] 读取歌手歌曲异常:", songsOutcome.error);
+      return {
+        code: 502,
+        message: `读取歌手失败: ${songsOutcome.error?.message ?? String(songsOutcome.error)}`,
+      };
+    }
+    if (!albumsOutcome.ok) {
+      coreLog.error("[qm-artist] 读取歌手专辑异常:", albumsOutcome.error);
+      return {
+        code: 502,
+        message: `读取歌手失败: ${albumsOutcome.error?.message ?? String(albumsOutcome.error)}`,
+      };
+    }
+
+    const songsData = songsOutcome.data;
+    const albumsData = albumsOutcome.data;
 
     const songs = ((songsData && songsData.songList) || [])
       .map((entry: any) => (entry && entry.songInfo) || null)
