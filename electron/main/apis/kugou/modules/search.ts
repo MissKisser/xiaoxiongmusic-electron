@@ -358,13 +358,13 @@ const searchGatewayList = async (
 /**
  * 搜索酷狗
  *
- * @param params.keywords - 搜索关键词
+ * @param params.keywords - 搜索关键词（`keyword` 为等价别名）
  * @param params.type - 搜索分类：0 单曲 / 8 专辑 / 9 歌手 / 2 歌单
  * @param params.page - 页码，从 1 开始
  * @param params.limit - 每页条数
  */
 export const search: KGModule = async (params: KGParams) => {
-  const keywords = String(params.keywords ?? params.keyword ?? "").trim();
+  const keywords = String(params.keywords || params.keyword || "").trim();
   if (!keywords) return { code: 400, message: "keywords required" };
 
   const type = resolveType(params.type);

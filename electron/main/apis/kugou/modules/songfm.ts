@@ -269,13 +269,14 @@ const normalizePoolSong = (raw: RawEntry, source: string): RawEntry | null => {
   if (!hash) return null;
 
   const singerInfo = Array.isArray(entry.singerinfo) ? entry.singerinfo : [];
-  const artists = singerInfo.length
-    ? singerInfo
-        .map((singer: RawEntry) => ({
-          id: singer && singer.id !== undefined ? String(singer.id) : "",
-          name: decodeName((singer && singer.name) || ""),
-        }))
-        .filter((singer: { id: string; name: string }) => singer.name)
+  // 歌手条目：优先用上游 `singerinfo`（带平台歌手号），映射后无有效名则按歌手串拆分
+  const singers = singerInfo.map((singer: RawEntry) => ({
+    id: singer && singer.id !== undefined ? String(singer.id) : "",
+    name: decodeName((singer && singer.name) || ""),
+  }));
+  const namedSingers = singers.filter((singer: { id: string; name: string }) => singer.name);
+  const artists = namedSingers.length
+    ? namedSingers
     : splitArtistNames(entry.author_name).map((name) => ({ id: "", name }));
   const artistName = artists.map((singer: { name: string }) => singer.name).join(" / ");
 

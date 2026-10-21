@@ -149,13 +149,13 @@ const buildSingerListUrl = (key: number, musician: number, page: number, limit: 
  * 读取酷狗音乐热门歌手列表
  * @param params.type - 分类标识（`<key>` 或 `<key>:<musician>`），缺省取「全部」
  * @param params.page - 页码，从 1 开始
- * @param params.limit - 每页条数，默认 30，上限 100
+ * @param params.limit - 每页条数，默认 30，上限 100（`pagesize` 为等价别名）
  */
 export const hot_artists: KGModule = async (params: KGParams) => {
   const page = Math.max(1, Number(params.page ?? DEFAULT_PAGE) || DEFAULT_PAGE);
   const limit = Math.min(
     MAX_LIMIT,
-    Math.max(1, Number(params.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT),
+    Math.max(1, Number(params.limit ?? params.pagesize ?? DEFAULT_LIMIT) || DEFAULT_LIMIT),
   );
   const { key, musician } = parseTypeId(params.type);
 
