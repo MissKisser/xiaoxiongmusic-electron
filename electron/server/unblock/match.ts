@@ -236,13 +236,17 @@ export const titleSimilarity = (requestTitle: string, candidateTitle: string): n
 
 /**
  * 计算歌手相似度：请求歌手与候选歌手任一方包含另一方即视为命中
+ *
+ * 请求侧没有歌手信息时返回 0（不放行）：空歌手退化为纯歌名匹配会命中同名不同版本的曲目
+ * （实测《青花瓷》仅按歌名检索会命中 95 秒的街声版），
+ * 宁可换源失败也不播错歌。
  * @param requestArtist 请求歌手
  * @param candidateArtist 候选歌手
  * @returns 0~1 的相似度
  */
 export const artistSimilarity = (requestArtist: string, candidateArtist: string): number => {
   const request = normalizeText(requestArtist);
-  if (!request) return 1;
+  if (!request) return 0;
   const tokens = (candidateArtist || "")
     .split(ARTIST_SEPARATOR)
     .map((token) => normalizeText(token))

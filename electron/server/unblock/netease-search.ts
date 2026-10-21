@@ -31,23 +31,30 @@ const NETEASE_BITRATE_KBPS = 128;
 /** 单次换源最多尝试的候选数 */
 const MAX_CANDIDATE_TRY = 3;
 
+/** 目标缺歌手时的拒绝原因（用户可读） */
+const MISSING_ARTIST_REASON = "缺少歌手信息，无法安全换源";
+
 /** 网易云检索请求头 */
 const SEARCH_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 
 /**
  * 检索网易云候选歌曲
+ *
+ * 目标缺歌手时直接返回空列表：仅按歌名检索会命中同名不同版本的曲目
+ * （实测《青花瓷》仅按歌名检索会命中 95 秒的街声版），宁可不换源也不播错歌。
  * @param title 歌名
- * @param artist 歌手，可为空
+ * @param artist 歌手；为空时不检索
  * @param cookie 网易云登录态，可为空
  * @returns 归一化后的候选列表
  */
-export const searchNeteaseCandidates = async (
+const searchNeteaseCandidates = async (
   title: string,
   artist: string,
   cookie?: Record<string, string>,
 ): Promise<Array<{ id: string; title: string; artist: string; duration?: number }>> => {
-  const keyword = artist ? `${title} ${artist}` : title;
+  if (!artist.trim()) return [];
+  const keyword = `${title} ${artist}`;
   const response = await NeteaseCloudMusicApi.cloudsearch({
     keywords: keyword,
     type: 1,
@@ -65,7 +72,9 @@ export const searchNeteaseCandidates = async (
     candidates.push({
       id,
       title: String(song?.name ?? ""),
-      artist: (song?.ar || song?.artists || []).map((item: any) => String(item?.name ?? "")).join(" / "),
+      artist: (song?.ar || song?.artists || [])
+        .map((item: any) => String(item?.name ?? ""))
+        .join(" / "),
       duration: duration > 0 ? duration : undefined,
     });
   }
@@ -133,6 +142,9 @@ export const getNeteaseSearchSongUrl = async (
 ): Promise<SongUrlResult> => {
   try {
     if (!target.title) return { code: 404, url: null };
+    if (!target.artist.trim()) {
+      return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
+    }
     const candidates = await searchNeteaseCandidates(target.title, target.artist, cookie);
     if (!candidates.length) return { code: 404, url: null };
     const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
@@ -157,9 +169,7 @@ export const getNeteaseSearchSongUrl = async (
           continue;
         }
         if (!check.verified) {
-          serverLog.warn(
-            `⚠️ Netease 直链体积未验证 (${detail.candidate.title}): ${check.reason}`,
-          );
+          serverLog.warn(`⚠️ Netease 直链体积未验证 (${detail.candidate.title}): ${check.reason}`);
         }
         serverLog.log("🔗 NeteaseSearchSong URL:", source.url);
         return { code: 200, url: source.url, lengthVerified: check.verified };
