@@ -162,6 +162,16 @@ const appRoutes: Array<RouteRecordRaw> = [
     },
     component: () => import("@/views/List/playlist.vue"),
   },
+  // 榜单详情
+  {
+    path: "/toplist",
+    name: "toplist",
+    beforeEnter: (to, _, next) => {
+      if (!to.query.id) next({ path: "/403" });
+      else next();
+    },
+    component: () => import("@/views/List/toplist.vue"),
+  },
   // 流媒体歌单
   {
     path: "/streaming-playlist",
@@ -437,4 +447,3 @@ const routes: Array<RouteRecordRaw> = [
 ];
 
 export default routes;
-

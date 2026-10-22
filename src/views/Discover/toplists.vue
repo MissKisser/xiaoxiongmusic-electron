@@ -2,7 +2,7 @@
   <div class="discover-toplists">
     <n-divider> 官方榜 </n-divider>
     <Transition name="fade" mode="out-in">
-      <!-- 分组榜单（QQ 音乐 / 酷狗）：榜单清单 + 榜单详情 -->
+      <!-- 分组榜单（QQ 音乐 / 酷狗）：榜单清单 -->
       <div v-if="isGroupedSource" class="official-list">
         <n-grid v-if="boardGroups.length" cols="1 600:2 1000:3" x-gap="20" y-gap="20">
           <n-gi v-for="group in boardGroups" :key="group.groupId" span="1">
@@ -17,7 +17,6 @@
                     :height="160"
                     :description="board.subTitle || board.updateTime"
                     size="normal"
-                    :class="{ active: board.topId === activeTopId }"
                     @click="handleBoardClick(board)"
                   >
                     <template #info>
@@ -44,21 +43,6 @@
             </n-card>
           </n-gi>
         </n-grid>
-        <!-- 榜单详情 -->
-        <div v-if="activeBoard" ref="boardDetailRef" class="board-detail">
-          <n-text class="detail-title">{{ activeBoard.title }}</n-text>
-          <n-text v-if="activeBoard.subTitle" class="detail-subtitle" depth="3">
-            {{ activeBoard.subTitle }}
-          </n-text>
-          <SongList
-            :data="boardSongs"
-            :loading="detailLoading"
-            :loadMore="boardHasMore"
-            :height="detailListHeight"
-            @reachBottom="loadMoreBoardSongs"
-            disabledSort
-          />
-        </div>
       </div>
       <!-- 网易云：官方榜 + 精选榜 -->
       <div v-else-if="topListData.official?.length > 0" class="official-list">
@@ -109,24 +93,37 @@
   </div>
 </template>
 
+<script lang="ts">
+import type { ApiPlatform } from "@/types/shared";
+import type { PlatformLeaderboardBoard, PlatformLeaderboardGroup } from "@/api/platform/types";
+
+/**
+ * 榜单清单缓存
+ *
+ * 榜单详情是独立页面，清单页离开后组件会被销毁，
+ * 这里按平台留住已取回的清单，返回清单页时直接复用。
+ */
+let boardGroupsCache: { platform: ApiPlatform; groups: PlatformLeaderboardGroup[] } | null = null;
+
+/** 离开清单页时的滚动位置，返回清单页时恢复 */
+let savedScrollTop = 0;
+</script>
+
 <script setup lang="ts">
 import { topPlaylist } from "@/api/playlist";
-import type { CoverType, SongType } from "@/types/main";
-import type { ApiPlatform } from "@/types/shared";
-import { onPlatformChange, usePlatformStore, useStatusStore } from "@/stores";
-import { dispatchLeaderboardDetail, dispatchLeaderboardGroups } from "@/api/platform/dispatch";
-import type { PlatformLeaderboardBoard, PlatformLeaderboardGroup } from "@/api/platform/types";
+import type { CoverType } from "@/types/main";
+import { onPlatformChange, usePlatformStore } from "@/stores";
+import { dispatchLeaderboardGroups } from "@/api/platform/dispatch";
 import { formatCoverList } from "@/utils/format";
 
 const router = useRouter();
 const platformStore = usePlatformStore();
-const statusStore = useStatusStore();
 
 /** 提供分组榜单的平台（QQ 音乐 / 酷狗） */
 const GROUPED_BOARD_PLATFORMS: ApiPlatform[] = ["qqmusic", "kugou"];
 
-/** 榜单详情每页曲目数 */
-const BOARD_PAGE_SIZE = 100;
+/** 滚动位置恢复的重试时长（毫秒） */
+const RESTORE_RETRY_MS = 2000;
 
 // 是否为第三方平台（QQ 音乐 / 酷狗）
 const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
@@ -148,132 +145,72 @@ const topListData = ref<{
 // 榜单清单（按分组）
 const boardGroups = ref<PlatformLeaderboardGroup[]>([]);
 
-// 当前打开的榜单
-const activeBoard = ref<PlatformLeaderboardBoard | null>(null);
-const activeTopId = computed<number>(() => activeBoard.value?.topId ?? 0);
-
-// 当前榜单已加载的曲目
-const boardSongs = ref<SongType[]>([]);
-
-// 当前榜单已加载到第几页
-const boardPage = ref<number>(1);
-
-// 榜单是否还有下一页
-// 平台一次给全量榜单曲目（无翻页概念）时为 undefined，列表不显示「没有更多」页脚
-const boardHasMore = ref<boolean | undefined>(undefined);
-
-// 榜单详情加载状态
-const detailLoading = ref<boolean>(false);
-
-// 榜单详情区元素
-const boardDetailRef = ref<HTMLElement | null>(null);
-
-// 榜单详情请求序号：只有最后一次请求的结果会被采纳，避免连点时标题与曲目错位
-let boardRequestId = 0;
-
 /**
- * 榜单详情曲目表高度
+ * 获取主内容区的滚动容器
  *
- * 曲目表是虚拟列表，必须有确定高度才能渲染出内容，
- * 这里跟随主内容区高度自适应，给标题与副标题留出空间。
+ * 榜单清单页由主内容区滚动，滚动位置需要跨页面保留。
+ * @returns 滚动容器
  */
-const detailListHeight = computed<number>(() => {
-  const contentHeight = statusStore.mainContentHeight || 720;
-  return Math.max(240, contentHeight - 160);
-});
-
-/**
- * 打开某个榜单：加载并展示该榜单的曲目
- *
- * 请求带序号守卫：连点不同榜单时，先发后到的旧结果会被丢弃，
- * 列表内容始终与当前打开的榜单一致。
- * @param board 榜单条目
- * @param page 页码（从 1 开始）
- */
-const openBoard = async (board: PlatformLeaderboardBoard, page = 1) => {
-  const requestId = ++boardRequestId;
-  if (page === 1) {
-    activeBoard.value = board;
-    boardSongs.value = [];
-  }
-  detailLoading.value = true;
-  try {
-    const detail = await dispatchLeaderboardDetail(platformStore.currentPlatform, {
-      boardId: board.topId,
-      page,
-      limit: BOARD_PAGE_SIZE,
-    });
-    // 已有更新的请求，本次结果作废
-    if (requestId !== boardRequestId) return;
-    boardSongs.value = page === 1 ? detail.songs : [...boardSongs.value, ...detail.songs];
-    boardPage.value = page;
-    boardHasMore.value = detail.hasMore;
-  } catch (error) {
-    if (requestId !== boardRequestId) return;
-    console.error("获取平台榜单详情失败：", error);
-    boardSongs.value = [];
-    boardHasMore.value = undefined;
-  } finally {
-    if (requestId === boardRequestId) detailLoading.value = false;
-  }
+const getScrollContainer = (): HTMLElement | null => {
+  const mainContent = document.getElementById("main-content");
+  return mainContent?.querySelector(".n-scrollbar-container") ?? null;
 };
 
 /**
- * 滚动到榜单详情区
+ * 恢复离开清单页时的滚动位置
  *
- * 详情区排在榜单卡片网格之后，不主动滚动的话用户看不到刚打开的榜单曲目。
+ * 清单内容是异步加载的，内容高度就绪前设置滚动位置会被浏览器忽略，
+ * 因此这里在短时间内持续重试，直到位置真正生效。
  */
-const scrollToBoardDetail = () => {
-  nextTick(() => {
-    boardDetailRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
+const restoreScroll = () => {
+  const target = savedScrollTop;
+  if (!target) return;
+  const deadline = Date.now() + RESTORE_RETRY_MS;
+  const apply = () => {
+    const container = getScrollContainer();
+    if (container) container.scrollTop = target;
+    if (Date.now() < deadline) requestAnimationFrame(apply);
+  };
+  apply();
 };
 
 /**
- * 点击榜单卡片：打开该榜单并把详情区滚动到视野内
- *
- * 打开动作不等待接口返回，先滚动给出即时反馈，曲目到达后自动填入列表。
+ * 点击榜单卡片：进入该榜单的独立详情页
  * @param board 榜单条目
  */
 const handleBoardClick = (board: PlatformLeaderboardBoard) => {
-  openBoard(board);
-  scrollToBoardDetail();
-};
-
-/**
- * 加载当前榜单的下一页曲目
- *
- * 仅支持翻页的平台会给出「还有下一页」标记，触底时追加到当前列表。
- */
-const loadMoreBoardSongs = async () => {
-  if (!boardHasMore.value || detailLoading.value || !activeBoard.value) return;
-  await openBoard(activeBoard.value, boardPage.value + 1);
+  router.push({
+    name: "toplist",
+    query: { id: board.topId, platform: platformStore.currentPlatform },
+  });
 };
 
 /**
  * 读取第三方平台的榜单清单
  */
 const loadBoardGroups = async () => {
+  const platform = platformStore.currentPlatform;
+  // 命中缓存时先渲染，避免返回清单页出现空白
+  if (boardGroupsCache?.platform === platform) {
+    boardGroups.value = boardGroupsCache.groups;
+  }
   try {
-    boardGroups.value = await dispatchLeaderboardGroups(platformStore.currentPlatform);
+    const groups = await dispatchLeaderboardGroups(platform);
+    boardGroups.value = groups;
+    boardGroupsCache = { platform, groups };
   } catch (error) {
     console.error("获取平台榜单清单失败：", error);
-    boardGroups.value = [];
+    if (!boardGroupsCache) boardGroups.value = [];
   }
+  await nextTick();
+  restoreScroll();
 };
 
 // 获取排行榜数据
 const getTopPlaylistData = async () => {
-  // QQ 音乐 / 酷狗：榜单清单 + 默认榜单详情
+  // QQ 音乐 / 酷狗：只取榜单清单，榜单详情在独立页面展示
   if (isGroupedSource.value) {
-    activeBoard.value = null;
-    boardSongs.value = [];
-    boardHasMore.value = undefined;
     await loadBoardGroups();
-    // 平台已切换时丢弃本次清单
-    if (!isGroupedSource.value) return;
-    const first = boardGroups.value[0]?.toplists?.[0];
-    if (first) await openBoard(first);
     return;
   }
   const result = await topPlaylist();
@@ -285,10 +222,12 @@ const getTopPlaylistData = async () => {
 
 // 平台切换：重新拉取榜单
 const stopPlatformWatch = onPlatformChange(() => {
-  // 作废进行中的榜单详情请求，避免旧平台的曲目落到新平台的页面上
-  boardRequestId++;
-  detailLoading.value = false;
   getTopPlaylistData();
+});
+
+// 离开清单页：记住滚动位置
+onBeforeRouteLeave(() => {
+  savedScrollTop = getScrollContainer()?.scrollTop ?? 0;
 });
 
 onMounted(getTopPlaylistData);
@@ -321,27 +260,6 @@ onUnmounted(() => {
     .desc {
       font-size: 13px;
     }
-  }
-  .board-detail {
-    margin-top: 24px;
-    // 滚动到详情区时与内容区顶部留出间距
-    scroll-margin-top: 12px;
-    .detail-title {
-      display: block;
-      font-size: 20px;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    .detail-subtitle {
-      display: block;
-      font-size: 13px;
-      margin-bottom: 12px;
-    }
-  }
-  // 选中的榜单卡片
-  .official-list .board-card.active {
-    border-color: rgb(var(--primary));
-    background-color: rgba(var(--primary), 0.06);
   }
   .loading {
     height: 160px;
