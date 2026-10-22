@@ -320,7 +320,6 @@ export const normalizeKgSong = (
     mv: null,
     cover,
     coverSize: buildCoverSize(cover),
-    size: Number(song?.sizes?.["320k"] ?? song?.sizes?.["128k"] ?? 0),
     platform: KUGOU,
     platformId: hash || undefined,
   };

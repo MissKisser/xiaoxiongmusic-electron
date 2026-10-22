@@ -313,7 +313,6 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
     mv: null,
     cover: albumCover,
     coverSize: buildCoverSize(albumCover),
-    size: Number(song?.size320 || song?.size128 || 0),
     platform: QQ_MUSIC,
     platformId: String(song?.mid ?? "") || undefined,
   };
