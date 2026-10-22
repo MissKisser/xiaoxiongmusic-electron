@@ -53,6 +53,8 @@ import { isObject, uniqBy } from "lodash-es";
 import { useDataStore, usePlatformStore, onPlatformChange } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
 import { isLogin, updateUserLikePlaylist } from "@/utils/auth";
+import { useLikedSongsSync } from "@/composables/useLikedSongsSync";
+import type { LikedSongsChange } from "@/utils/likedEvents";
 import { useListDetail } from "@/composables/List/useListDetail";
 import { useListSearch } from "@/composables/List/useListSearch";
 import { useListScroll } from "@/composables/List/useListScroll";
@@ -219,7 +221,7 @@ const getPlaylistDetail = async (
   clearSearch();
   if (!refresh) resetPlaylistData(getList);
   // 获取歌单内容
-  getPlaylistData(id, getList, refresh);
+  await getPlaylistData(id, getList, refresh);
 };
 
 // 重置歌单数据
@@ -235,37 +237,42 @@ const resetPlaylistData = (getList: boolean) => {
 const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) => {
   // 加载缓存
   loadLikedCache();
-  // 获取歌单详情
-  const { detail: cover, privileges } = await dispatchPlaylistDetail("netease", {
-    id,
-    withTracks: false,
-  });
-  // 检查是否仍然是当前请求的歌单
-  if (currentRequestId.value !== id) return;
-  setDetailData(cover);
-  // 不需要获取列表或无歌曲
-  if (!getList || detailData.value?.count === 0) {
-    setLoading(false);
-    return;
-  }
-  // 如果已登录且歌曲数量少于 800，直接加载所有歌曲
-  if (isLogin() === 1 && (detailData.value?.count as number) < 800) {
-    const ids: number[] = privileges ?? [];
-    const result = await songDetail(ids);
+  try {
+    // 获取歌单详情
+    const { detail: cover, privileges } = await dispatchPlaylistDetail("netease", {
+      id,
+      withTracks: false,
+    });
     // 检查是否仍然是当前请求的歌单
     if (currentRequestId.value !== id) return;
-    // 直接批量详情返回时也进行一次按 id 去重
-    setListData(uniqBy(formatSongsList(result.songs), "id"));
-  } else {
-    await getPlaylistAllSongs(id, detailData.value?.count || 0, refresh);
+    setDetailData(cover);
+    // 不需要获取列表或无歌曲
+    if (!getList || detailData.value?.count === 0) {
+      setLoading(false);
+      return;
+    }
+    // 如果已登录且歌曲数量少于 800，直接加载所有歌曲
+    if (isLogin() === 1 && (detailData.value?.count as number) < 800) {
+      const ids: number[] = privileges ?? [];
+      const result = await songDetail(ids);
+      // 检查是否仍然是当前请求的歌单
+      if (currentRequestId.value !== id) return;
+      // 直接批量详情返回时也进行一次按 id 去重
+      setListData(uniqBy(formatSongsList(result.songs), "id"));
+    } else {
+      await getPlaylistAllSongs(id, detailData.value?.count || 0, refresh);
+    }
+    // 检查是否仍然是当前请求的歌单
+    if (currentRequestId.value !== id) return;
+    // 更新我喜欢
+    if (detailData.value) {
+      dataStore.setLikeSongsList(detailData.value, listData.value);
+    }
+    setLoading(false);
+  } catch (error) {
+    console.error("获取我喜欢的音乐失败：", error);
+    setLoading(false);
   }
-  // 检查是否仍然是当前请求的歌单
-  if (currentRequestId.value !== id) return;
-  // 更新我喜欢
-  if (detailData.value) {
-    dataStore.setLikeSongsList(detailData.value, listData.value);
-  }
-  setLoading(false);
 };
 
 /**
@@ -336,6 +343,60 @@ const syncLikedState = (platform: ApiPlatform, tracks: SongType[]) => {
   if (platformStore.currentPlatform !== platform) return;
   platformStore.setLikedSongs(platform, tracks);
 };
+
+/**
+ * 把一次红心变更应用到本地列表（乐观更新）
+ *
+ * 红心写操作成功后立即生效：喜欢则把曲目补进列表，取消则从列表移除，
+ * 歌单计数同步增减。曲目按歌曲的逻辑 id 匹配，同一首歌的不同文件版本
+ * （不同内容哈希）共享同一个逻辑 id，跨版本也能正确命中。
+ * @param change 红心变更
+ */
+const applyLikedChange = (change: LikedSongsChange) => {
+  const id = Number(change.song.id);
+  if (!Number.isFinite(id)) return;
+  const current = listData.value;
+  const exists = current.some((track) => Number(track.id) === id);
+  if (change.liked) {
+    if (exists) return;
+    setListData([change.song, ...current]);
+  } else {
+    if (!exists) return;
+    setListData(current.filter((track) => Number(track.id) !== id));
+  }
+  // 歌单计数同步增减
+  const detail = detailData.value;
+  if (detail) {
+    setDetailData({
+      ...detail,
+      count: Math.max(0, (detail.count ?? 0) + (change.liked ? 1 : -1)),
+    });
+  }
+  // 红心状态集合：上游尚未反映变更时，重拉会把它覆盖成旧值，这里补回
+  if (change.platform !== "netease") {
+    platformStore.patchLikedSong(change.platform, id, change.liked);
+  }
+  // 网易云的本地缓存与列表同源，乐观更新后一并同步
+  if (change.platform === "netease" && detailData.value) {
+    void dataStore.setLikeSongsList(detailData.value, listData.value);
+  }
+};
+
+/**
+ * 红心变更后实时更新「我喜欢的音乐」
+ *
+ * 写入侧广播变更事件后，本视图立即做乐观更新，
+ * 再在后台有界重拉，直到上游读到的数据已反映该变更。
+ */
+const stopLikedSync = useLikedSongsSync({
+  platform: () => platformStore.currentPlatform,
+  applyChange: applyLikedChange,
+  currentTracks: () => listData.value,
+  reload: () =>
+    isPlatformSource.value
+      ? getPlatformLikedSongs(true)
+      : getPlaylistDetail(playlistId.value, { getList: true, refresh: true }),
+});
 
 // 加载缓存
 const loadLikedCache = () => {
@@ -482,6 +543,7 @@ const offPlatformChange = onPlatformChange(() => {
 onDeactivated(() => loadingMsgShow(false));
 onUnmounted(() => {
   offPlatformChange();
+  stopLikedSync();
   loadingMsgShow(false);
 });
 

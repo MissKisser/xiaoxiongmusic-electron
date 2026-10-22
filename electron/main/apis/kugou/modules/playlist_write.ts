@@ -23,6 +23,7 @@ import {
 } from "../core/cloud";
 import { getKgAppid, getKgClientver } from "../core/config";
 import { currentSalts } from "../core/crypto";
+import { extractEntryTitle } from "../core/song_title";
 import type { KGModule, KGParams } from "../core/types";
 
 /** 公开歌单信息接口（取收藏所需的创建者与原始歌单号） */
@@ -60,6 +61,10 @@ interface KgSongRow {
   filename?: string;
   album_id?: number | string;
   mixsongid?: number | string;
+  /** 歌名，形态为「歌手们 - 歌名.mp3」 */
+  name?: string;
+  /** 歌手名，形态为「歌手A / 歌手B」 */
+  singername?: string;
 }
 
 /** 公开歌单信息 */
@@ -288,6 +293,55 @@ const findByListId = (items: KgListItem[], listid: string): KgListItem | undefin
   items.find((item) => String(item.listid ?? "") === listid);
 
 /**
+ * 在歌单曲目中按歌曲逻辑 id 或内容哈希定位目标歌曲
+ *
+ * 定位口径按可靠性排序：
+ * 1. 歌曲逻辑 id（`mixsongid`，`album_audio_id` 口径）：同一首歌在酷狗有多个文件
+ *    版本（不同音质 / 不同来源），各版本共享同一个逻辑 id，只有内容哈希不同，
+ *    因此逻辑 id 是跨版本最可靠的判据；
+ * 2. 内容哈希（`hash`，大小写不敏感）：同一文件版本的精确匹配。
+ * @param items 歌单曲目
+ * @param song 待定位的写操作条目
+ * @param hash 待定位歌曲的内容哈希（大写）
+ * @returns 命中的曲目，未命中时返回 undefined
+ */
+const locateRowByKey = (
+  items: KgSongRow[],
+  song: Record<string, unknown>,
+  hash: string,
+): KgSongRow | undefined => {
+  const mixsongid = Number(song.mixsongid ?? 0);
+  if (mixsongid > 0) {
+    const hit = items.find((row) => Number(row.mixsongid ?? 0) === mixsongid);
+    if (hit) return hit;
+  }
+  return items.find((row) => String(row.hash ?? "").toUpperCase() === hash);
+};
+
+/**
+ * 在歌单曲目中按歌名与歌手定位目标歌曲
+ *
+ * 作为逻辑 id 与内容哈希都落空时的兜底：同一首歌在不同文件版本下的歌名与歌手一致。
+ * @param items 歌单曲目
+ * @param song 待定位的写操作条目
+ * @returns 命中的曲目，未命中时返回 undefined
+ */
+const locateRowByTitle = (
+  items: KgSongRow[],
+  song: Record<string, unknown>,
+): KgSongRow | undefined => {
+  const name = String(song.name ?? "").trim();
+  if (!name) return undefined;
+  const singer = String(song.singer ?? "").trim();
+  return items.find((row) => {
+    if (extractEntryTitle(row, { nameFields: ["name"] }) !== name) return false;
+    if (!singer) return true;
+    const rowSinger = String(row.singername ?? "").trim();
+    return !rowSinger || rowSinger === singer;
+  });
+};
+
+/**
  * 创建歌单
  * @param params.name - 歌单名
  */
@@ -457,7 +511,7 @@ export const playlist_delete: KGModule = async (params: KGParams) => {
  * 往歌单加歌 / 从歌单删歌
  * @param params.op - add | del
  * @param params.id - 歌单 listid，like 为 true 时可缺省
- * @param params.songs - 歌曲列表 [{ hash, name, album_id, mixsongid, fileid }]，hash 与 name 均必填
+ * @param params.songs - 歌曲列表 [{ hash, name, singer, album_id, mixsongid, fileid }]，hash 与 name 均必填
  * @param params.like - 为 true 时写入「我喜欢」歌单
  */
 export const playlist_tracks: KGModule = async (params: KGParams) => {
@@ -538,10 +592,10 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
     }
 
     const after = await waitListSongs(ctx, listid, (items) =>
-      hashes.every((hash) => items.some((row) => String(row.hash ?? "").toUpperCase() === hash)),
+      songs.every((song, index) => Boolean(locateRowByKey(items, song, hashes[index]))),
     );
-    const missing = hashes.filter(
-      (hash) => !after.items.some((row) => String(row.hash ?? "").toUpperCase() === hash),
+    const missing = songs.filter(
+      (song, index) => !locateRowByKey(after.items, song, hashes[index]),
     );
     if (missing.length > 0) {
       return { code: 502, message: `加歌后读回校验失败：缺少 ${missing.length} 首` };
@@ -550,33 +604,52 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
     return { code: 200, id: listid, changed: true, count: after.count, verified: true };
   }
 
-  // 删歌要按歌单里的 fileid 定位歌曲；上游读取有复制延迟，
-  // 读到旧快照时歌里还没有这首歌，这里重试等上游视图追上来
-  const hashesNeedingLookup = songs
-    .map((song, index) => ({ hash: hashes[index], fileid: Number(song.fileid ?? 0) }))
-    .filter((item) => !item.fileid)
-    .map((item) => item.hash);
+  // 删歌要按歌单里的 fileid 定位歌曲。
+  // 定位口径：歌曲逻辑 id（mixsongid）> 内容哈希（hash，大小写不敏感）> 歌名 + 歌手。
+  // 同一首歌在酷狗有多个文件版本，用户当年加入「我喜欢」时的文件与现在拿到的
+  // 文件内容哈希可能不同，只按哈希精确匹配会永远定位不到，
+  // 那种情况不是「读取延迟」，而是「版本不匹配」。
   const before = await waitListSongs(ctx, listid, (items) =>
-    hashesNeedingLookup.every((hash) => {
-      const hit = items.find((row) => String(row.hash ?? "").toUpperCase() === hash);
-      return Boolean(hit && hit.fileid);
+    songs.every((song, index) => {
+      if (Number(song.fileid ?? 0) > 0) return true;
+      return Boolean(locateRowByKey(items, song, hashes[index]));
     }),
   );
   const fileIds: number[] = [];
+  /** 实际定位到的歌单条目，用于删后按同一口径回查 */
+  const targeted: Array<{ mixsongid: number; hash: string }> = [];
+  const missing: string[] = [];
   for (const [index, song] of songs.entries()) {
     const fileid = Number(song.fileid ?? 0);
     if (fileid) {
       fileIds.push(fileid);
       continue;
     }
-    const hit = before.items.find((row) => String(row.hash ?? "").toUpperCase() === hashes[index]);
+    const hit =
+      locateRowByKey(before.items, song, hashes[index]) ?? locateRowByTitle(before.items, song);
     if (!hit || !hit.fileid) {
-      return {
-        code: 502,
-        message: `删歌失败：未能定位歌曲的 fileid（上游歌单曲目读取延迟），请重试：${hashes[index]}`,
-      };
+      missing.push(hashes[index]);
+      continue;
     }
     fileIds.push(Number(hit.fileid));
+    targeted.push({
+      mixsongid: Number(hit.mixsongid ?? 0),
+      hash: String(hit.hash ?? "").toUpperCase(),
+    });
+  }
+  if (missing.length > 0) {
+    // 区分两种失败原因：上游曲目尚未读取完整（重试可能成功）与歌单里确实没有这首歌
+    const incomplete = before.items.length < before.count;
+    if (incomplete) {
+      return {
+        code: 502,
+        message: `删歌失败：上游歌单曲目尚未读取完整（已读到 ${before.items.length}/${before.count} 首），请重试：${missing.join(", ")}`,
+      };
+    }
+    return {
+      code: 404,
+      message: `删歌失败：未在该歌单中找到该歌曲（已按歌曲 id、内容哈希、歌名匹配）：${missing.join(", ")}`,
+    };
   }
 
   const res = await sendGatewayRequest(
@@ -607,12 +680,18 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
     return { code: 502, message: `删歌失败：${err}` };
   }
 
+  // 删后按实际定位到的条目回查：跨版本删除时请求里的哈希本就不在歌单里，
+  // 拿请求哈希回查会误判成「已删除」
+  const isTargetPresent = (items: KgSongRow[], row: { mixsongid: number; hash: string }) =>
+    items.some(
+      (item) =>
+        (row.mixsongid > 0 && Number(item.mixsongid ?? 0) === row.mixsongid) ||
+        (!!row.hash && String(item.hash ?? "").toUpperCase() === row.hash),
+    );
   const after = await waitListSongs(ctx, listid, (items) =>
-    hashes.every((hash) => !items.some((row) => String(row.hash ?? "").toUpperCase() === hash)),
+    targeted.every((row) => !isTargetPresent(items, row)),
   );
-  const still = hashes.filter((hash) =>
-    after.items.some((row) => String(row.hash ?? "").toUpperCase() === hash),
-  );
+  const still = targeted.filter((row) => isTargetPresent(after.items, row));
   if (still.length > 0) {
     return { code: 502, message: `删歌后读回校验失败：仍有 ${still.length} 首` };
   }

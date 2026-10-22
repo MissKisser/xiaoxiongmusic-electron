@@ -40,6 +40,7 @@ import {
 import { likeSong as neteaseLikeSong } from "@/api/song";
 import { useDataStore } from "@/stores/data";
 import { usePlatformStore } from "@/stores/platform";
+import { notifyLikedSongsChanged } from "@/utils/likedEvents";
 import { type DispatchPlaylist } from "./dispatch";
 import { describeFailure } from "./errorText";
 import { platformRequest, platformRequestBody, platformWriteRequest } from "./http";
@@ -246,14 +247,24 @@ const toQqSongEntry = (song: SongType) => ({
  *
  * 酷狗加歌接口要求 `hash`（内容哈希）与 `name`（歌名）均非空，
  * 缺歌名会被服务端以 `error_code=20010` 拒绝。
+ *
+ * `mixsongid` 是歌曲的逻辑 id（`album_audio_id` 口径），同一首歌的不同文件版本
+ * （不同内容哈希）共享同一个逻辑 id，删歌时按它定位歌单里的条目最可靠；
+ * `singer` 是歌手名，作为内容哈希与逻辑 id 都匹配不上时的兜底判据。
  * @param song 歌曲
  * @returns 酷狗写操作条目
  */
 const toKgSongEntry = (song: SongType) => {
   const album = typeof song.album === "object" && song.album ? song.album : null;
+  const artists = Array.isArray(song.artists) ? song.artists : [];
+  const singer = artists
+    .map((artist) => artist?.name ?? "")
+    .filter(Boolean)
+    .join(" / ");
   return {
     hash: String(song.platformId ?? "").toUpperCase(),
     name: String(song.name ?? ""),
+    singer,
     album_id: Number(album?.id ?? 0),
     mixsongid: Number(song.id ?? 0),
   };
@@ -627,6 +638,9 @@ const readQqSongLikedState = async (song: SongType): Promise<boolean | null> => 
  * `dirId=201 / tid=<歌单号>`，而模块按普通歌单口径比对 `tid`），
  * 真实写入成功时模块仍会返回 502。故这里在模块返回失败时，
  * 用「我喜欢的总数变化 + 单曲收藏状态」读回确认实际效果。
+ *
+ * 写入确认生效后广播一次红心变更事件（`notifyLikedSongsChanged`），
+ * 展示「我喜欢的音乐」的视图据此实时更新，不必手动刷新。
  * @param platform 音源平台
  * @param song 歌曲
  * @param liked 是否喜欢
@@ -658,6 +672,7 @@ export const likeSong = async (
   if (result.ok) {
     patchLikedSongCache(platform, song, liked);
     await refreshPlatformPlaylists(platform);
+    notifyLikedSongsChanged({ platform, song, liked });
     return result;
   }
   // 模块返回失败：读回确认写入是否实际生效
@@ -678,6 +693,7 @@ export const likeSong = async (
   if (countChanged || stateMatched) {
     patchLikedSongCache(platform, song, liked);
     await refreshPlatformPlaylists(platform);
+    notifyLikedSongsChanged({ platform, song, liked });
     return { ok: true, message: undefined, data: result.data };
   }
   return result;

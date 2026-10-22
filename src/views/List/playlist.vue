@@ -135,6 +135,9 @@ import { renderIcon, copyData } from "@/utils/helper";
 import { isLogin, toLikePlaylist, updateUserLikePlaylist } from "@/utils/auth";
 import { useDataStore, useLocalStore, usePlatformStore } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
+import { uniqBy } from "lodash-es";
+import { useLikedSongsSync } from "@/composables/useLikedSongsSync";
+import type { LikedSongsChange } from "@/utils/likedEvents";
 import { useListDetail } from "@/composables/List/useListDetail";
 import { useListSearch } from "@/composables/List/useListSearch";
 import { useListScroll } from "@/composables/List/useListScroll";
@@ -504,6 +507,82 @@ const handlePlatformPlaylist = async (
   }
 };
 
+/**
+ * 重新读取平台「我喜欢的音乐」歌单的曲目
+ *
+ * 覆盖语义：每次都以本次读到的曲目为准，不与旧列表叠加。
+ * @param platform 音源平台
+ */
+const reloadPlatformLikedTracks = async (platform: ApiPlatform) => {
+  const pageSize = 300;
+  const tracks: SongType[] = [];
+  let detail: CoverType | null = null;
+  let count = 0;
+  let page = 1;
+  do {
+    const result = await dispatchPlaylistDetail(platform, {
+      id: platformPlaylistId.value,
+      dirId: platformDirId.value,
+      withTracks: true,
+      page,
+      pageSize,
+    });
+    detail = result.detail;
+    count = result.count;
+    tracks.push(...result.tracks);
+    page += 1;
+    if (result.tracks.length === 0 || tracks.length >= count) break;
+  } while (page <= 50);
+  setListData(uniqBy(tracks, "id"));
+  setDetailData(detail);
+};
+
+/**
+ * 把一次红心变更应用到本地列表（乐观更新）
+ *
+ * 只作用于平台「我喜欢的音乐」歌单：红心写操作成功后立即生效，
+ * 喜欢则把曲目补进列表，取消则从列表移除，歌单计数同步增减。
+ * 曲目按歌曲的逻辑 id 匹配，同一首歌的不同文件版本共享同一个逻辑 id。
+ * @param change 红心变更
+ */
+const applyLikedChange = (change: LikedSongsChange) => {
+  const id = Number(change.song.id);
+  if (!Number.isFinite(id)) return;
+  const current = listData.value;
+  const exists = current.some((track) => Number(track.id) === id);
+  if (change.liked) {
+    if (exists) return;
+    setListData([change.song, ...current]);
+  } else {
+    if (!exists) return;
+    setListData(current.filter((track) => Number(track.id) !== id));
+  }
+  const detail = detailData.value;
+  if (detail) {
+    setDetailData({
+      ...detail,
+      count: Math.max(0, (detail.count ?? 0) + (change.liked ? 1 : -1)),
+    });
+  }
+};
+
+/**
+ * 红心变更后实时更新平台「我喜欢的音乐」歌单
+ *
+ * 只在当前展示的正是平台「我喜欢的音乐」时生效，
+ * 其余歌单不受红心变更影响。
+ */
+const stopLikedSync = useLikedSongsSync({
+  platform: () => routePlatform.value ?? "netease",
+  shouldHandle: () => isPlatformLikedPlaylist.value,
+  applyChange: applyLikedChange,
+  currentTracks: () => listData.value,
+  reload: async () => {
+    if (!routePlatform.value || !isPlatformLikedPlaylist.value) return;
+    await reloadPlatformLikedTracks(routePlatform.value);
+  },
+});
+
 // 获取在线歌单
 const handleOnlinePlaylist = async (id: number, getList: boolean, refresh: boolean) => {
   // 1. 尝试读取缓存
@@ -797,7 +876,10 @@ onActivated(() => {
 });
 
 onDeactivated(() => loadingMsgShow(false));
-onUnmounted(() => loadingMsgShow(false));
+onUnmounted(() => {
+  stopLikedSync();
+  loadingMsgShow(false);
+});
 onMounted(() => {
   getPlaylistDetail(playlistId.value);
   void loadPlatformSubscribeState();

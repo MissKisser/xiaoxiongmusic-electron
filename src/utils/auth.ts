@@ -21,6 +21,7 @@ import { dailyRecommend } from "@/api/rec";
 import { isElectron } from "./env";
 import { likePlaylist, playlistTracks } from "@/api/playlist";
 import { likeSong as manageLikeSong } from "@/api/platform/manage";
+import { notifyLikedSongsChanged } from "./likedEvents";
 import { likeArtist } from "@/api/artist";
 import { likeAlbum } from "@/api/album";
 import { radioSub } from "@/api/radio";
@@ -225,9 +226,13 @@ export const toLikeSong: DebouncedFunc<(song: SongType, like: boolean) => Promis
       if (like && !exists) {
         likeList.push(id);
         window.$message.success("已添加到我喜欢的音乐");
+        // 广播红心变更，「我喜欢的音乐」视图据此实时更新
+        notifyLikedSongsChanged({ platform: "netease", song, liked: true });
       } else if (!like && exists) {
         likeList.splice(likeList.indexOf(id), 1);
         window.$message.success("已取消喜欢");
+        // 广播红心变更，「我喜欢的音乐」视图据此实时更新
+        notifyLikedSongsChanged({ platform: "netease", song, liked: false });
       } else if (like && exists) {
         window.$message.info("我喜欢的音乐中已存在该歌曲");
       }
