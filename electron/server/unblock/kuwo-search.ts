@@ -10,9 +10,24 @@
  * 四条子请求任意一条失败都可能被 `Promise.allSettled` 静默吞掉，
  * 表现为「同一首歌两次检索的候选池大小不一致」甚至偶发空池；
  * 因此这里记录失败的子请求，并在整池为空时整体重试一次。
+ *
+ * 波点与酷我共用这一个候选池（两源实测候选池 100% 相同，差异只在取链环节），
+ * 因此检索结果按短时效缓存复用：换源链里两个源连着尝试时，
+ * 只有第一个源发起检索，第二个源直接复用缓存 —— 一次检索、两条取链。
  */
 import axios from "axios";
+import { serverLog } from "../../main/logger";
 import type { MatchCandidate } from "./match";
+import { TTLCache } from "./resilience";
+
+/** 候选池缓存时长（毫秒）：够覆盖同一首歌的连续换源尝试 */
+const POOL_CACHE_TTL_MS = 60000;
+
+/** 候选池缓存条目上限 */
+const POOL_CACHE_MAX_ENTRIES = 32;
+
+/** 候选池缓存：键为「歌名 + 歌手」，值为去重合并后的候选列表 */
+const poolCache = new TTLCache<KuwoCandidate[]>(POOL_CACHE_TTL_MS, POOL_CACHE_MAX_ENTRIES);
 
 /** 候选歌曲（酷我 rid 为其唯一标识） */
 export type KuwoCandidate = MatchCandidate & {
@@ -110,6 +125,9 @@ const runSearch = async (
  *
  * 子请求失败会被记录，整池为空时整体重试一次；
  * 重试后仍为空才判定为「该源没有候选」。
+ *
+ * 检索结果按短时效缓存复用：波点与酷我共用同一候选池，
+ * 换源链里第二个源命中缓存时不再重复发起四条检索子请求。
  * @param title 歌名
  * @param artist 歌手，可为空
  * @param onError 子请求失败时的回调，用于记录日志
@@ -120,9 +138,21 @@ export const searchKuwoCandidates = async (
   artist: string,
   onError?: (message: string) => void,
 ): Promise<KuwoCandidate[]> => {
+  // 键用 JSON 数组序列化，避免歌名与歌手的分界被同名内容撞掉
+  const cacheKey = JSON.stringify([title, artist]);
+  const cached = poolCache.get(cacheKey);
+  if (cached) {
+    serverLog.log(`♻️ 酷我系候选池命中缓存，跳过重复检索（${title}）`);
+    return cached;
+  }
   const keywords = [artist ? `${title} ${artist}` : "", title].filter(Boolean);
   const merged = await runSearch(keywords, onError);
-  if (merged.length) return merged;
+  if (merged.length) {
+    poolCache.set(cacheKey, merged);
+    return merged;
+  }
   onError?.("酷我检索整池为空，重试一次");
-  return runSearch(keywords, onError);
+  const retried = await runSearch(keywords, onError);
+  if (retried.length) poolCache.set(cacheKey, retried);
+  return retried;
 };

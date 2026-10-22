@@ -8,7 +8,9 @@
  * 3. 候选按「歌名 + 歌手 + 时长」三重校验排序，不再取第一条命中；
  * 4. 详情页 GET 与播放地址 POST 使用同一会话 cookie —— play_id 可能与会话绑定，
  *    用随机 cookie 取播放地址会静默失败（失败路径补 warn 日志，不再无声 404）；
- * 5. 详情页字段为空时保留搜索页字段，不用空值覆盖。
+ * 5. 详情页字段为空时保留搜索页字段，不用空值覆盖；
+ * 6. 检索层加熔断：整站故障时连续失败累计到阈值即熔断，熔断期内零请求，
+ *    避免对死源逐首空等。
  */
 import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
@@ -28,9 +30,31 @@ import {
 } from "./match";
 import { probeContentLength } from "./audio-length";
 import { sanitizeUrl } from "./sanitize";
+import { CircuitBreaker, isUpstreamFault } from "./resilience";
 
 /** 歌曲宝直链码率（kbps） */
 const GEQUBAO_BITRATE_KBPS = 128;
+
+/** 检索层连续失败多少次后熔断 */
+const SEARCH_FAILURE_THRESHOLD = 3;
+
+/** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
+const SEARCH_BREAK_DURATION_MS = 10 * 60 * 1000;
+
+/**
+ * 歌曲宝检索层熔断器
+ *
+ * 歌曲宝整站故障时（实测全站 520，成功贡献为 0）逐首重试只会白等，
+ * 这里用熔断把「反复打一个死源」换成「熔断期内零请求」，
+ * 熔断期满放一次探测请求，成功即恢复、失败则继续熔断。
+ * 状态只在内存中，重启即重置；不写用户配置、不产生界面提示，只进日志。
+ */
+const searchBreaker = new CircuitBreaker({
+  name: "歌曲宝检索",
+  failureThreshold: SEARCH_FAILURE_THRESHOLD,
+  openDurationMs: SEARCH_BREAK_DURATION_MS,
+  onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
+});
 
 /** 单次解锁最多进入详情页的候选数（歌名与歌手都已命中的） */
 const DETAIL_FETCH_LIMIT = 5;
@@ -128,6 +152,9 @@ const parseSearchPage = (html: string): GequbaoCandidate[] => {
  *
  * 「歌名 + 歌手」与「裸歌名」两组关键词分别检索后合并去重：
  * 站外源的曲目标题常把歌手写进歌名字段，只按「歌名 + 歌手」检索会漏掉这类候选。
+ *
+ * 检索层故障（5xx / 超时 / 连接失败）累计到阈值即熔断该源，
+ * 熔断期内直接返回空候选，不发起任何请求。
  * @param title 歌名
  * @param artist 歌手，可为空
  * @returns 候选列表与「上游是否完全不可用」标记
@@ -136,10 +163,19 @@ const searchCandidates = async (
   title: string,
   artist: string,
 ): Promise<{ candidates: GequbaoCandidate[]; upstreamFailed: boolean }> => {
+  if (!searchBreaker.canRequest()) {
+    serverLog.warn(
+      `🔌 歌曲宝检索处于熔断状态，跳过本次检索（剩余 ${Math.ceil(
+        searchBreaker.remainingOpenMs() / 1000,
+      )} 秒）`,
+    );
+    return { candidates: [], upstreamFailed: true };
+  }
   const keywords = artist ? [`${title} ${artist}`, title] : [title];
   const merged: GequbaoCandidate[] = [];
   const seen = new Set<string>();
   let failed = 0;
+  let fault = false;
   for (const keyword of keywords) {
     try {
       const response = await axios.get(`${SITE_URL}/s/${encodeURIComponent(keyword)}`, {
@@ -157,10 +193,17 @@ const searchCandidates = async (
       }
     } catch (error) {
       failed += 1;
+      if (isUpstreamFault(error)) fault = true;
       serverLog.warn(`⚠️ Gequbao 检索失败（关键词：${keyword}）：${String(error)}`);
     }
   }
-  return { candidates: merged, upstreamFailed: failed === keywords.length };
+  const upstreamFailed = failed === keywords.length;
+  // 整轮检索都因上游故障（5xx / 超时 / 连接失败）而失败时计入熔断计数；
+  // 只要上游还有响应（拿到了候选，或响应内容不可解析）就认为源仍可达，清零失败计数。
+  // 两条分支必须二选一执行：半开状态下未记账会让探测请求一直占位，源被永久挡住。
+  if (upstreamFailed && fault) searchBreaker.recordFailure();
+  else searchBreaker.recordSuccess();
+  return { candidates: merged, upstreamFailed };
 };
 
 /**
