@@ -40,6 +40,9 @@ const modules: NativeModule[] = [
   {
     name: "tools",
   },
+  {
+    name: "taskbar-lyric",
+  },
   // 有人抱怨编译 wasm 总是有问题，暂时注释掉
   // {
   //   name: "ferrous-opencc-wasm",
