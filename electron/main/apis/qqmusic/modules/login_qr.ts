@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { qmRequest, mergeQQMusicCookies } from "../core/request";
+import { qmRequest, replaceQQMusicCookies } from "../core/request";
 import {
   credentialToSession,
   getCredentialMusicId,
@@ -216,7 +216,8 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
       const uinStr = getCredentialMusicId(wxLoginData);
       if (!uinStr || !wxLoginData.musickey) throw new Error("微信登录响应缺少有效凭据");
       const savedCookies = credentialToSession(wxLoginData, 1);
-      mergeQQMusicCookies(savedCookies);
+      // 换号登录：整体替换会话，旧账号的凭据与缓存条目一并丢弃
+      replaceQQMusicCookies(savedCookies);
       coreLog.info(`[qm-login] 微信扫码登录成功 (uin: ${uinStr})`);
 
       return {
@@ -372,7 +373,8 @@ export const login_qr_check: QMModule = async (params: QMParams) => {
       coreLog.info(`[qm-login] 已保留 QQ 互联 cookie：${Object.keys(qqConnectCookies).join(", ")}`);
     }
 
-    mergeQQMusicCookies({ ...savedCookies, ...qqConnectCookies });
+    // 换号登录：整体替换会话，旧账号的凭据与缓存条目一并丢弃
+    replaceQQMusicCookies({ ...savedCookies, ...qqConnectCookies });
     coreLog.info(`[qm-login] QQ 扫码登录成功 (uin: ${uinStr})`);
 
     return {

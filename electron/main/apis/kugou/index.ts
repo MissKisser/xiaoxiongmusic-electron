@@ -4,10 +4,18 @@
  * 统一入口：callKugou(name, params)
  */
 
-import { createHash } from "node:crypto";
 import { modules } from "./modules";
 import type { KGParams } from "./core/types";
 import { getSessionCookies, saveSessionCookies } from "../../database/PlatformSessionDB";
+import {
+  buildCacheKey,
+  cacheGet,
+  cacheSet,
+  clearCache,
+  resolveAccountId,
+  syncAccountScope,
+} from "./core/cache";
+import { coreLog } from "../../logger";
 
 export const getKugouSession = (): Record<string, string> => getSessionCookies("kugou");
 
@@ -22,11 +30,12 @@ export const clearKugouSession = (): void => {
     ...(session.dfid ? { dfid: session.dfid } : {}),
   };
   saveSessionCookies("kugou", device);
+  // 登出后旧账号的缓存条目作废，避免重新登录后读到上一个账号的数据
+  clearCache();
 };
 
 /** 2 分钟响应缓存 */
 const DEFAULT_TTL = 2 * 60 * 1000;
-const MAX_ENTRIES = 200;
 
 /**
  * 不缓存的模块
@@ -53,41 +62,8 @@ const NON_CACHEABLE = new Set([
   "songfm",
 ]);
 
-interface CacheEntry {
-  value: unknown;
-  expireAt: number;
-}
-
-const cache = new Map<string, CacheEntry>();
-
-const hashParams = (params: unknown): string =>
-  createHash("md5")
-    .update(JSON.stringify(params ?? {}))
-    .digest("hex")
-    .slice(0, 8);
-
-const cacheGet = (key: string): unknown => {
-  const hit = cache.get(key);
-  if (!hit) return undefined;
-  if (hit.expireAt <= Date.now()) {
-    cache.delete(key);
-    return undefined;
-  }
-  cache.delete(key);
-  cache.set(key, hit);
-  return hit.value;
-};
-
-const cacheSet = (key: string, value: unknown, ttl = DEFAULT_TTL): void => {
-  if (cache.size >= MAX_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
-  cache.set(key, { value, expireAt: Date.now() + ttl });
-};
-
 export const clearKugouCache = (): void => {
-  cache.clear();
+  clearCache();
 };
 
 /** 可用模块名列表 */
@@ -104,6 +80,25 @@ const isEmptyResult = (value: unknown): boolean => {
 };
 
 /**
+ * 构造账号维度的缓存键
+ *
+ * 账号标识取当前登录账号的 userid（未登录为固定匿名标识）：
+ * 换号后旧账号的条目自然失配，不会把上一个账号的数据返回给新账号；
+ * 账号变化时顺带清空旧条目，避免旧数据在内存里长期驻留。
+ * @param name 模块名
+ * @param params 业务参数
+ * @returns 缓存键
+ */
+const buildScopedCacheKey = (name: string, params: unknown): string => {
+  const accountId = resolveAccountId(getKugouSession());
+  const { changed } = syncAccountScope(accountId);
+  if (changed) {
+    coreLog.info(`[kg-cache] 账号已切换，当前账号维度：${accountId}，缓存已清空`);
+  }
+  return buildCacheKey(accountId, name, params);
+};
+
+/**
  * 调用任意 KG API
  * @param name - 模块名称（search / lyric）
  * @param params - 业务参数
@@ -115,11 +110,11 @@ export const callKugou = async <T = unknown>(name: string, params: KGParams = {}
 
   if (NON_CACHEABLE.has(name)) return (await fn(params)) as T;
 
-  const key = `${name}|${hashParams(params)}`;
+  const key = buildScopedCacheKey(name, params);
   const hit = cacheGet(key);
   if (hit !== undefined) return hit as T;
 
   const value = (await fn(params)) as T;
-  if (!isEmptyResult(value)) cacheSet(key, value);
+  if (!isEmptyResult(value)) cacheSet(key, value, DEFAULT_TTL);
   return value;
 };

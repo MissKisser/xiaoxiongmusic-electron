@@ -9,13 +9,15 @@
  */
 
 import { QM_API_URL, QM_HEADERS, SESSION_TTL, getCommonParams } from "./config";
-import {
-  clearSessionCookies,
-  getSessionCookies,
-  saveSessionCookies,
-} from "../../../database/PlatformSessionDB";
 import { coreLog } from "../../../logger";
 import { sessionToCookieHeader } from "./credential";
+import { clearCache, resolveAccountId } from "./cache";
+import {
+  getQQMusicSession,
+  mergeQQMusicSession,
+  resetQQMusicSession,
+  setQQMusicSession,
+} from "./session";
 
 /** Session 字段（可能缺失则下次请求会自动补拿） */
 interface SessionCache {
@@ -27,7 +29,6 @@ interface SessionCache {
 
 let session: SessionCache = { expireAt: 0 };
 let initPromise: Promise<void> | null = null;
-let userCookies: Record<string, string> | null = null;
 let sessionGeneration = 0;
 
 /** 使当前客户端会话失效，避免账号变化后继续复用旧会话 */
@@ -37,26 +38,38 @@ const invalidateSession = (): void => {
 };
 
 /** 读取内存或数据库中的 QM cookies */
-export const getQQMusicCookies = (): Record<string, string> => {
-  if (userCookies !== null) return userCookies;
-  userCookies = getSessionCookies("qqmusic");
-  return userCookies;
-};
+export const getQQMusicCookies = (): Record<string, string> => getQQMusicSession();
 
 /** 更新 QM cookies 并落库 */
 export const mergeQQMusicCookies = (cookies: Record<string, string>): void => {
-  const current = getQQMusicCookies();
-  userCookies = { ...current, ...cookies };
-  saveSessionCookies("qqmusic", userCookies);
+  const previousAccountId = resolveAccountId(getQQMusicCookies());
+  const merged = mergeQQMusicSession(cookies);
   invalidateSession();
-  coreLog.info(`[qm-cookie] 已保存 Cookie (${Object.keys(userCookies).length} 个字段)`);
+  // 换号（账号标识变化）时丢弃旧账号的缓存条目
+  if (resolveAccountId(merged) !== previousAccountId) clearCache();
+  coreLog.info(`[qm-cookie] 已保存 Cookie (${Object.keys(merged).length} 个字段)`);
+};
+
+/**
+ * 用新凭据整体替换当前 QM 会话（换号登录）
+ *
+ * 旧账号的会话字段（互联 cookie、微信态凭据等）一并丢弃，
+ * 避免出现「半旧半新」的会话态；替换后旧账号的缓存条目同时作废。
+ * @param cookies 新账号的会话字段
+ */
+export const replaceQQMusicCookies = (cookies: Record<string, string>): void => {
+  resetQQMusicSession();
+  setQQMusicSession(cookies);
+  invalidateSession();
+  clearCache();
+  coreLog.info(`[qm-cookie] 已切换为新账号会话 (${Object.keys(cookies).length} 个字段)`);
 };
 
 /** 清空 QM cookies 登录态 */
 export const clearQQMusicCookies = (): void => {
-  userCookies = {};
-  clearSessionCookies("qqmusic");
+  resetQQMusicSession();
   invalidateSession();
+  clearCache();
   coreLog.info("[qm-cookie] 已从数据库中清空 QM Session");
 };
 

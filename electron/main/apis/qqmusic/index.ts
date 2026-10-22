@@ -9,8 +9,7 @@
  * 与网易云的 ncm-api 体系完全独立，不共用任何调用链。
  */
 
-import { createHash } from "node:crypto";
-import { clearQQMusicCookies, mergeQQMusicCookies } from "./core/request";
+import { clearQQMusicCookies, mergeQQMusicCookies, replaceQQMusicCookies } from "./core/request";
 import { login_qr_check, login_qr_key } from "./modules/login_qr";
 import user_detail from "./modules/user_detail";
 import {
@@ -41,19 +40,21 @@ import { songfm } from "./modules/songfm";
 import { album } from "./modules/album";
 import { artist } from "./modules/artist";
 import type { QMParams } from "./core/types";
+import {
+  buildCacheKey,
+  cacheGet,
+  cacheSet,
+  clearCache,
+  resolveAccountId,
+  syncAccountScope,
+} from "./core/cache";
+import { getQQMusicSession } from "./core/session";
+import { coreLog } from "../../logger";
 
-export { clearQQMusicCookies, mergeQQMusicCookies };
+export { clearQQMusicCookies, mergeQQMusicCookies, replaceQQMusicCookies };
 
 /** 2 分钟响应缓存 */
 const DEFAULT_TTL = 2 * 60 * 1000;
-const MAX_ENTRIES = 200;
-
-interface CacheEntry {
-  value: unknown;
-  expireAt: number;
-}
-
-const cache = new Map<string, CacheEntry>();
 
 /** 不缓存的实时接口（含全部登录态与写操作接口） */
 const NON_CACHEABLE: ReadonlySet<string> = new Set([
@@ -110,34 +111,27 @@ const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
   artist,
 };
 
-const hashParams = (params: unknown): string =>
-  createHash("md5")
-    .update(JSON.stringify(params ?? {}))
-    .digest("hex")
-    .slice(0, 8);
-
-const cacheGet = (key: string): unknown => {
-  const hit = cache.get(key);
-  if (!hit) return undefined;
-  if (hit.expireAt <= Date.now()) {
-    cache.delete(key);
-    return undefined;
-  }
-  cache.delete(key);
-  cache.set(key, hit);
-  return hit.value;
-};
-
-const cacheSet = (key: string, value: unknown, ttl = DEFAULT_TTL): void => {
-  if (cache.size >= MAX_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
-  cache.set(key, { value, expireAt: Date.now() + ttl });
-};
-
 export const clearQQMusicCache = (): void => {
-  cache.clear();
+  clearCache();
+};
+
+/**
+ * 构造账号维度的缓存键
+ *
+ * 账号标识取当前登录账号的 uin（未登录为固定匿名标识）：
+ * 换号后旧账号的条目自然失配，不会把上一个账号的数据返回给新账号；
+ * 账号变化时顺带清空旧条目，避免旧数据在内存里长期驻留。
+ * @param name 模块名
+ * @param params 业务参数
+ * @returns 缓存键
+ */
+const buildScopedCacheKey = (name: string, params: unknown): string => {
+  const accountId = resolveAccountId(getQQMusicSession());
+  const { changed } = syncAccountScope(accountId);
+  if (changed) {
+    coreLog.info(`[qm-cache] 账号已切换，当前账号维度：${accountId}，缓存已清空`);
+  }
+  return buildCacheKey(accountId, name, params);
 };
 
 /**
@@ -152,12 +146,12 @@ export const callQQMusic = async (name: string, params: QMParams = {}): Promise<
 
   if (NON_CACHEABLE.has(name)) return fn(params);
 
-  const key = `${name}|${hashParams(params)}`;
+  const key = buildScopedCacheKey(name, params);
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
   const value = await fn(params);
-  cacheSet(key, value);
+  cacheSet(key, value, DEFAULT_TTL);
   return value;
 };
 

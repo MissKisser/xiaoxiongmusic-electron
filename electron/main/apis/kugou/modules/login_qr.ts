@@ -2,6 +2,7 @@ import { getKgAppid, getKgClientver } from "../core/config";
 import { getDeviceMid, signatureWebParams } from "../core/crypto";
 import type { KGModule, KGParams } from "../core/types";
 import { getSessionCookies, saveSessionCookies } from "../../../database/PlatformSessionDB";
+import { clearCache } from "../core/cache";
 
 const BASE_URL = "https://login-user.kugou.com";
 const SRC_APPID = 2919;
@@ -58,8 +59,12 @@ export const loginQrCheck: KGModule = async (params: KGParams) => {
   const avatarUrl =
     data.userpic ?? data.user_pic ?? data.avatar ?? data.avatar_url ?? data.pic ?? data.user_img;
   if (Number(data.status) === 4) {
+    const previous = getSessionCookies("kugou");
+    // 换号登录：只保留设备指纹，账号相关字段整体替换，
+    // 避免旧账号的会话字段残留（同时作废旧账号的缓存条目）
     saveSessionCookies("kugou", {
-      ...getSessionCookies("kugou"),
+      ...(previous.guid ? { guid: previous.guid } : {}),
+      ...(previous.dfid ? { dfid: previous.dfid } : {}),
       token: String(data.token ?? ""),
       userid: String(data.userid ?? ""),
       vip_token: String(data.vip_token ?? ""),
@@ -67,6 +72,7 @@ export const loginQrCheck: KGModule = async (params: KGParams) => {
       nickname: String(nickname ?? `KG ${data.userid ?? ""}`),
       avatar: String(avatarUrl ?? "").replace(/^http:\/\//, "https://"),
     });
+    clearCache();
   }
   return {
     code: 200,
