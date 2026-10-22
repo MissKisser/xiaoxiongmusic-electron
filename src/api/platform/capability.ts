@@ -86,6 +86,15 @@ export interface PlatformTab {
 }
 
 /**
+ * 第三方平台歌单分组的路由参数
+ *
+ * QQ 音乐与酷狗把「我创建的歌单」与「我收藏的歌单」分成两套目录语义，
+ * 收藏页用该参数区分当前展示的分组，
+ * 账号信息区的统计入口按同一口径跳到对应分组。
+ */
+export const PLATFORM_PLAYLIST_TYPE_QUERY = ["owned", "favorites"] as const;
+
+/**
  * 各平台在发现页的子页可见性
  *
  * 标签页可见性的唯一真源：逐平台列出要展示的子页，

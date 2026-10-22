@@ -1,7 +1,7 @@
 <template>
   <div class="like-type">
     <!-- 分类 -->
-    <n-flex v-if="!isPlatformSource" class="type">
+    <n-flex class="type">
       <n-tag
         v-for="(item, index) in plTypeName"
         :key="index"
@@ -22,7 +22,10 @@
 <script setup lang="ts">
 import type { CoverType } from "@/types/main";
 import { onPlatformChange, useDataStore, usePlatformStore } from "@/stores";
+import { PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
 
+const route = useRoute();
+const router = useRouter();
 const dataStore = useDataStore();
 const platformStore = usePlatformStore();
 
@@ -36,11 +39,25 @@ const loading = ref<boolean>(true);
 const plTypeChoose = ref(0);
 const plTypeName = ["我创建的", "我收藏的"];
 
+/**
+ * 第三方平台的歌单分组（由路由参数决定）
+ *
+ * 平台把「我创建的歌单」与「我收藏的歌单」分成两套目录，
+ * 分组写进路由参数，外部入口（账号信息区的统计）可直达对应分组。
+ */
+const platformTypeIndex = computed<number>(() => {
+  const type = String(route.query.type ?? "");
+  const index = PLATFORM_PLAYLIST_TYPE_QUERY.findIndex((item) => item === type);
+  return index >= 0 ? index : 0;
+});
+
 // 歌单列表内容
 const listData = computed<CoverType[]>(() => {
-  // 第三方平台：展示当前平台收藏（订阅）的歌单
+  // 第三方平台：平台把自建与收藏分成两套目录，按当前分组取数
   if (isPlatformSource.value) {
-    return platformStore.playlists.favorites.map((item) => ({
+    const list =
+      plTypeChoose.value === 0 ? platformStore.playlists.owned : platformStore.playlists.favorites;
+    return list.map((item) => ({
       id: item.id,
       name: item.name,
       cover: item.cover,
@@ -71,7 +88,25 @@ const listData = computed<CoverType[]>(() => {
 });
 
 // 更换歌单类型
-const changeType = (index: number) => (plTypeChoose.value = index);
+const changeType = (index: number) => {
+  plTypeChoose.value = index;
+  // 第三方平台把分组写回路由参数，外部入口可直达同一分组
+  if (!isPlatformSource.value) return;
+  router.replace({
+    name: "like-playlists",
+    query: { ...route.query, type: PLATFORM_PLAYLIST_TYPE_QUERY[index] },
+  });
+};
+
+// 路由参数变化时同步分组
+watch(
+  () => route.query.type,
+  () => {
+    if (!isPlatformSource.value) return;
+    plTypeChoose.value = platformTypeIndex.value;
+  },
+  { immediate: true },
+);
 
 // 平台切换：重新拉取当前平台的收藏歌单
 const stopPlatformWatch = onPlatformChange(() => {

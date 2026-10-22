@@ -7,7 +7,7 @@
           v-for="(item, index) in likeData"
           :key="index"
           class="item"
-          @click="router.push({ name: item.name })"
+          @click="router.push({ name: item.name, query: item.query })"
         >
           <SvgIcon :name="item.icon" :depth="3" />
           <n-number-animation :from="0" :to="item.length" />
@@ -42,7 +42,7 @@
 <script setup lang="ts">
 import { useMobile } from "@/composables/useMobile";
 import { onPlatformChange, useDataStore, usePlatformStore, useSettingStore } from "@/stores";
-import { LIKE_TABS } from "@/api/platform/capability";
+import { LIKE_TABS, PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
 
 const router = useRouter();
 const dataStore = useDataStore();
@@ -50,6 +50,18 @@ const platformStore = usePlatformStore();
 const settingStore = useSettingStore();
 
 const { isSmall } = useMobile();
+
+/** 收藏页统计条目 */
+interface LikeDataItem {
+  /** 图标名 */
+  icon: string;
+  /** 跳转路由名 */
+  name: string;
+  /** 数量 */
+  length: number;
+  /** 跳转时附带的查询参数 */
+  query?: Record<string, string>;
+}
 
 const likeType = ref<string>((router.currentRoute.value?.name as string) || "like-playlists");
 
@@ -63,14 +75,21 @@ const showStatus = computed<boolean>(() => isPlatformSource.value || dataStore.l
 const visibleTabs = computed(() => LIKE_TABS[platformStore.currentPlatform] ?? []);
 
 // 喜欢数据
-const likeData = computed(() => {
-  // 第三方平台：只有「收藏的歌单」有数据源，其余子页隐藏
+const likeData = computed<LikeDataItem[]>(() => {
+  // 第三方平台：平台把自建与收藏分成两套目录，两组各显示自己的条目数
   if (isPlatformSource.value) {
     return [
       {
-        icon: "MusicList",
+        icon: "PlaylistAdd",
+        name: "like-playlists",
+        length: platformStore.playlists.owned.length,
+        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[0] },
+      },
+      {
+        icon: "PlaylistAddCheck",
         name: "like-playlists",
         length: platformStore.playlists.favorites.length,
+        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[1] },
       },
     ];
   }

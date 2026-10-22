@@ -98,12 +98,12 @@
       </n-flex>
       <n-divider />
       <!-- 喜欢数量 -->
-      <div v-if="dataStore.loginType !== 'uid'" class="like-num">
+      <div v-if="showLikeNum" class="like-num">
         <div
           v-for="(item, index) in userLikeData"
           :key="index"
           class="num-item"
-          @click="router.push({ name: item.name })"
+          @click="router.push({ name: item.name, query: item.query })"
         >
           <n-number-animation :from="0" :to="item.value" />
           <n-text :depth="3">{{ item.label }}</n-text>
@@ -129,6 +129,7 @@
 import { useDataStore, usePlatformStore, onPlatformChange, PLATFORM_META } from "@/stores";
 import { openUserLogin, openPlatformLogin } from "@/utils/modal";
 import { getLoginState } from "@/api/login";
+import { PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
 import type { ApiPlatform } from "@/types/shared";
 import {
   toLogout,
@@ -153,6 +154,8 @@ interface UserLikeItem {
   name: string;
   /** 数量 */
   value: number;
+  /** 跳转时附带的查询参数 */
+  query?: Record<string, string>;
 }
 
 // 用户菜单展示
@@ -268,14 +271,22 @@ const handlePlatform = (item: (typeof platformList.value)[number]) => {
 
 // 用户喜欢数据
 const userLikeData = computed<UserLikeItem[]>(() => {
-  // 第三方平台：只有「收藏的歌单」与「我喜欢的音乐」有数据源，
+  // 第三方平台：平台把「我创建的歌单」与「我收藏的歌单」分成两套目录语义，
+  // 两组各按自己的条目数展示，与侧边栏分组、收藏页分组同源；
   // 专辑 / 歌手子页已隐藏，故不展示（没有的能力不显示 0）
   if (platformStore.currentPlatform !== "netease") {
     const items: UserLikeItem[] = [
       {
-        label: "歌单",
+        label: "创建",
+        name: "like-playlists",
+        value: platformStore.playlists.owned.length,
+        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[0] },
+      },
+      {
+        label: "收藏",
         name: "like-playlists",
         value: platformStore.playlists.favorites.length,
+        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[1] },
       },
     ];
     const liked = platformStore.playlists.owned.find((item) => item.isLiked);
@@ -306,6 +317,16 @@ const userLikeData = computed<UserLikeItem[]>(() => {
     },
   ];
 });
+
+/**
+ * 是否展示统计区
+ *
+ * 网易云的 UID 登录模式拿不到用户数据，故不展示；
+ * 第三方平台的统计与网易云登录方式无关，始终展示。
+ */
+const showLikeNum = computed<boolean>(
+  () => platformStore.currentPlatform !== "netease" || dataStore.loginType !== "uid",
+);
 
 // 检查登录状态
 const checkLoginStatus = async () => {

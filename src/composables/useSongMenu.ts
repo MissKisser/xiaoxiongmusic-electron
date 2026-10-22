@@ -183,11 +183,12 @@ export const useSongMenu = () => {
   );
 
   // 当前平台歌单是否为自己创建（可写）
+  // 系统「我喜欢的音乐」是只读目录，改用平台的红心机制增删歌曲
   const isPlatformOwnedPlaylist = computed<boolean>(() => {
     if (!isPlatformPlaylistPage.value) return false;
     const id = routePlaylistId.value;
     return platformStore.playlists.owned.some(
-      (playlist) => String(playlist.platformId ?? playlist.id) === id,
+      (playlist) => String(playlist.platformId ?? playlist.id) === id && playlist.isLiked !== true,
     );
   });
 

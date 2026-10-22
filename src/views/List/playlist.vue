@@ -56,7 +56,14 @@
           </template>
           编辑歌单
         </n-button>
-        <n-button v-else :focusable="false" strong secondary round @click="togglePlatformSubscribe">
+        <n-button
+          v-else-if="!isPlatformLikedPlaylist"
+          :focusable="false"
+          strong
+          secondary
+          round
+          @click="togglePlatformSubscribe"
+        >
           <template #icon>
             <SvgIcon :name="isPlatformSubscribed ? 'Favorite' : 'FavoriteBorder'" />
           </template>
@@ -224,7 +231,16 @@ const isPlatformOwnedPlaylist = computed<boolean>(() => {
   if (!isPlatformSource.value || !routePlatform.value) return false;
   const id = platformPlaylistId.value;
   return platformStore.playlists.owned.some(
-    (playlist) => String(playlist.platformId ?? playlist.id) === id,
+    (playlist) => String(playlist.platformId ?? playlist.id) === id && playlist.isLiked !== true,
+  );
+});
+
+// 平台歌单是否为系统「我喜欢的音乐」（只读，不可编辑删除）
+const isPlatformLikedPlaylist = computed<boolean>(() => {
+  if (!isPlatformSource.value || !routePlatform.value) return false;
+  const id = platformPlaylistId.value;
+  return platformStore.playlists.owned.some(
+    (playlist) => String(playlist.platformId ?? playlist.id) === id && playlist.isLiked === true,
   );
 });
 
@@ -364,11 +380,20 @@ const moreOptions = computed<DropdownOption[]>(() => {
   ];
 });
 
+// 平台歌单定位信息
+interface PlatformPlaylistTarget {
+  /** 平台歌单标识 */
+  id?: string;
+  /** 自建歌单目录号 */
+  dirId?: number;
+}
+
 // 获取歌单基础信息
 const getPlaylistDetail = async (
   id: number,
   options: { getList: boolean; refresh: boolean } = { getList: true, refresh: false },
   platform: ApiPlatform | null = routePlatform.value,
+  target: PlatformPlaylistTarget = {},
 ) => {
   if (!id) return;
   // 设置当前请求的歌单 ID，用于防止竞态条件
@@ -384,7 +409,7 @@ const getPlaylistDetail = async (
   // 本地歌单
   if (isLocal) handleLocalPlaylist(id);
   // 第三方平台歌单
-  else if (platform) await handlePlatformPlaylist(platform, getList);
+  else if (platform) await handlePlatformPlaylist(platform, getList, target);
   // 在线歌单
   else await handleOnlinePlaylist(id, getList, refresh);
 };
@@ -427,18 +452,25 @@ const handleLocalPlaylist = (id: number) => {
 };
 
 // 获取第三方平台歌单
-const handlePlatformPlaylist = async (platform: ApiPlatform, getList: boolean) => {
+const handlePlatformPlaylist = async (
+  platform: ApiPlatform,
+  getList: boolean,
+  target: PlatformPlaylistTarget = {},
+) => {
   const pageSize = 300;
   const tracks: SongType[] = [];
   let detail: CoverType | null = null;
   let count = 0;
   let page = 1;
+  // 路由更新时目标歌单标识取自目标路由，避免读到切换前的旧歌单
+  const targetId = target.id ?? platformPlaylistId.value;
+  const targetDirId = target.dirId ?? platformDirId.value;
   try {
     // 逐页取回曲目，行为与网易云链路一致
     do {
       const result = await dispatchPlaylistDetail(platform, {
-        id: platformPlaylistId.value,
-        dirId: platformDirId.value,
+        id: targetId,
+        dirId: targetDirId,
         withTracks: getList,
         page,
         pageSize,
@@ -670,12 +702,12 @@ const togglePlatformSubscribe = async () => {
 };
 
 // 读取平台歌单的收藏状态
-const loadPlatformSubscribeState = async () => {
-  if (!isPlatformSource.value || !routePlatform.value) return;
-  isPlatformSubscribed.value = await isPlaylistSubscribed(
-    routePlatform.value,
-    platformPlaylistId.value,
-  );
+const loadPlatformSubscribeState = async (
+  platform: ApiPlatform | null = routePlatform.value,
+  id: string = platformPlaylistId.value,
+) => {
+  if (!platform) return;
+  isPlatformSubscribed.value = await isPlaylistSubscribed(platform, id);
 };
 
 // 删除指定索引歌曲
@@ -734,8 +766,12 @@ onBeforeRouteUpdate((to) => {
     // 路由上带平台维度时按该平台取数（平台切换即换源）
     const platform = to.query.platform as ApiPlatform | undefined;
     const source = platform === "qqmusic" || platform === "kugou" ? platform : null;
-    getPlaylistDetail(id, { getList: true, refresh: false }, source);
-    void loadPlatformSubscribeState();
+    // 目标路由尚未生效，平台歌单定位信息取自目标路由，避免读到切换前的旧歌单
+    getPlaylistDetail(id, { getList: true, refresh: false }, source, {
+      id: to.query.id ? String(to.query.id) : undefined,
+      dirId: Number(to.query.dirId ?? 0) || undefined,
+    });
+    void loadPlatformSubscribeState(source, to.query.id ? String(to.query.id) : undefined);
   }
 });
 

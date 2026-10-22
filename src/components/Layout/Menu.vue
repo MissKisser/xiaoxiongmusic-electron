@@ -429,11 +429,13 @@ const findPlatformPlaylist = (
 // 创建的歌单
 const createPlaylist = computed<MenuOption[]>(() => {
   // 第三方平台：展示当前平台的自建歌单
+  // 平台把系统「我喜欢的音乐」也算在自建目录里，故一并列出，
+  // 使分组条目数与账号信息区的「创建」统计同口径
   if (isPlatformSource.value) {
     if (!isPlatformLoggedIn.value) return [];
-    return platformStore.playlists.owned
-      .filter((playlist) => !playlist.isLiked)
-      .map((playlist) => renderPlatformPlaylist(playlist, settingStore.menuShowCover));
+    return platformStore.playlists.owned.map((playlist) =>
+      renderPlatformPlaylist(playlist, settingStore.menuShowCover),
+    );
   }
   const userId = dataStore.userData.userId;
   const list = dataStore.userLikeData.playlists
