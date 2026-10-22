@@ -16,6 +16,8 @@
  * | 专辑封面 | `album.picUrl`    | `cover`（直链拼 album mid） | `cover`（`img` 模板） |
  * | 时长     | `duration`（毫秒） | `duration`（已是毫秒）  | `duration`（已是毫秒）|
  * | 付费标记 | `fee`             | `pay.pay_play` / `pay.price_album` | 基档 `privilege` |
+ * | 音质档位 | `quality`         | `file.size_*` 文件大小  | `sizes` 各档文件大小 |
+ * | 原唱翻唱 | `originCoverType` | 上游无此判据          | 上游 `isoriginal`  |
  * | 歌单封面 | `coverImgUrl`     | `cover`                | `cover`             |
  * | 歌单曲目数 | `trackCount`    | `songNum`              | `count`             |
  */
@@ -219,6 +221,15 @@ export interface PlatformSong {
   duration: number;
   /** 免费或无版权标记：0 正常 / 1 VIP / 4 购买专辑 / 8 非会员可免费播放低音质 */
   fee: 0 | 1 | 4 | 8;
+  /** 音质档位（网易云 QualityType 口径，取该歌曲实际提供的最高档） */
+  quality?: QualityType;
+  /**
+   * 原唱/翻唱标记
+   *
+   * 1 原唱 | 2 翻唱（网易云 `originCoverType` 口径）。
+   * 上游没有该判据时留空，界面不显示原唱/翻唱标签。
+   */
+  originCoverType?: number;
   /** MV 编号 */
   mv: number | null;
   /** 封面 */
@@ -571,6 +582,8 @@ export const toSongType = (song: PlatformSong): SongType => ({
   coverSize: song.coverSize,
   duration: song.duration,
   free: song.fee,
+  quality: song.quality,
+  originCoverType: song.originCoverType,
   mv: song.mv,
   createTime: song.publishTime,
   size: song.size,

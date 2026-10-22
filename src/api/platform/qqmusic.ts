@@ -9,6 +9,7 @@
 
 import { deriveStableId, secureUrl, splitArtists, toNumericId } from "./common";
 import { platformRequest, platformRequestBody } from "./http";
+import { QualityType } from "@/types/main";
 import {
   buildCoverSize,
   getAlbumName,
@@ -192,6 +193,81 @@ const normalizeAlbum = (album: unknown, albumMid: string, albumId: string): Plat
 };
 
 /**
+ * QQ 音乐各音质档位的文件大小与 Hi-Res 规格
+ *
+ * 主进程有两种下发形态：搜索 / 歌手 / 专辑模块给扁平字段，
+ * 榜单 / 刷歌 / 单曲详情模块给上游原始 `file` 对象，此处统一读成同一形状。
+ */
+interface QqQualityInfo {
+  /** 母带档（24bit/192kHz）文件大小 */
+  sizeMaster: number;
+  /** 128k MP3 文件大小 */
+  size128: number;
+  /** 320k MP3 文件大小 */
+  size320: number;
+  /** 无损 FLAC 文件大小 */
+  sizeFlac: number;
+  /** APE 文件大小 */
+  sizeApe: number;
+  /** 192k OGG 文件大小 */
+  sizeOgg: number;
+  /** Hi-Res 文件大小 */
+  sizeHiRes: number;
+  /** Hi-Res 采样率 */
+  sampleRate: number;
+  /** Hi-Res 位深 */
+  bitDepth: number;
+}
+
+/**
+ * 读取 QQ 音乐歌曲的各音质档位信息
+ *
+ * 扁平字段与上游原始 `file` 对象取同一份数据，缺哪边取哪边。
+ * @param song QQ 原生歌曲
+ * @returns 各音质档位信息
+ */
+const readQqQualityInfo = (song: Record<string, any>): QqQualityInfo => {
+  const file = (song?.file ?? {}) as Record<string, any>;
+  const num = (value: unknown): number => Number(value ?? 0) || 0;
+  const sizeNew = Array.isArray(file.size_new) ? file.size_new : [];
+  return {
+    // 母带档：上游 `file.size_new[0]`（实测约 5.5Mbps，对应 24bit/192kHz），
+    // 扁平字段 `sizeHiRes` 取的也是这个值。
+    sizeMaster: num(song?.sizeHiRes ?? sizeNew[0]),
+    size128: num(song?.size128 ?? file.size_128mp3),
+    size320: num(song?.size320 ?? file.size_320mp3),
+    sizeFlac: num(song?.sizeFlac ?? file.size_flac),
+    sizeApe: num(song?.sizeApe ?? file.size_ape),
+    sizeOgg: num(song?.sizeOgg ?? file.size_192ogg),
+    // Hi-Res 只认上游 `file.size_hires` 与采样率位深，
+    // 扁平字段的 `sizeHiRes` 取的是母带档，不是 Hi-Res。
+    sizeHiRes: num(file.size_hires),
+    sampleRate: num(song?.hiResSampleRate ?? file.hires_sample),
+    bitDepth: num(song?.hiResBitDepth ?? file.hires_bitdepth),
+  };
+};
+
+/**
+ * 按网易云口径推导 QQ 音乐歌曲音质档位
+ *
+ * 取该歌曲实际提供的最高档位，优先级与网易云一致：
+ * 超清母带 > Hi-Res > 无损 > 320k > 192k > 128k。
+ * @param info 各音质档位信息
+ * @returns 音质档位，上游未给任何档位时返回 undefined
+ */
+const resolveQqQuality = (info: QqQualityInfo): QualityType | undefined => {
+  if (info.sizeMaster > 0) return QualityType.Master;
+  if (info.sizeHiRes > 0 || (info.sampleRate > 0 && info.bitDepth > 0)) {
+    return QualityType.HiRes;
+  }
+  if (info.sizeFlac > 0 || info.sizeApe > 0) return QualityType.SQ;
+  if (info.size320 > 0) return QualityType.HQ;
+  if (info.sizeOgg > 0) return QualityType.MQ;
+  if (info.size128 > 0) return QualityType.LQ;
+  return undefined;
+};
+
+/**
  * 归一化 QQ 歌曲
  *
  * 平台原生字段 → 网易云字段：
@@ -200,6 +276,9 @@ const normalizeAlbum = (album: unknown, albumMid: string, albumId: string): Plat
  *
  * 付费判据取上游 `pay` 对象：`pay_play` 非 0 表示 VIP 专享，
  * `price_album` 非 0 表示需购买专辑。
+ *
+ * 音质档位取上游各音质文件大小推导，口径与网易云一致（见 `resolveQqQuality`）。
+ * 原唱/翻唱上游没有判据，恒为空。
  * @param song QQ 原生歌曲
  * @returns 归一化歌曲
  */
@@ -230,6 +309,7 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
     duration: Number(song?.duration ?? 0),
     // QQ 付费标记：需购买专辑 → 4，VIP 专享 → 1
     fee: priceAlbum > 0 ? 4 : payPlay > 0 ? 1 : 0,
+    quality: resolveQqQuality(readQqQualityInfo(song)),
     mv: null,
     cover: albumCover,
     coverSize: buildCoverSize(albumCover),

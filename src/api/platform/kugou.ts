@@ -13,6 +13,7 @@
 
 import { normalizeArtistEntry, secureUrl, splitArtists, toNumericId } from "./common";
 import { platformRequest, platformRequestBody } from "./http";
+import { QualityType } from "@/types/main";
 import {
   buildCoverSize,
   type PlatformAlbumDetail,
@@ -40,6 +41,8 @@ interface KgSearchResponse {
   code?: number;
   total?: number;
   songs?: Array<Record<string, any>>;
+  /** 上游原始响应（原唱/翻唱判据取自这里） */
+  raw?: unknown;
   message?: string;
 }
 
@@ -61,6 +64,8 @@ interface KgPlaylistDetailResponse {
   total?: number;
   hasMore?: boolean;
   songs?: Array<Record<string, any>>;
+  /** 上游原始响应（原唱/翻唱判据取自这里） */
+  raw?: unknown;
   /** 是否为收藏（订阅）歌单 */
   subscribed?: boolean;
   /** 收藏歌单的源歌单是否可读 */
@@ -136,18 +141,38 @@ const normalizeArtist = (singer: Record<string, any>): PlatformArtist =>
 /** 酷狗授权位：完全免费可播 */
 const KG_PRIVILEGE_FREE = 0;
 
-/** 酷狗授权位：非会员可免费播放（低码率） */
+/** 酷狗授权位：非会员可免费播放（低码率），会员可播高码率 */
 const KG_PRIVILEGE_FREE_FOR_AD = 8;
+
+/** 酷狗音质档位名（主进程归一化后的 `qualities` / `sizes` 键名） */
+const KG_QUALITY_TIER = {
+  /** Hi-Res（24bit） */
+  hiRes: "flac24bit",
+  /** 无损 */
+  lossless: "flac",
+  /** 高质量 320k */
+  hq: "320k",
+  /** 低质量 128k */
+  lq: "128k",
+} as const;
 
 /**
  * 取酷狗曲目的基档授权位
  *
- * 授权位按音质档位逐档下发，基档（最低码率）决定这首曲子能不能免费播：
- * 基档为 `0` / `8` 时账号可播，高档被锁只是会员权益差异。
- * @param qualities 各音质档位
+ * 判据优先级：
+ * 1. 歌曲级基档授权位（`pay.privilege`，上游 `privilege` /
+ *    `copyright.qualities['128'].privilege`）；
+ * 2. 各音质档位里码率最低那一档的授权位（上游按档下发授权位时的口径）。
+ *
+ * 基档（最低码率）决定这首曲子能不能免费播：
+ * 基档为 `0` 时账号可播，高档被锁只是会员权益差异。
+ * @param song 酷狗原生歌曲
  * @returns 基档授权位，取不到时为 null
  */
-const pickBasePrivilege = (qualities: unknown): number | null => {
+const pickBasePrivilege = (song: Record<string, any>): number | null => {
+  const songLevel = Number(song?.pay?.privilege ?? song?.privilege ?? Number.NaN);
+  if (Number.isFinite(songLevel)) return songLevel;
+  const qualities = song?.qualities;
   if (!Array.isArray(qualities) || qualities.length === 0) return null;
   const tiers = qualities
     .map((item: Record<string, any>) => ({
@@ -161,6 +186,91 @@ const pickBasePrivilege = (qualities: unknown): number | null => {
 };
 
 /**
+ * 按基档授权位推导酷狗歌曲的付费标记
+ *
+ * 口径与网易云一致：
+ * 0 完全免费 / 8 非会员可免费播放低音质 / 其余为会员墙（VIP）。
+ * @param privilege 基档授权位
+ * @returns 付费标记
+ */
+const resolveKgFee = (privilege: number | null): 0 | 1 | 8 => {
+  if (privilege === null) return 0;
+  if (privilege === KG_PRIVILEGE_FREE) return 0;
+  if (privilege === KG_PRIVILEGE_FREE_FOR_AD) return 8;
+  return 1;
+};
+
+/**
+ * 按网易云口径推导酷狗歌曲音质档位
+ *
+ * 取该歌曲实际提供的最高档位，优先级与网易云一致：
+ * Hi-Res > 无损 > 320k > 128k。
+ * @param song 酷狗原生歌曲
+ * @returns 音质档位，上游未给任何档位时返回 undefined
+ */
+const resolveKgQuality = (song: Record<string, any>): QualityType | undefined => {
+  const sizes = (song?.sizes ?? {}) as Record<string, number>;
+  const qualities = Array.isArray(song?.qualities) ? (song.qualities as string[]) : [];
+  const has = (tier: string): boolean => Number(sizes?.[tier] ?? 0) > 0 || qualities.includes(tier);
+  if (has(KG_QUALITY_TIER.hiRes)) return QualityType.HiRes;
+  if (has(KG_QUALITY_TIER.lossless)) return QualityType.SQ;
+  if (has(KG_QUALITY_TIER.hq)) return QualityType.HQ;
+  if (has(KG_QUALITY_TIER.lq)) return QualityType.LQ;
+  return undefined;
+};
+
+/**
+ * 酷狗原唱/翻唱索引：歌曲 hash → 1 原唱 | 2 翻唱
+ */
+type KgOriginalIndex = Map<string, number>;
+
+/**
+ * 读取酷狗上游条目的原唱/翻唱判据
+ *
+ * 判据来源：
+ * - `isoriginal` / `IsOriginal`：1 原唱，0 非原创（翻唱 / 改编 / 现场版）；
+ * - `trans_param.is_original`：1 原唱，其余非零值按非原创作（翻唱）处理。
+ * @param item 酷狗上游条目
+ * @returns 1 原唱 | 2 翻唱，上游没给判据时返回 undefined
+ */
+const readKgOriginalFlag = (item: Record<string, any>): number | undefined => {
+  const top = item?.isoriginal ?? item?.IsOriginal;
+  if (top === 0 || top === 1) return top === 1 ? 1 : 2;
+  const nested = Number(item?.trans_param?.is_original);
+  if (!Number.isFinite(nested) || nested <= 0) return undefined;
+  return nested === 1 ? 1 : 2;
+};
+
+/**
+ * 从上游原始响应里建立「原唱/翻唱」索引
+ *
+ * 主进程各模块把上游原始载荷放在 `raw` 里（搜索 / 歌手 / 专辑 / 歌单），
+ * 曲目条目带 `hash`（兜底 `FileHash`）与原唱判据，按 hash 建索引供归一化查表。
+ * @param raw 上游原始响应
+ * @returns hash → 1 原唱 | 2 翻唱 的索引
+ */
+const buildKgOriginalIndex = (raw: unknown): KgOriginalIndex => {
+  const index: KgOriginalIndex = new Map();
+  const visit = (node: unknown, depth: number): void => {
+    if (!node || typeof node !== "object" || depth > 6) return;
+    if (Array.isArray(node)) {
+      node.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    const record = node as Record<string, any>;
+    const hash = String(record.hash ?? record.FileHash ?? "");
+    if (hash) {
+      const flag = readKgOriginalFlag(record);
+      if (flag !== undefined) index.set(hash, flag);
+      return;
+    }
+    Object.values(record).forEach((value) => visit(value, depth + 1));
+  };
+  visit(raw, 0);
+  return index;
+};
+
+/**
  * 归一化酷狗歌曲
  *
  * 平台原生字段 → 网易云字段：
@@ -171,25 +281,26 @@ const pickBasePrivilege = (qualities: unknown): number | null => {
  * 歌曲主键说明：云歌单条目的 `audio_id` 恒为 0，不能作主键；
  * 真实主键是 `mixSongId`（`album_audio_id` 口径），播放地址 / 歌词 / 评论均以它为键。
  *
- * 可播性判据：取基档授权位 `privilege`（`0` / `8` 可免费播，其余为会员墙或无授权）。
+ * 可播性判据：取基档授权位 `privilege`（`0` 可免费播，`8` 低码率免费，其余为会员墙）。
  * `pay_type`（`media_pay_type`）描述的是单个音频文件的版权形态，与可播性无单调关系，不作判据。
+ *
+ * 音质档位取各档文件大小推导，口径与网易云一致（见 `resolveKgQuality`）。
+ * 原唱/翻唱判据取上游原始响应（见 `buildKgOriginalIndex`），上游没给判据时留空。
  * @param song 酷狗原生歌曲
+ * @param originalIndex 原唱/翻唱索引，按 hash 查表
  * @returns 归一化歌曲
  */
-export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
+export const normalizeKgSong = (
+  song: Record<string, any>,
+  originalIndex?: KgOriginalIndex,
+): PlatformSong => {
   const cover = fillCover(song?.cover ?? song?.img ?? "");
   const artists: PlatformArtist[] = Array.isArray(song?.artists)
     ? song.artists.map(normalizeArtist)
     : splitArtists(song?.artist);
-  // 付费判据：基档授权位（各音质档位取最低码率那一档）
-  const basePrivilege = pickBasePrivilege(song?.qualities);
-  const privilege = basePrivilege ?? Number(song?.privilege ?? song?.pay?.privilege ?? Number.NaN);
-  const fee =
-    Number.isNaN(privilege) ||
-    privilege === KG_PRIVILEGE_FREE ||
-    privilege === KG_PRIVILEGE_FREE_FOR_AD
-      ? 0
-      : 1;
+  // 付费判据：基档授权位（歌曲级 `pay.privilege`，或各音质档位取最低码率那一档）
+  const fee = resolveKgFee(pickBasePrivilege(song));
+  const hash = String(song?.hash ?? "");
 
   return {
     id: Number(song?.mixSongId ?? song?.albumAudioId ?? song?.audioId ?? song?.audio_id ?? 0) || 0,
@@ -204,33 +315,26 @@ export const normalizeKgSong = (song: Record<string, any>): PlatformSong => {
     duration: Number(song?.duration ?? 0),
     // 酷狗：基档授权位非免费口径即视为不可免费播放
     fee,
+    quality: resolveKgQuality(song),
+    originCoverType: hash ? originalIndex?.get(hash) : undefined,
     mv: null,
     cover,
     coverSize: buildCoverSize(cover),
     size: Number(song?.sizes?.["320k"] ?? song?.sizes?.["128k"] ?? 0),
     platform: KUGOU,
-    platformId: String(song?.hash ?? "") || undefined,
+    platformId: hash || undefined,
   };
 };
 
 /**
  * 归一化酷狗刷歌曲目
  *
- * 与 `normalizeKgSong` 的唯一差异是**付费判据**。
- * 榜单 / 歌单等模块的 `qualities` 是音质档位名数组（`["128k","320k"]`），
- * 而 `normalizeKgSong` 的基档授权位解析要求 `{bitrate, privilege}` 对象数组，
- * 遇到字符串数组会恒得 privilege=0，把付费曲目误判成免费。
- * 刷歌模块的 `pay.privilege` 是上游直给的基档授权位，这里直接按它判付费。
+ * 刷歌模块的 `pay.privilege` 是上游直给的基档授权位，
+ * 付费判据与其它酷狗模块同口径（见 `pickBasePrivilege`）。
  * @param song 酷狗刷歌原生歌曲
  * @returns 归一化歌曲
  */
-export const normalizeKgSongFM = (song: Record<string, any>): PlatformSong => {
-  const normalized = normalizeKgSong(song);
-  const privilege = Number(song?.pay?.privilege ?? Number.NaN);
-  if (!Number.isFinite(privilege)) return normalized;
-  const fee = privilege === KG_PRIVILEGE_FREE || privilege === KG_PRIVILEGE_FREE_FOR_AD ? 0 : 1;
-  return { ...normalized, fee };
-};
+export const normalizeKgSongFM = (song: Record<string, any>): PlatformSong => normalizeKgSong(song);
 
 /**
  * 归一化酷狗歌单条目
@@ -280,6 +384,7 @@ export const normalizeKgPlaylistDetail = (
   detail: KgPlaylistDetailResponse,
 ): PlatformPlaylistDetail => {
   const cover = fillCover(detail?.cover ?? "");
+  const originalIndex = buildKgOriginalIndex(detail?.raw);
   return {
     id: detail?.id ?? "",
     name: "",
@@ -290,7 +395,7 @@ export const normalizeKgPlaylistDetail = (
     creator: { id: "", name: "" },
     platform: KUGOU,
     platformId: String(detail?.id ?? "") || undefined,
-    tracks: (detail?.songs ?? []).map(normalizeKgSong),
+    tracks: (detail?.songs ?? []).map((song) => normalizeKgSong(song, originalIndex)),
     hasMore: detail?.hasMore === true,
     // 收藏歌单的源歌单可读性：源歌单不可读时曲目为空，界面据此给出明确说明
     subscribed: detail?.subscribed === true,
@@ -388,9 +493,10 @@ export const kgSearch = async (
     limit,
     type: 0,
   });
+  const originalIndex = buildKgOriginalIndex(res?.raw);
   return {
     total: Number(res?.total ?? 0),
-    songs: (res?.songs ?? []).map(normalizeKgSong),
+    songs: (res?.songs ?? []).map((song) => normalizeKgSong(song, originalIndex)),
   };
 };
 
@@ -725,6 +831,8 @@ interface KgArtistResponse {
   };
   songs?: Array<Record<string, any>>;
   albums?: Array<Record<string, any>>;
+  /** 上游原始响应（原唱/翻唱判据取自这里） */
+  raw?: unknown;
   message?: string;
 }
 
@@ -740,6 +848,8 @@ interface KgAlbumResponse {
   description?: string;
   total?: number;
   songs?: Array<Record<string, any>>;
+  /** 上游原始响应（原唱/翻唱判据取自这里） */
+  raw?: unknown;
   message?: string;
 }
 
@@ -754,6 +864,8 @@ interface KgPublicPlaylistResponse {
   playCount?: number;
   total?: number;
   songs?: Array<Record<string, any>>;
+  /** 上游原始响应（原唱/翻唱判据取自这里） */
+  raw?: unknown;
   message?: string;
 }
 
@@ -772,7 +884,8 @@ export const kgArtistDetail = async (
   albums: PlatformCoverEntry[];
 }> => {
   const res = await platformRequest<KgArtistResponse>(KUGOU, "artist", { id: String(id) });
-  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const originalIndex = buildKgOriginalIndex(res?.raw);
+  const songs = (res?.songs ?? []).map((song) => normalizeKgSong(song, originalIndex));
   const albums: PlatformCoverEntry[] = (res?.albums ?? []).map((item) => {
     const albumId = String(item?.id ?? "");
     return {
@@ -813,7 +926,8 @@ export const kgAlbumDetail = async (
   const res = await platformRequest<KgAlbumResponse>(KUGOU, "album", { id: String(id) });
   const albumId = String(res?.id ?? id);
   const cover = fillCover(res?.cover ?? "");
-  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const originalIndex = buildKgOriginalIndex(res?.raw);
+  const songs = (res?.songs ?? []).map((song) => normalizeKgSong(song, originalIndex));
   const album: PlatformAlbumDetail = {
     id: albumId,
     platformId: albumId,
@@ -850,7 +964,8 @@ export const kgPublicPlaylist = async (
     page,
     pageSize,
   });
-  const songs = (res?.songs ?? []).map(normalizeKgSong);
+  const originalIndex = buildKgOriginalIndex(res?.raw);
+  const songs = (res?.songs ?? []).map((song) => normalizeKgSong(song, originalIndex));
   const cover = fillCover(res?.cover ?? "");
   const playlist: PlatformCoverEntry = {
     id: String(res?.id ?? id),
@@ -1034,19 +1149,13 @@ const normalizeKgBoard = (
  *
  * 付费判据的差异：榜单曲目只给歌曲级授权位（`pay.privilege`），
  * 不像歌单曲目那样按音质分档下发，故按歌曲级授权位判定
- * （`0` / `8` 可免费播，其余为会员墙）。
+ * （`0` 完全免费、`8` 低码率免费，其余为会员墙）。
  * @param song 酷狗原生榜单曲目
  * @returns 归一化曲目
  */
 const normalizeKgLeaderboardSong = (song: Record<string, any>): PlatformSong => {
   const normalized = normalizeKgSong(song);
-  const privilege = Number(song?.pay?.privilege ?? song?.privilege ?? Number.NaN);
-  const fee =
-    Number.isNaN(privilege) ||
-    privilege === KG_PRIVILEGE_FREE ||
-    privilege === KG_PRIVILEGE_FREE_FOR_AD
-      ? 0
-      : 1;
+  const fee = resolveKgFee(pickBasePrivilege(song));
   // 歌曲主键缺失时按 hash 派生稳定数字 id，保证列表内不出现重复 id
   const id = toNumericId(
     normalized.id || song?.mixSongId || song?.albumAudioId,
