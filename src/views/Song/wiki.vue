@@ -51,7 +51,7 @@
                 <n-text
                   v-if="typeof currentSong.album !== 'string'"
                   class="text-hidden clickable-text"
-                  @click="$router.push({ name: 'album', query: { id: currentSong.album.id } })"
+                  @click="handleJumpAlbum(currentSong.album)"
                 >
                   {{
                     settingStore.hideBracketedContent
@@ -295,7 +295,7 @@
 </template>
 
 <script setup lang="ts">
-import type { SongType } from "@/types/main";
+import type { MetaData, SongType } from "@/types/main";
 import type { WikiViewModel, UserRecord, SongWikiData, ListenData, SheetData } from "./types";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { renderToolbar } from "@/utils/meta";
@@ -308,6 +308,7 @@ import {
 } from "@/api/song";
 import { formatSongsList, removeBrackets } from "@/utils/format";
 import { jumpToArtist } from "@/utils/artist";
+import { jumpToAlbum } from "@/utils/album";
 import { useSettingStore } from "@/stores";
 import dayjs from "dayjs";
 import { useSongMenu } from "@/composables/useSongMenu";
@@ -490,6 +491,11 @@ const handleSheetExpand = async ({ name, expanded }: { name: number; expanded: b
 
 const handlePlay = () => {
   if (currentSong.value) player.addNextSong(currentSong.value, true);
+};
+
+// 跳转专辑详情
+const handleJumpAlbum = (album: MetaData) => {
+  jumpToAlbum(album, currentSong.value?.platform);
 };
 
 onActivated(() => fetchData());

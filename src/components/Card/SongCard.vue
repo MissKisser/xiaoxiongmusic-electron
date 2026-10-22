@@ -128,12 +128,8 @@
         <n-text
           v-if="isObject(song.album)"
           class="album-text"
-          @click="
-            router.push({
-              name: 'album',
-              query: { id: song.album?.id },
-            })
-          "
+          :class="{ clickable: canJumpToAlbum }"
+          @click="handleJumpAlbum"
         >
           {{ song.album?.name || "未知专辑" }}
         </n-text>
@@ -173,11 +169,12 @@
 </template>
 
 <script setup lang="ts">
-import { QualityType, type SongType } from "@/types/main";
+import { QualityType, type MetaData, type SongType } from "@/types/main";
 import { useStatusStore, useMusicStore, useSettingStore } from "@/stores";
 import { formatNumber } from "@/utils/helper";
 import { openJumpArtist } from "@/utils/modal";
 import { removeBrackets } from "@/utils/format";
+import { canJumpAlbum, jumpToAlbum } from "@/utils/album";
 import { isObject } from "lodash-es";
 import { formatTimestamp, msToTime } from "@/utils/time";
 import { usePlayerController } from "@/core/player/PlayerController";
@@ -213,6 +210,23 @@ const blobURLManager = useBlobURLManager();
 
 // 歌曲数据
 const song = toRef(props, "song");
+
+// 专辑条目（名称字符串形态没有跳转目标）
+const albumEntry = computed<MetaData | null>(() => {
+  const album = song.value.album;
+  return album && typeof album === "object" ? album : null;
+});
+
+// 专辑能否定位到具体专辑（第三方平台需带平台主键）
+const canJumpToAlbum = computed<boolean>(
+  () => !!albumEntry.value && canJumpAlbum(albumEntry.value, song.value.platform),
+);
+
+// 跳转专辑详情
+const handleJumpAlbum = () => {
+  if (!albumEntry.value) return;
+  jumpToAlbum(albumEntry.value, song.value.platform);
+};
 
 // 音质颜色
 const qualityColor = computed(() => {
@@ -435,9 +449,12 @@ const localCover = async (show: boolean) => {
     -webkit-line-clamp: 2;
     padding-right: 20px;
     &:hover {
-      .album-text {
+      .album-text.clickable {
         color: var(--primary-hex);
       }
+    }
+    .album-text.clickable {
+      cursor: pointer;
     }
   }
   .actions {

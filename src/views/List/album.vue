@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import type { DropdownOption } from "naive-ui";
+import type { LocationQuery } from "vue-router";
 import type { ApiPlatform } from "@/types/shared";
 import { songDetail } from "@/api/song";
 import { albumDetail } from "@/api/album";
@@ -106,11 +107,23 @@ const { playAllSongs: playAllSongsAction } = useListActions();
 // 专辑 ID（网易云为数字 id，第三方平台为平台主键）
 const albumId = computed<string>(() => String(router.currentRoute.value.query.id ?? ""));
 
-// 路由指定的音源平台（第三方平台专辑带 platform 参数，网易云原路径不带）
-const routePlatform = computed<ApiPlatform | null>(() => {
-  const platform = router.currentRoute.value.query.platform as string | undefined;
+/**
+ * 读取路由上的音源平台
+ *
+ * 第三方平台专辑带 platform 参数，网易云原路径不带；
+ * 路由更新期间必须按目标路由读取，否则会拿旧路由的平台去查新专辑。
+ * @param query 路由查询参数
+ * @returns 第三方平台标识，网易云为 null
+ */
+const readRoutePlatform = (query: LocationQuery): ApiPlatform | null => {
+  const platform = query.platform as string | undefined;
   return platform === "qqmusic" || platform === "kugou" ? platform : null;
-});
+};
+
+// 路由指定的音源平台（第三方平台专辑带 platform 参数，网易云原路径不带）
+const routePlatform = computed<ApiPlatform | null>(() =>
+  readRoutePlatform(router.currentRoute.value.query),
+);
 
 // 是否为第三方平台（QQ 音乐 / 酷狗）
 const isPlatformSource = computed<boolean>(() => routePlatform.value !== null);
@@ -164,7 +177,7 @@ const moreOptions = computed<DropdownOption[]>(() => {
         label: "刷新缓存",
         key: "refresh",
         props: {
-          onClick: () => getAlbumDetail(albumId.value, true),
+          onClick: () => getAlbumDetail(albumId.value, routePlatform.value, true),
         },
         icon: renderIcon("Refresh"),
       },
@@ -183,7 +196,7 @@ const moreOptions = computed<DropdownOption[]>(() => {
       label: "刷新缓存",
       key: "refresh",
       props: {
-        onClick: () => getAlbumDetail(albumId.value, true),
+        onClick: () => getAlbumDetail(albumId.value, null, true),
       },
       icon: renderIcon("Refresh"),
     },
@@ -224,7 +237,11 @@ const moreOptions = computed<DropdownOption[]>(() => {
 });
 
 // 获取专辑基础信息
-const getAlbumDetail = async (id: string, refresh: boolean = false) => {
+const getAlbumDetail = async (
+  id: string,
+  platform: ApiPlatform | null,
+  refresh: boolean = false,
+) => {
   if (!id) return;
   // 设置当前请求的专辑 ID，用于防止竞态条件
   currentRequestId.value = id;
@@ -232,9 +249,9 @@ const getAlbumDetail = async (id: string, refresh: boolean = false) => {
   clearSearch();
 
   // 第三方平台：走平台数据层
-  if (routePlatform.value) {
+  if (platform) {
     try {
-      const result = await dispatchAlbumDetail(routePlatform.value, id);
+      const result = await dispatchAlbumDetail(platform, id);
       if (currentRequestId.value !== id) return;
       setDetailData(result.detail);
       setListData(result.tracks);
@@ -294,7 +311,7 @@ const backgroundCheck = async (id: number, cached: ListCacheData) => {
 
     if (checkNeedsUpdate(cached, latestDetail)) {
       console.log("Album cache expired, refreshing...");
-      getAlbumDetail(String(id), true);
+      getAlbumDetail(String(id), null, true);
     }
   } catch (e) {
     console.error("Album background check failed", e);
@@ -321,14 +338,15 @@ const playAllSongs = useDebounceFn(() => {
 onBeforeRouteUpdate((to) => {
   clearSearch();
   const id = String(to.query.id ?? "");
-  if (id) getAlbumDetail(id);
+  // 按目标路由的平台取数：跨平台切换专辑时不能用旧路由的平台
+  if (id) getAlbumDetail(id, readRoutePlatform(to.query));
 });
 
 onActivated(() => {
   if (!isActivated.value) {
     isActivated.value = true;
   } else {
-    getAlbumDetail(albumId.value, false);
+    getAlbumDetail(albumId.value, routePlatform.value, false);
   }
 });
 
@@ -337,12 +355,12 @@ onDeactivated(() => {
 });
 
 onMounted(() => {
-  getAlbumDetail(albumId.value);
+  getAlbumDetail(albumId.value, routePlatform.value);
 });
 
 // 平台切换：重新拉取专辑详情
 const stopPlatformWatch = onPlatformChange(() => {
-  getAlbumDetail(albumId.value, true);
+  getAlbumDetail(albumId.value, routePlatform.value, true);
 });
 
 onUnmounted(() => {

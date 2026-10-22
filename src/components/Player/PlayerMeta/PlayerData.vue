@@ -114,7 +114,8 @@
         <span
           v-if="isObject(musicStore.playSong.album)"
           class="name-text text-hidden"
-          @click="jumpPage({ name: 'album', query: { id: musicStore.playSong.album.id } })"
+          :class="{ 'not-clickable': !canJumpToAlbum }"
+          @click="jumpAlbum(musicStore.playSong.album)"
         >
           {{ musicStore.playSong.album?.name || "未知专辑" }}
         </span>
@@ -147,6 +148,7 @@ import { formatFileSize, handleSongQuality } from "@/utils/helper";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { removeBrackets } from "@/utils/format";
 import { jumpToArtist } from "@/utils/artist";
+import { canJumpAlbum, jumpToAlbum } from "@/utils/album";
 
 defineProps<{
   center?: boolean;
@@ -351,6 +353,30 @@ const jumpArtist = debounce(
     trailing: false,
   },
 );
+
+// 专辑条目（名称字符串形态没有跳转目标）
+const playAlbumEntry = computed<MetaData | null>(() => {
+  const album = musicStore.playSong.album;
+  return album && typeof album === "object" ? album : null;
+});
+
+// 专辑能否定位到具体专辑（第三方平台需带平台主键）
+const canJumpToAlbum = computed<boolean>(
+  () => !!playAlbumEntry.value && canJumpAlbum(playAlbumEntry.value, musicStore.playSong.platform),
+);
+
+// 跳转专辑详情
+const jumpAlbum = debounce(
+  (album: MetaData) => {
+    statusStore.showFullPlayer = false;
+    jumpToAlbum(album, musicStore.playSong.platform);
+  },
+  300,
+  {
+    leading: true,
+    trailing: false,
+  },
+);
 </script>
 
 <style lang="scss" scoped>
@@ -435,6 +461,9 @@ const jumpArtist = debounce(
       line-clamp: 1;
       -webkit-line-clamp: 1;
       cursor: pointer;
+      &.not-clickable {
+        cursor: default;
+      }
       &:hover {
         opacity: 1;
       }
