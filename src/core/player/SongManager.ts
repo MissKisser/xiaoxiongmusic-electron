@@ -1,6 +1,10 @@
 import { personalFm, personalFmToTrash } from "@/api/rec";
 import { songUrl, unlockSongUrl } from "@/api/song";
-import { describePlaybackFailure } from "@/api/platform/errorText";
+import {
+  resolvePlaybackFailureText,
+  PLAYBACK_FAILED_TEXT,
+  type PlatformFailure,
+} from "@/api/platform/errorText";
 import { kgSongUrl } from "@/api/platform/kugou";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { kgSongFM, qqSongFM } from "@/api/platform/songfm";
@@ -85,13 +89,14 @@ const MISSING_SONG_ID_REASON = "缺少编号信息，无法获取播放链接";
 /** 歌曲缺少歌名时的拒绝原因（用户可读） */
 const MISSING_SONG_NAME_REASON = "缺少歌名，无法检索播放链接";
 
-/** 未启用任何解锁源时的拒绝原因（用户可读） */
-const NO_UNLOCK_SERVER_REASON = "未启用任何解锁源，无法获取播放链接";
+/** 未启用任何换源服务时的拒绝原因（用户可读，不罗列内部音源名） */
+const NO_UNLOCK_SERVER_REASON = "未开启换源功能，无法获取播放链接";
 
 /**
- * 把解锁源的异常翻译成用户可读的原因
+ * 把换源链的异常翻译成用户可读的原因
  *
  * 只保留错误类别，不带出异常原文（异常里可能夹带请求地址）。
+ * 该文案只写进控制台日志，不进入用户可见提示。
  * @param error 捕获到的异常
  * @returns 用户可读的原因
  */
@@ -128,10 +133,8 @@ class SongManager {
   /** 预载歌曲的播放标识（平台 + 数字 ID） */
   private nextPrefetchKey: string | undefined;
   /** 最近一次第三方平台的播放失败详情（用于最终失败时的用户提示） */
-  private lastPlatformFailure:
-    | { platform: ApiPlatform; reason?: string; status?: number; privilege?: number | null }
-    | undefined;
-  /** 最近一次解锁链的用户可读失败原因（用于最终失败时的用户提示） */
+  private lastPlatformFailure: PlatformFailure | undefined;
+  /** 最近一次换源链的用户可读失败原因（用于最终失败时的用户提示） */
   private lastUnlockFailure: string | undefined;
 
   /**
@@ -213,9 +216,12 @@ class SongManager {
   };
 
   /**
-   * 获取解锁源的中文名称
-   * @param server 解锁服务器标识
-   * @returns 中文名称
+   * 获取换源服务的调试名称
+   *
+   * 只用于控制台日志，便于开发者排查逐源失败；
+   * 用户可见文案一律走平台语义口径，不得引用该名称。
+   * @param server 换源服务标识
+   * @returns 调试名称
    */
   private getUnlockSourceName(server: SongUnlockServer): string {
     const nameMap: Record<SongUnlockServer, string> = {
@@ -479,7 +485,7 @@ class SongManager {
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
    *
    * 逐源隔离失败：单个源超时或报错只记失败，继续尝试下一个源，
-   * 全部源都拿不到链接时给出可读的失败原因。
+   * 全部源都拿不到链接时给出平台语义的兜底提示（逐源明细只写控制台日志）。
    * @param songData 歌曲数据
    * @returns 解锁播放信息
    */
@@ -617,11 +623,11 @@ class SongManager {
       }
     }
 
-    const failureReason = failures.length
-      ? `所有解锁源均未找到可用链接（${failures.join("；")}）`
-      : "所有解锁源均未找到可用链接";
-    console.warn(`⚠️ [${songId}] ${failureReason}`);
-    return { id: songId, url: undefined, failureReason };
+    // 逐源失败明细只进日志：用户侧只给出平台语义的兜底结论，不暴露内部音源名
+    console.warn(
+      `⚠️ [${songId}] 换源链全部失败：${failures.length ? failures.join("；") : "无可用链接"}`,
+    );
+    return { id: songId, url: undefined, failureReason: PLAYBACK_FAILED_TEXT };
   };
 
   /**
@@ -768,16 +774,16 @@ class SongManager {
    * 汇总播放最终失败的用户可读原因
    *
    * 平台侧失败（付费墙 / 无授权）优先 —— 它的文案已说明「已尝试换源未成功」；
-   * 否则用解锁链逐源失败的原因。
-   * @returns 用户可读原因；无明确原因时返回 undefined
+   * 否则用换源链给出的可操作提示（缺编号 / 缺歌名 / 未开启换源）；
+   * 都没有时给出平台语义的兜底结论。全过程不出现内部音源名。
+   * @returns 用户可读原因
    */
-  private takePlaybackFailureReason = (): string | undefined => {
+  private takePlaybackFailureReason = (): string => {
     const failure = this.lastPlatformFailure;
     this.lastPlatformFailure = undefined;
-    const platformReason = failure ? describePlaybackFailure(failure.platform, failure) : undefined;
-    const unlockReason = this.lastUnlockFailure;
+    const localReason = this.lastUnlockFailure;
     this.lastUnlockFailure = undefined;
-    return platformReason || unlockReason;
+    return resolvePlaybackFailureText(failure, localReason);
   };
 
   /**

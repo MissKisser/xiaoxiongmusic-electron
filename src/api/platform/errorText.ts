@@ -10,6 +10,9 @@
  *
  * 这里把两套表达统一翻译成用户可读文案，
  * 写操作层（`manage.ts`）与播放层（`SongManager.ts`）共用同一份翻译表。
+ *
+ * 用户可见的失败提示只说平台语义（付费 / 无权限 / 暂不可播 / 已尝试换源），
+ * 不出现内部音源名与技术细节 —— 换源过程的逐源明细只写控制台日志。
  */
 
 import type { ApiPlatform } from "@/types/shared";
@@ -81,6 +84,12 @@ export interface PlatformPlaybackFailure {
   privilege?: number | null;
 }
 
+/** 带平台标识的播放失败详情 */
+export interface PlatformFailure extends PlatformPlaybackFailure {
+  /** 音源平台 */
+  platform: ApiPlatform;
+}
+
 /**
  * 把播放失败详情翻译成用户可读提示
  *
@@ -112,4 +121,27 @@ export const describePlaybackFailure = (
     }
   }
   return PLAYBACK_FAILED_TEXT;
+};
+
+/**
+ * 汇总播放失败的用户可读提示
+ *
+ * 用户可见的失败提示一律走平台语义口径（付费 / 无权限 / 暂不可播 / 已尝试换源），
+ * 不出现内部音源名与技术细节：
+ * - 平台侧失败优先 —— 付费墙、无授权、凭证异常的文案已说明「已尝试换源未成功」；
+ * - 其次用本地链路的可操作提示（缺编号 / 缺歌名 / 缺歌手 / 未开启换源）；
+ * - 都没有时给出兜底结论。
+ *
+ * @param platformFailure 平台侧失败详情，没有平台侧记录时传 undefined
+ * @param localReason 本地链路的失败原因
+ * @returns 用户可读提示
+ */
+export const resolvePlaybackFailureText = (
+  platformFailure?: PlatformFailure,
+  localReason?: string,
+): string => {
+  if (platformFailure) {
+    return describePlaybackFailure(platformFailure.platform, platformFailure);
+  }
+  return localReason || PLAYBACK_FAILED_TEXT;
 };
