@@ -364,6 +364,8 @@ export const normalizeKgPlaylist = (playlist: Record<string, any>): PlatformPlay
     platformId: String(playlist?.listid ?? playlist?.id ?? "") || undefined,
     owned: !subscribed,
     subscribed,
+    // 系统歌单标记原始值：1 默认收藏，2 我喜欢的歌
+    isDef: Number(playlist?.isDef ?? 0),
     isDefault: playlist?.isDefault === true,
     // 收藏歌单的真实标识是源歌单，本地 listid 只是收藏记录号
     originListid: String(playlist?.originListid ?? playlist?.list_create_listid ?? "") || undefined,
@@ -518,21 +520,40 @@ export const kgUserPlaylistList = async (): Promise<{
 };
 
 /**
- * 酷狗「我喜欢的歌」歌单号候选（按优先级排列）
+ * 酷狗系统歌单标记（上游 `is_def` 原始值）
  *
- * 概念版把「我喜欢的歌」放在 listid=4，正式语义下是 listid=3「我喜欢」，
- * 再退到系统默认歌单（isDef=1，即 listid=1「默认收藏」）。
+ * 1 是「默认收藏」，2 是「我喜欢的歌」。
+ * 「我喜欢的歌」的歌单号按账号分配，没有跨账号通用的固定值，
+ * 因此读侧按这个语义定位，与写操作侧（`playlist_tracks` 的 `is_def === 2` 口径）一致。
+ */
+export const KG_SYSTEM_LIST_LIKED = 2;
+
+/**
+ * 酷狗「我喜欢的歌」歌单号候选（仅作兜底）
+ *
+ * 仅在上游没有回 `is_def` 字段时启用；系统歌单号在多数账号下落在 4 / 3 / 1，
+ * 但歌单号是账号内分配的，换账号后不保证命中，故不能作为主判据。
  */
 const LIKED_PLAYLIST_IDS = ["4", "3", "1"];
 
 /**
  * 从自建歌单里定位「我喜欢的歌」
  *
- * 酷狗没有独立的红心接口族，「喜欢」本身就是一种歌单。
+ * 判据按可靠性排序：
+ * 1. **系统歌单标记 `is_def === 2`**：上游直接标明「我喜欢的歌」，账号内唯一；
+ * 2. **系统歌单号候选**：上游缺 `is_def` 时的兜底（歌单号按账号分配，可能指错）；
+ * 3. **系统默认歌单**：最后的兜底。
+ *
+ * 定位始终在**当前账号自己的歌单列表**内进行，
+ * 因此不会把上一个账号解析出的歌单号带到新账号。
  * @param owned 自建歌单列表
  * @returns 命中的歌单，未命中时为 null
  */
 export const kgFindLikedPlaylist = (owned: PlatformPlaylist[]): PlatformPlaylist | null => {
+  // 上游标明的「我喜欢的歌」（is_def === 2）
+  const marked = owned.find((playlist) => Number(playlist.isDef ?? 0) === KG_SYSTEM_LIST_LIKED);
+  if (marked) return marked;
+  // 兜底：系统歌单号候选
   for (const listid of LIKED_PLAYLIST_IDS) {
     const hit = owned.find((playlist) => String(playlist.platformId ?? playlist.id) === listid);
     if (hit) return hit;

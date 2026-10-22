@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import type { CoverType } from "@/types/main";
-import { onPlatformChange, useDataStore, usePlatformStore } from "@/stores";
+import { onAccountChange, onPlatformChange, useDataStore, usePlatformStore } from "@/stores";
 import { PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
 
 const route = useRoute();
@@ -116,12 +116,22 @@ const stopPlatformWatch = onPlatformChange(() => {
   });
 });
 
+// 账号变更：重新拉取当前账号的收藏歌单
+const stopAccountWatch = onAccountChange(({ platform }) => {
+  if (platform !== platformStore.currentPlatform) return;
+  loading.value = true;
+  void platformStore.refreshPlaylists(platform).finally(() => {
+    loading.value = false;
+  });
+});
+
 onMounted(() => {
   loading.value = false;
 });
 
 onUnmounted(() => {
   stopPlatformWatch();
+  stopAccountWatch();
 });
 </script>
 

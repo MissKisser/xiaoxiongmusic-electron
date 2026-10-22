@@ -14,6 +14,7 @@ import {
 import { likeSong } from "@/api/song";
 import { formatCoverList, formatArtistsList, formatSongsList } from "@/utils/format";
 import { useDataStore, useMusicStore } from "@/stores";
+import { usePlatformStore } from "@/stores/platform";
 import { logout, refreshLogin } from "@/api/login";
 import { debounce, isFunction, type DebouncedFunc } from "lodash-es";
 import { isBeforeSixAM } from "./time";
@@ -37,9 +38,24 @@ export const isLogin = (): 0 | 1 | 2 => {
   if (dataStore.loginType === "uid") return 2;
   return getCookie("MUSIC_U") ? 1 : 0;
 };
+/**
+ * 清空网易云「我喜欢的音乐」的页面缓存
+ *
+ * 该缓存（`likeSongsList`）没有账号维度，换账号后仍留着上一个账号的曲目，
+ * 渲染出来就是「我喜欢的音乐」页显示上一个账号的内容。
+ */
+const clearNeteaseLikeCache = async (): Promise<void> => {
+  const dataStore = useDataStore();
+  await dataStore.setLikeSongsList(
+    { id: 0, name: "我喜欢的音乐", cover: "/images/album.jpg?asset" },
+    [],
+  );
+};
+
 // 退出登录
 export const toLogout = async (): Promise<void> => {
   const dataStore = useDataStore();
+  const platformStore = usePlatformStore();
   await logout();
   // 去除 cookie
   removeCookie("MUSIC_U");
@@ -47,6 +63,9 @@ export const toLogout = async (): Promise<void> => {
   sessionStorage.clear();
   // 清除用户数据
   await dataStore.clearUserData();
+  // 清除「我喜欢的音乐」页面缓存与账号归属标识，不留上一个账号的残影
+  await clearNeteaseLikeCache();
+  platformStore.setAccountKey("netease", "");
   // 跳转首页
   router.push("/");
   window.$message.success("成功退出登录");
@@ -74,9 +93,16 @@ export const updateUserData = async () => {
   try {
     if (!isLogin()) return;
     const dataStore = useDataStore();
+    const platformStore = usePlatformStore();
     // userId
     const { profile } = await userAccount();
     const userId = profile.userId;
+    // 账号已切换：上一个账号的「我喜欢的音乐」页面缓存整体作废
+    const accountKey = String(userId);
+    const previousAccountKey = platformStore.accountKeyOf("netease");
+    if (previousAccountKey && previousAccountKey !== accountKey) {
+      await clearNeteaseLikeCache();
+    }
     // 获取用户信息
     const userDetailData = await userDetail(userId);
     const userData = Object.assign(profile, userDetailData);
@@ -113,6 +139,8 @@ export const updateUserData = async () => {
     // 若部分失败
     const hasFailed = allUserLikeResult.some((result) => result.status === "rejected");
     if (hasFailed) throw new Error("Failed to update some user data");
+    // 喜欢数据已按当前账号重写，标记这批数据的归属账号
+    platformStore.setAccountKey("netease", accountKey);
   } catch (error) {
     console.error("❌ Error updating user data:", error);
     throw error;
@@ -141,6 +169,8 @@ export const updateSpecialUserData = async (userData?: any) => {
     };
     // 获取用户喜欢数据
     await updateUserLikePlaylist();
+    // 喜欢数据已按当前账号重写，标记这批数据的归属账号
+    usePlatformStore().setAccountKey("netease", String(dataStore.userData.userId));
   } catch (error) {
     console.error("❌ Error updating special user data:", error);
     throw error;

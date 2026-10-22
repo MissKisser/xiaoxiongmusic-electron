@@ -50,7 +50,7 @@ import { dispatchLikedSongs, dispatchPlaylistDetail } from "@/api/platform/dispa
 import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isObject, uniqBy } from "lodash-es";
-import { useDataStore, usePlatformStore, onPlatformChange } from "@/stores";
+import { useDataStore, usePlatformStore, onAccountChange, onPlatformChange } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
 import { isLogin, updateUserLikePlaylist } from "@/utils/auth";
 import { useLikedSongsSync } from "@/composables/useLikedSongsSync";
@@ -88,6 +88,19 @@ const currentRequestId = ref<number>(0);
 
 // 第三方平台列表的请求序号，用于防止竞态条件
 const platformRequestId = ref<number>(0);
+
+/**
+ * 网易云「我喜欢的音乐」缓存是否属于当前账号
+ *
+ * 网易云的用户喜欢数据与页面缓存都没有账号维度，
+ * 换账号后仍留着上一个账号的歌单号与曲目，
+ * 这里按账号归属标识判定，不属于当前账号就不用缓存。
+ */
+const isNeteaseCacheValid = computed<boolean>(() => {
+  const userId = dataStore.userData.userId;
+  if (!userId) return false;
+  return platformStore.accountKeyOf("netease") === String(userId);
+});
 
 // 加载提示
 const loadingMsg = ref<MessageReactive | null>(null);
@@ -400,6 +413,8 @@ const stopLikedSync = useLikedSongsSync({
 
 // 加载缓存
 const loadLikedCache = () => {
+  // 缓存不属于当前账号时不加载，避免渲染上一个账号的「我喜欢的音乐」
+  if (!isNeteaseCacheValid.value) return;
   if (isObject(dataStore.likeSongsList.detail)) {
     setDetailData(dataStore.likeSongsList.detail);
   }
@@ -540,9 +555,21 @@ const offPlatformChange = onPlatformChange(() => {
   void getPlaylistDetail(playlistId.value, { getList: true, refresh: true });
 });
 
+// 账号变更后按新账号刷新喜欢歌曲
+const offAccountChange = onAccountChange(({ platform }) => {
+  if (platform !== platformStore.currentPlatform) return;
+  if (isPlatformSource.value) {
+    void getPlatformLikedSongs(true);
+    return;
+  }
+  // 网易云：账号变更后重新解析当前账号的「我喜欢的音乐」歌单号
+  void getPlaylistDetail(playlistId.value, { getList: true, refresh: true });
+});
+
 onDeactivated(() => loadingMsgShow(false));
 onUnmounted(() => {
   offPlatformChange();
+  offAccountChange();
   stopLikedSync();
   loadingMsgShow(false);
 });
@@ -555,7 +582,8 @@ onMounted(async () => {
   }
 
   // 首先确保用户歌单数据已加载
-  if (!dataStore.userLikeData.playlists?.length) {
+  // 缓存不属于当前账号时强制重拉，避免沿用上一个账号的「我喜欢的音乐」歌单号
+  if (!dataStore.userLikeData.playlists?.length || !isNeteaseCacheValid.value) {
     try {
       await updateUserLikePlaylist();
     } catch (error) {

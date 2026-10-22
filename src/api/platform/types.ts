@@ -288,6 +288,8 @@ export interface PlatformPlaylist {
   subscribed?: boolean;
   /** 歌单目录号（QQ 自建歌单读详情时需要） */
   dirId?: number;
+  /** 系统歌单标记原始值（酷狗：1 默认收藏 / 2 我喜欢的歌） */
+  isDef?: number;
   /** 是否为系统默认歌单（如「我喜欢的音乐」「默认收藏」） */
   isDefault?: boolean;
   /** 是否为「我喜欢的音乐」歌单 */

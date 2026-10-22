@@ -21,6 +21,7 @@ import { useMobile } from "@/composables/useMobile";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
 import {
+  onAccountChange,
   onPlatformChange,
   useDataStore,
   useLocalStore,
@@ -714,8 +715,15 @@ const offPlatformChange = onPlatformChange(({ platform }) => {
   void platformStore.refreshPlaylists(platform);
 });
 
+// 账号变更后按新账号刷新歌单列表
+const offAccountChange = onAccountChange(({ platform }) => {
+  if (platform !== platformStore.currentPlatform) return;
+  void platformStore.refreshPlaylists(platform);
+});
+
 onUnmounted(() => {
   offPlatformChange();
+  offAccountChange();
 });
 
 // 监听路由

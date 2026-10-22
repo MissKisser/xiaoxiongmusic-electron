@@ -67,14 +67,12 @@ import {
   qqSearchAlbums,
   qqSearchArtists,
   qqSearchPlaylists,
-  qqUserLikedSongs,
   qqUserPlaylistList,
   toQqAlbumEntry,
   toQqArtistEntry,
   toQqPlaylistEntry,
 } from "./qqmusic";
 import {
-  buildCoverSize,
   toArtistType,
   toCoverEntry,
   toSongType,
@@ -216,6 +214,21 @@ const readUserPlaylists = async (platform: ApiPlatform): Promise<DispatchUserPla
 };
 
 /**
+ * 作废平台歌单列表缓存
+ *
+ * 缓存按平台存放，里面是**某个账号**的歌单号；账号切换后同一个歌单号
+ * 在新账号下指向完全不同的歌单，因此账号变更时必须显式作废。
+ * @param platform 音源平台，缺省作废全部平台
+ */
+export const invalidatePlaylistListCache = (platform?: ApiPlatform): void => {
+  if (!platform) {
+    playlistListCache.clear();
+    return;
+  }
+  playlistListCache.delete(platform);
+};
+
+/**
  * 用歌单列表补齐歌单头
  *
  * QQ 音乐与酷狗的歌单详情接口不返回歌单名 / 封面 / 创建者，
@@ -344,6 +357,37 @@ const fetchNeteasePlaylistDetail = async (
     pageSize: NETEASE_PAGE_SIZE,
     privileges,
   };
+};
+
+/**
+ * 解析当前账号的「我喜欢的音乐」歌单
+ *
+ * 系统红心歌单的**歌单号按账号分配**（酷狗 listid、QQ 音乐歌单号都是账号内主键），
+ * 换账号后同一个歌单号指向完全不同的歌单，因此一律从**当前账号自己的歌单列表**
+ * 里按平台语义解析，绝不沿用其它账号解析出的歌单号。
+ *
+ * 平台语义：
+ * - QQ 音乐：系统目录 `dirId === 201`（「我喜欢」）；
+ * - 酷狗：上游标记 `is_def === 2`（「我喜欢的歌」）。
+ *
+ * 网易云不走这里：它的「我喜欢的音乐」是用户歌单列表首项，由用户歌单接口给出。
+ * @param platform 音源平台
+ * @returns 命中的歌单条目，未命中时为 null
+ */
+export const resolveLikedPlaylist = async (
+  platform: ApiPlatform,
+): Promise<DispatchPlaylist | null> => {
+  if (platform === "qqmusic") {
+    const { owned } = await qqUserPlaylistList();
+    const hit = owned.find((playlist) => playlist.isLiked === true);
+    return hit ? { ...fromPlatformPlaylist(hit), isLiked: true } : null;
+  }
+  if (platform === "kugou") {
+    const { owned } = await kgUserPlaylistList();
+    const hit = kgFindLikedPlaylist(owned);
+    return hit ? { ...fromPlatformPlaylist(hit), isLiked: true } : null;
+  }
+  return null;
 };
 
 /**
@@ -476,7 +520,9 @@ export const dispatchPlaylistDetail = async (
       }
     }
     // 歌单名 / 封面 / 创建者在歌单列表里，详情接口不回，用列表补齐
-    const entry = res.name ? null : await findPlaylistEntry(platform, options.id);
+    // （系统「我喜欢」目录只回名字不回封面，两者缺一都要回列表补）
+    const entry =
+      res.name && res.coverImgUrl ? null : await findPlaylistEntry(platform, options.id);
     const playlist: DispatchPlaylist = {
       id: res.id,
       name: res.name || entry?.name || "",
@@ -563,7 +609,9 @@ export const dispatchPlaylistDetail = async (
  * 读取当前平台的「我喜欢的音乐」曲目
  *
  * 网易云以传入的歌单 id 读取（该 id 来自网易云用户歌单列表首项）；
- * QQ 音乐走「我喜欢」系统目录模块；酷狗的「喜欢」是一种歌单，按歌单号定位后读取。
+ * QQ 音乐与酷狗的「我喜欢的音乐」都是**账号内分配**的系统歌单，
+ * 一律从当前账号自己的歌单列表里按平台语义解析出歌单号，
+ * 再走与侧边栏歌单条目相同的取数路径读取曲目。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 歌单头部与曲目
@@ -596,38 +644,9 @@ export const dispatchLikedSongs = async (
     return fetchNeteasePlaylistDetail(playlistId, true);
   }
 
-  if (platform === "qqmusic") {
-    const page = options.page ?? 1;
-    const res = await qqUserLikedSongs((page - 1) * pageSize, pageSize);
-    // 「我喜欢的音乐」是系统目录，曲目模块不回封面，封面只在「我的歌单列表」里给出
-    const entry = res.coverImgUrl ? null : await findPlaylistEntry(platform, res.id);
-    const cover = res.coverImgUrl || entry?.cover || "";
-    const playlist: DispatchPlaylist = {
-      id: res.id,
-      name: res.name,
-      cover,
-      coverSize: cover ? buildCoverSize(cover) : res.coverSize,
-      count: res.trackCount,
-      playCount: res.playCount,
-      description: res.description,
-      creatorName: res.creator?.name,
-      platform: res.platform,
-      platformId: res.platformId,
-      subscribed: false,
-    };
-    return {
-      detail: toCoverType(playlist),
-      tracks: res.tracks.map(toSongType),
-      count: res.trackCount,
-      hasMore: res.hasMore,
-      page,
-      pageSize,
-    };
-  }
-
-  // 酷狗：「喜欢」是歌单的一种，先在自建歌单里定位再读曲目
-  const { owned } = await kgUserPlaylistList();
-  const liked = kgFindLikedPlaylist(owned);
+  const page = options.page ?? 1;
+  // 「我喜欢的音乐」的歌单号按账号分配，必须从当前账号自己的歌单列表里解析
+  const liked = await resolveLikedPlaylist(platform);
   if (!liked) {
     return {
       detail: toCoverType({
@@ -635,7 +654,7 @@ export const dispatchLikedSongs = async (
         name: "我喜欢的音乐",
         cover: "",
         count: 0,
-        platform: "kugou",
+        platform,
         subscribed: false,
       }),
       tracks: [],
@@ -645,30 +664,15 @@ export const dispatchLikedSongs = async (
       pageSize,
     };
   }
-  const listId = liked.platformId ?? liked.id;
-  const page = options.page ?? 1;
-  const res = await kgPlaylistDetail(listId, page, pageSize);
-  const playlist: DispatchPlaylist = {
-    id: res.id,
-    name: liked.name || res.name,
-    cover: liked.coverImgUrl || res.coverImgUrl,
-    coverSize: liked.coverSize ?? res.coverSize,
-    count: liked.trackCount || res.trackCount,
-    playCount: liked.playCount || res.playCount,
-    description: liked.description || res.description,
-    creatorName: liked.creator?.name || res.creator?.name,
-    platform: res.platform,
-    platformId: res.platformId,
-    subscribed: false,
-  };
-  return {
-    detail: toCoverType(playlist),
-    tracks: res.tracks.map(toSongType),
-    count: playlist.count,
-    hasMore: res.hasMore,
+  // 曲目走与侧边栏歌单条目完全相同的取数路径，
+  // 保证「我喜欢的音乐」页与列表里的那条「我喜欢」指向同一张歌单
+  const res = await dispatchPlaylistDetail(platform, {
+    id: liked.platformId ?? liked.id,
+    dirId: liked.dirId,
     page,
     pageSize,
-  };
+  });
+  return { ...res, page, pageSize };
 };
 
 /**

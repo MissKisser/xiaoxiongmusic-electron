@@ -5,6 +5,7 @@ import { platformCall } from "@/api/platform/music";
 import {
   dispatchLikedSongIds,
   dispatchUserPlaylists,
+  invalidatePlaylistListCache,
   type DispatchPlaylist,
 } from "@/api/platform/dispatch";
 
@@ -37,6 +38,59 @@ export type PlatformChangeListener = (payload: PlatformChangePayload) => void;
 
 /** 平台切换事件订阅集合 */
 const changeListeners = new Set<PlatformChangeListener>();
+
+/**
+ * 账号变更事件载荷
+ */
+export interface AccountChangePayload {
+  /** 变更的平台 */
+  platform: ApiPlatform;
+  /** 变更后的账号标识（登出时为空串） */
+  accountKey: string;
+  /** 变更前的账号标识 */
+  previousAccountKey: string;
+  /** 变更后是否处于登录态 */
+  loggedIn: boolean;
+}
+
+/**
+ * 账号变更事件订阅者
+ */
+export type AccountChangeListener = (payload: AccountChangePayload) => void;
+
+/**
+ * 账号变更事件订阅集合
+ */
+const accountListeners = new Set<AccountChangeListener>();
+
+/**
+ * 订阅账号变更事件
+ *
+ * 账号变更（登录 / 登出 / 换号）后，页面层据此作废并重新拉取
+ * 该平台的歌单列表、红心集合与用户数据。
+ * @param listener 事件订阅者
+ * @returns 取消订阅函数
+ */
+export const onAccountChange = (listener: AccountChangeListener): (() => void) => {
+  accountListeners.add(listener);
+  return () => {
+    accountListeners.delete(listener);
+  };
+};
+
+/**
+ * 广播账号变更事件
+ * @param payload 事件载荷
+ */
+const emitAccountChange = (payload: AccountChangePayload): void => {
+  for (const listener of accountListeners) {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error("账号变更事件处理失败：", error);
+    }
+  }
+};
 
 /**
  * 进行中的喜欢歌曲装载请求（按平台去重）
@@ -93,6 +147,17 @@ interface PlatformState {
   currentPlatform: ApiPlatform;
   /** 各平台账号资料 */
   platformProfiles: PlatformProfileMap;
+  /**
+   * 各平台账号数据的归属标识
+   *
+   * 记录当前持有的账号维度数据（歌单列表 / 红心集合 / 用户喜欢数据）属于哪个账号：
+   * - 第三方平台：平台账号资料里的 userId（QQ 的 uin、酷狗的 userid）；
+   * - 网易云：网易云 uid。
+   *
+   * 标识变化即意味着账号已切换：系统红心歌单的歌单号按账号分配，
+   * 同一个歌单号在新账号下指向完全不同的歌单，旧数据必须整体作废重拉。
+   */
+  accountKeys: Record<string, string>;
   /** 当前平台的歌单列表（第三方平台维护，网易云沿用既有本地缓存） */
   playlists: {
     /** 自建歌单 */
@@ -126,6 +191,8 @@ export const usePlatformStore = defineStore("platform", {
       qqmusic: null,
       kugou: null,
     },
+    // 各平台账号数据的归属标识
+    accountKeys: {},
     // 当前平台的歌单列表
     playlists: {
       owned: [],
@@ -162,6 +229,56 @@ export const usePlatformStore = defineStore("platform", {
   },
 
   actions: {
+    /**
+     * 读取某平台账号数据的归属标识
+     * @param platform 音源平台
+     * @returns 账号标识，未登录时为空串
+     */
+    accountKeyOf(platform: ApiPlatform): string {
+      return this.accountKeys[platform] ?? "";
+    },
+
+    /**
+     * 标记某平台账号数据的归属标识
+     *
+     * 标识变化意味着账号已切换：作废该平台的账号维度数据并广播事件，
+     * 由页面层重新拉取。
+     * @param platform 音源平台
+     * @param accountKey 账号标识，登出时为空串
+     */
+    setAccountKey(platform: ApiPlatform, accountKey: string): void {
+      const previousAccountKey = this.accountKeys[platform] ?? "";
+      if (previousAccountKey === accountKey) return;
+      this.invalidateAccountData(platform, accountKey);
+      emitAccountChange({
+        platform,
+        accountKey,
+        previousAccountKey,
+        loggedIn: !!accountKey,
+      });
+    },
+
+    /**
+     * 作废某平台的账号维度数据
+     *
+     * 账号切换后，上一个账号的歌单号与红心集合在新账号下指向完全不同的内容，
+     * 必须整体作废：红心集合、分派层的歌单列表缓存、当前平台的歌单列表槽。
+     * @param platform 音源平台
+     * @param accountKey 变更后的账号标识（登出时为空串）
+     */
+    invalidateAccountData(platform: ApiPlatform, accountKey: string): void {
+      if (accountKey) this.accountKeys[platform] = accountKey;
+      else delete this.accountKeys[platform];
+      // 红心集合按平台存放，账号切换后整体作废
+      this.invalidateLikedSongs(platform);
+      // 分派层的歌单列表缓存按平台存放，内含上一个账号的歌单号
+      invalidatePlaylistListCache(platform);
+      // 当前平台的歌单列表槽存放的是上一个账号的歌单
+      if (this.currentPlatform === platform) {
+        this.playlists = { owned: [], favorites: [] };
+      }
+    },
+
     /**
      * 切换当前平台
      *
@@ -270,11 +387,18 @@ export const usePlatformStore = defineStore("platform", {
         this.playlists = { owned: [], favorites: [] };
         return this.playlists;
       }
+      // 记录发起时的账号标识：请求期间账号被切换时，本次结果整体丢弃，
+      // 避免把上一个账号的歌单写进新账号的界面
+      const accountKey = this.accountKeys[target] ?? "";
       try {
-        this.playlists = await dispatchUserPlaylists(target);
+        const lists = await dispatchUserPlaylists(target);
+        if ((this.accountKeys[target] ?? "") !== accountKey) return this.playlists;
+        this.playlists = lists;
       } catch (error) {
         console.error(`获取 ${PLATFORM_META[target].name}歌单列表失败：`, error);
-        this.playlists = { owned: [], favorites: [] };
+        if ((this.accountKeys[target] ?? "") === accountKey) {
+          this.playlists = { owned: [], favorites: [] };
+        }
       }
       return this.playlists;
     },
@@ -283,6 +407,8 @@ export const usePlatformStore = defineStore("platform", {
      * 刷新指定平台的账号资料
      *
      * 走主进程平台模块 `user_detail`；未登录时把本地资料清空。
+     * 账号标识与已记录的不一致即意味着账号已切换（换号登录），
+     * 此时作废该平台的账号维度数据并广播账号变更事件。
      * @param platform 音源平台
      * @returns 平台账号资料，未登录时为 null
      */
@@ -293,6 +419,18 @@ export const usePlatformStore = defineStore("platform", {
         const res = await platformCall<PlatformUserDetail>(platform, "user_detail");
         const profile = res?.loggedIn && res.profile ? res.profile : null;
         this.platformProfiles[platform] = profile;
+        // 账号标识变化 = 账号已切换：作废上一个账号的数据并广播事件
+        const accountKey = profile?.userId ? String(profile.userId) : "";
+        const previousAccountKey = this.accountKeys[platform] ?? "";
+        if (accountKey !== previousAccountKey) {
+          this.invalidateAccountData(platform, accountKey);
+          emitAccountChange({
+            platform,
+            accountKey,
+            previousAccountKey,
+            loggedIn: !!profile,
+          });
+        }
         // 登录态就绪时装载其「我喜欢的音乐」集合，使任意页面的红心状态可判定
         if (profile) void this.ensureLikedSongs(platform);
         return profile;
@@ -314,23 +452,28 @@ export const usePlatformStore = defineStore("platform", {
      * 登出指定平台
      *
      * 清空主进程会话与本地资料；网易云由既有退出登录链路处理。
+     * 登出后该平台的账号维度数据整体作废，不留上一个账号的残影。
      * @param platform 音源平台
      */
     async logout(platform: ApiPlatform): Promise<void> {
       if (platform === "netease") return;
       await window.api.platformMusic.clearSession(platform);
+      const previousAccountKey = this.accountKeys[platform] ?? "";
       this.platformProfiles[platform] = null;
-      // 登出后该平台的喜欢歌曲缓存作废，重新登录时再装载
-      this.invalidateLikedSongs(platform);
-      if (this.currentPlatform === platform) {
-        this.playlists = { owned: [], favorites: [] };
-      }
+      // 账号维度数据整体作废：红心集合、歌单列表缓存、当前平台的歌单列表
+      this.invalidateAccountData(platform, "");
+      emitAccountChange({
+        platform,
+        accountKey: "",
+        previousAccountKey,
+        loggedIn: false,
+      });
     },
   },
 
   // 持久化（只存非凭据字段）
   persist: {
     key: "platform-store",
-    pick: ["currentPlatform", "platformProfiles"],
+    pick: ["currentPlatform", "platformProfiles", "accountKeys"],
   },
 });
