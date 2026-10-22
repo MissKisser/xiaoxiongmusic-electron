@@ -9,6 +9,11 @@
  * 以 error_code=20017 拒收，因此这里不固定标识，跟随当前登录模式。
  * 目录语义：type=0 自建，type=1 收藏（与网易云的 subtype 含义一致）。
  * listid=1「默认收藏」、listid=3「我喜欢」，概念版另有 listid=4「我喜欢的歌」。
+ *
+ * 顺序口径：上游 `/v4/get_list_all_file` 的默认序是「添加时间升序」（先加的在前），
+ * 官方客户端显示的却是歌单内的位置序——每个条目自带 `sort` 位置下标，
+ * 新加入的曲目位置最靠前。同批导入的曲目添加时间完全相同，
+ * 只按添加时间排还原不出官方顺序，因此这里按位置下标还原。
  */
 
 import { kgGatewayRequest } from "../core/request";
@@ -22,6 +27,9 @@ import type { KGModule, KGParams } from "../core/types";
 
 /** cloudlist 路由头 */
 const CLOUDLIST_ROUTER = "cloudlist.service.kugou.com";
+
+/** 云歌单单页最大曲目数（上游分页上限） */
+const MAX_PAGE_SIZE = 300;
 
 /** 封面模板的尺寸占位取值 */
 const COVER_SIZE = 300;
@@ -77,6 +85,13 @@ interface KgSongItem {
   album_name?: string;
   /** 时长（毫秒） */
   timelen?: number;
+  /**
+   * 歌单内的位置下标（0 起）
+   *
+   * 官方客户端按这个位置显示曲目，新加入的曲目位置最靠前；
+   * 上游的默认返回序是「添加时间升序」，与此不是一回事。
+   */
+  sort?: number;
   /** 封面模板，尺寸以 `{size}` 占位 */
   cover?: string;
   media_pay_type?: number;
@@ -254,6 +269,91 @@ const findCollectedEntry = (items: KgPlaylistItem[], listid: string): KgPlaylist
   null;
 
 /**
+ * 按官方客户端的显示顺序排列曲目
+ *
+ * 官方客户端按歌单内的位置下标（条目自带的 `sort`）显示曲目，
+ * 位置 0 是最靠前的一首，新加入的曲目落在最前面。
+ * 上游没有给位置下标时保持上游原序，不擅自改变语义。
+ * @param items 上游返回的曲目条目
+ * @returns 按官方位置序排列的曲目条目
+ */
+const sortByOfficialOrder = (items: KgSongItem[]): KgSongItem[] => {
+  const positions = items.map((item) => {
+    const value: unknown = item?.sort;
+    if (value === undefined || value === null || value === "") return Number.NaN;
+    return Number(value);
+  });
+  if (positions.some((value) => !Number.isFinite(value))) return items;
+  const order = items.map((_, index) => index);
+  order.sort((a, b) => positions[a] - positions[b] || a - b);
+  return order.map((index) => items[index]);
+};
+
+/**
+ * 读取一个云歌单的全部曲目，并按官方客户端的显示顺序排列
+ *
+ * 上游分页按「添加时间」切分，与官方显示序不是一回事，
+ * 还原官方顺序必须把整个歌单取回来再排，之后按位置序切页。
+ * 上游在分页边界可能重复同一条目，这里按内容哈希去重。
+ * @param session 酷狗会话凭据
+ * @param listid 歌单 listid
+ * @returns 曲目条目与歌曲总数
+ */
+const readListSongsInOfficialOrder = async (
+  session: { userid: string; token: string },
+  listid: string,
+): Promise<{ items: KgSongItem[]; count: number }> => {
+  const collected: KgSongItem[] = [];
+  const seen = new Set<string>();
+  let count = 0;
+  let totalPages = 1;
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    const response = await kgGatewayRequest<{
+      data?: {
+        info?: KgSongItem[];
+        count?: number;
+      };
+    }>("/v4/get_list_all_file", {
+      method: "POST",
+      headers: { "x-router": CLOUDLIST_ROUTER },
+      params: { plat: 1 },
+      data: {
+        listid,
+        userid: session.userid,
+        area_code: 1,
+        show_relate_goods: 1,
+        pagesize: MAX_PAGE_SIZE,
+        allplatform: 1,
+        show_cover: 1,
+        type: 0,
+        token: session.token,
+        page,
+      },
+    });
+
+    const data = response?.data ?? {};
+    const items = data.info ?? [];
+    count = data.count ?? count;
+    totalPages = Math.max(1, Math.ceil(count / MAX_PAGE_SIZE));
+    for (const item of items) {
+      const key = String(item?.hash ?? "");
+      if (key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      collected.push(item);
+    }
+    if (items.length === 0) break;
+  }
+
+  return {
+    items: sortByOfficialOrder(collected),
+    count: count || collected.length,
+  };
+};
+
+/**
  * 读取当前账号的云端歌单列表（自建 + 收藏）
  */
 export const user_playlist_list: KGModule = async () => {
@@ -295,40 +395,21 @@ export const playlist_detail: KGModule = async (params: KGParams) => {
   if (!listid) return { code: 400, message: "id required" };
 
   const page = Math.max(1, Number(params.page ?? 1) || 1);
-  const pageSize = Math.max(1, Number(params.pageSize ?? 300) || 300);
+  const pageSize = Math.max(1, Number(params.pageSize ?? MAX_PAGE_SIZE) || MAX_PAGE_SIZE);
 
-  const response = await kgGatewayRequest<{
-    data?: {
-      info?: KgSongItem[];
-      count?: number;
-      page?: number;
-      pagesize?: number;
-      listid?: string | number;
-    };
-  }>("/v4/get_list_all_file", {
-    method: "POST",
-    headers: { "x-router": CLOUDLIST_ROUTER },
-    params: { plat: 1 },
-    data: {
-      listid,
-      userid: session.userid,
-      area_code: 1,
-      show_relate_goods: 1,
-      pagesize: pageSize,
-      allplatform: 1,
-      show_cover: 1,
-      type: 0,
-      token: session.token,
-      page,
-    },
-  });
+  const result = await readListSongsInOfficialOrder(
+    { userid: session.userid, token: session.token },
+    listid,
+  );
 
-  const data = response?.data ?? {};
-  const songs = data.info ?? [];
+  // 官方显示序是整张歌单的位置序，分页要按排好序的全量切页，
+  // 否则翻页会与上游的添加时间序错位
+  const offset = (page - 1) * pageSize;
+  const songs = result.items.slice(offset, offset + pageSize);
 
   // 收藏歌单的曲目在源歌单里：本地收藏号在云歌单命名空间下查不到曲目，
   // 此时按源歌单标识解析；源歌单是公开歌单时走公开歌单通道读取。
-  if (songs.length === 0) {
+  if (result.items.length === 0) {
     const snapshot = await readPlaylistItems({
       userid: session.userid,
       token: session.token,
@@ -388,10 +469,10 @@ export const playlist_detail: KGModule = async (params: KGParams) => {
 
   return {
     code: 200,
-    id: String(data.listid ?? listid),
+    id: listid,
     page,
     pageSize,
-    total: data.count ?? songs.length,
+    total: result.count || result.items.length,
     songs: songs.map(mapCloudSong),
   };
 };
