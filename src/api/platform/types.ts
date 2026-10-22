@@ -281,6 +281,14 @@ export interface PlatformPlaylist {
   isDefault?: boolean;
   /** 是否为「我喜欢的音乐」歌单 */
   isLiked?: boolean;
+  /** 源歌单号（酷狗收藏歌单：源歌单在源账号下的歌单号） */
+  originListid?: string;
+  /** 源歌单的精选号（酷狗收藏歌单：公开歌单通道按此取曲目） */
+  originSpecialid?: string;
+  /** 源歌单作者 userid（酷狗收藏歌单） */
+  originUserid?: string;
+  /** 收藏记录的全局标识（酷狗收藏歌单） */
+  globalCollectionId?: string;
 }
 
 /** 归一化后的歌单详情（网易云 `playlist` + `tracks` 形状） */
@@ -289,6 +297,12 @@ export interface PlatformPlaylistDetail extends PlatformPlaylist {
   tracks: PlatformSong[];
   /** 是否还有更多曲目 */
   hasMore: boolean;
+  /** 收藏歌单的源歌单是否可读（酷狗收藏歌单） */
+  sourceReadable?: boolean;
+  /** 收藏歌单的源歌单名（酷狗收藏歌单） */
+  sourceName?: string;
+  /** 收藏歌单的源歌单曲目数（酷狗收藏歌单） */
+  sourceCount?: number;
 }
 
 /** 归一化后的播放地址（网易云 `song/url/v1` 形状 + 判据字段） */

@@ -30,7 +30,7 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDECi0Np2UR87scwrvTr72L6oO01rBbbBPriSDFPxr3
 -----END PUBLIC KEY-----`;
 
 /** 概念版模式下的签名盐值集合 */
-const currentSalts = () => ({
+export const currentSalts = () => ({
   androidSign: isKugouConceptMode() ? LITE_SIGN_SALT : ANDROID_SIGN_SALT,
   signKey: isKugouConceptMode() ? LITE_SIGN_KEY_SALT : SIGN_KEY_SALT,
   publicKey: isKugouConceptMode() ? KG_LITE_PUBLIC_KEY : KG_PUBLIC_KEY,

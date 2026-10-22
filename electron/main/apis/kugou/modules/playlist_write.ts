@@ -14,9 +14,6 @@
 import { getSessionCookies } from "../../../database/PlatformSessionDB";
 import { coreLog } from "../../../logger";
 import {
-  KG_CLOUD_APPID,
-  KG_CLOUD_CLIENTVER,
-  KG_CLOUD_SIGN_SALT,
   KG_CLOUDLIST_ROUTER,
   getCloudDeviceMid,
   sendCloudRequest,
@@ -24,6 +21,8 @@ import {
   type KgRequestContext,
   type KgSendResult,
 } from "../core/cloud";
+import { getKgAppid, getKgClientver } from "../core/config";
+import { currentSalts } from "../core/crypto";
 import type { KGModule, KGParams } from "../core/types";
 
 /** 公开歌单信息接口（取收藏所需的创建者与原始歌单号） */
@@ -49,6 +48,8 @@ interface KgListItem {
   list_create_listid?: number | string;
   list_create_gid?: string;
   list_create_username?: string;
+  /** 源歌单的精选号（收藏歌单才有，读源歌单曲目的键） */
+  musiclib_id?: number | string;
 }
 
 /** 歌单内的歌曲条目 */
@@ -65,23 +66,36 @@ interface KgSongRow {
 interface KgPublicPlaylist {
   /** 创建者 userid */
   suid: string;
-  /** 原始歌单号 */
+  /** 原始歌单号（精选号） */
   specialid: string;
   /** 歌单名 */
   name: string;
+  /** 源歌单的全局标识，格式 `collection_3_<源用户id>_<源云歌单号>_0` */
+  globalSpecialid: string;
+  /** 源歌单在源账号下的云歌单号 */
+  sourceListid: string;
+  /** 源歌单作者 userid */
+  sourceUserid: string;
 }
 
 /**
  * 从登录态构造协议请求上下文
+ *
+ * 客户端标识与签名盐值必须与读模块取同一套（`system.kugouLoginVersion` 决定的
+ * 概念版 / 标准版），否则网关会以 `error_code=20017` 拒收：登录 token 与客户端
+ * 标识是绑定的，用另一套标识签名会让「读歌单列表」「定位「我喜欢」」这类前置
+ * 调用全部落空，写操作随之无法定位目标歌单。
  * @returns 请求上下文，未登录时返回 null
  */
 const currentContext = (): KgRequestContext | null => {
   const session = getSessionCookies("kugou");
   if (!session.token || !session.userid) return null;
+  const salts = currentSalts();
   return {
-    appid: KG_CLOUD_APPID,
-    clientver: KG_CLOUD_CLIENTVER,
-    signSalt: KG_CLOUD_SIGN_SALT,
+    appid: getKgAppid(),
+    clientver: getKgClientver(),
+    signSalt: salts.androidSign,
+    publicKey: salts.publicKey,
     mid: getCloudDeviceMid(),
     dfid: session.dfid || "-",
     userid: session.userid,
@@ -168,7 +182,22 @@ const readListSongs = async (
 };
 
 /**
- * 读取公开歌单信息（收藏时取创建者与原始歌单号）
+ * 解析源歌单的全局标识
+ *
+ * `global_specialid` 形如 `collection_3_<源用户id>_<源云歌单号>_0`，
+ * 其中第三段是源歌单作者、第四段是源歌单在该作者账号下的云歌单号。
+ * 这两个值才是上游认可的「源歌单身份」：直接拿精选号当云歌单号提交，
+ * 上游会以 error_code=30203 拒收。
+ * @param globalSpecialid - 源歌单全局标识
+ * @returns 源歌单作者与云歌单号，取不到时返回空串
+ */
+const parseGlobalSpecialid = (globalSpecialid: string): { userid: string; listid: string } => {
+  const parts = globalSpecialid.split("_");
+  return { userid: parts[2] ?? "", listid: parts[3] ?? "" };
+};
+
+/**
+ * 读取公开歌单信息（收藏时取源歌单身份）
  * @param specialid - 公开歌单号
  * @returns 歌单信息，取不到时返回 null
  */
@@ -180,12 +209,73 @@ const readPublicPlaylist = async (specialid: string): Promise<KgPublicPlaylist |
   });
   if (!res.ok) return null;
   const body = (await res.json()) as {
-    data?: { suid?: number | string; specialid?: number | string; specialname?: string };
+    data?: {
+      suid?: number | string;
+      specialid?: number | string;
+      specialname?: string;
+      global_specialid?: string;
+    };
   };
   const suid = String(body?.data?.suid ?? "");
   const id = String(body?.data?.specialid ?? "");
   if (!suid || !id) return null;
-  return { suid, specialid: id, name: String(body?.data?.specialname ?? "") };
+  const globalSpecialid = String(body?.data?.global_specialid ?? "");
+  const source = parseGlobalSpecialid(globalSpecialid);
+  return {
+    suid,
+    specialid: id,
+    name: String(body?.data?.specialname ?? ""),
+    globalSpecialid,
+    sourceListid: source.listid,
+    sourceUserid: source.userid,
+  };
+};
+
+/**
+ * 等待歌单列表满足条件
+ *
+ * 上游的读取是最终一致的（多节点复制延迟，实测最长可达数十秒），
+ * 写完立刻读回可能拿到旧值，读回校验会误判。这里在有限次数内重试，
+ * 直到满足条件或用尽次数。
+ * @param ctx - 请求上下文
+ * @param predicate - 判定条件
+ * @returns 是否在重试次数内满足条件
+ */
+const waitMyLists = async (
+  ctx: KgRequestContext,
+  predicate: (items: KgListItem[]) => boolean,
+): Promise<boolean> => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const snapshot = await readMyLists(ctx);
+    if (predicate(snapshot.items)) return true;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return false;
+};
+
+/**
+ * 等待歌单曲目满足条件
+ *
+ * 上游的读取是最终一致的（多节点复制延迟，实测最长可达数十秒），
+ * 写完立刻读回可能拿到旧值，读回校验会误判。这里在有限次数内重试，
+ * 直到满足条件或用尽次数。
+ * @param ctx - 请求上下文
+ * @param listid - 歌单 listid
+ * @param predicate - 判定条件
+ * @returns 最后一次读到的曲目与总数
+ */
+const waitListSongs = async (
+  ctx: KgRequestContext,
+  listid: string,
+  predicate: (items: KgSongRow[]) => boolean,
+): Promise<{ items: KgSongRow[]; count: number }> => {
+  let last: { items: KgSongRow[]; count: number } = { items: [], count: 0 };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    last = await readListSongs(ctx, listid);
+    if (predicate(last.items)) return last;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return last;
 };
 
 /**
@@ -374,13 +464,15 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
   const op = String(params.op ?? "add");
   if (op !== "add" && op !== "del") return { code: 400, message: "op 必须是 add 或 del" };
 
-  const songs = (Array.isArray(params.songs) ? params.songs : []) as Array<
-    Record<string, unknown>
-  >;
+  const songs = (Array.isArray(params.songs) ? params.songs : []) as Array<Record<string, unknown>>;
   if (songs.length < 1) return { code: 400, message: "songs required" };
   if (songs.length > MAX_TRACKS) return { code: 400, message: "songs 数量超出上限" };
 
-  const hashes = songs.map((song) => String(song.hash ?? "").trim().toUpperCase());
+  const hashes = songs.map((song) =>
+    String(song.hash ?? "")
+      .trim()
+      .toUpperCase(),
+  );
   if (hashes.some((hash) => !hash)) {
     return { code: 400, message: "songs 中存在缺少 hash 的条目" };
   }
@@ -445,7 +537,9 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
       return { code: 502, message: `加歌失败：${err}` };
     }
 
-    const after = await readListSongs(ctx, listid);
+    const after = await waitListSongs(ctx, listid, (items) =>
+      hashes.every((hash) => items.some((row) => String(row.hash ?? "").toUpperCase() === hash)),
+    );
     const missing = hashes.filter(
       (hash) => !after.items.some((row) => String(row.hash ?? "").toUpperCase() === hash),
     );
@@ -456,7 +550,18 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
     return { code: 200, id: listid, changed: true, count: after.count, verified: true };
   }
 
-  const before = await readListSongs(ctx, listid);
+  // 删歌要按歌单里的 fileid 定位歌曲；上游读取有复制延迟，
+  // 读到旧快照时歌里还没有这首歌，这里重试等上游视图追上来
+  const hashesNeedingLookup = songs
+    .map((song, index) => ({ hash: hashes[index], fileid: Number(song.fileid ?? 0) }))
+    .filter((item) => !item.fileid)
+    .map((item) => item.hash);
+  const before = await waitListSongs(ctx, listid, (items) =>
+    hashesNeedingLookup.every((hash) => {
+      const hit = items.find((row) => String(row.hash ?? "").toUpperCase() === hash);
+      return Boolean(hit && hit.fileid);
+    }),
+  );
   const fileIds: number[] = [];
   for (const [index, song] of songs.entries()) {
     const fileid = Number(song.fileid ?? 0);
@@ -464,11 +569,12 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
       fileIds.push(fileid);
       continue;
     }
-    const hit = before.items.find(
-      (row) => String(row.hash ?? "").toUpperCase() === hashes[index],
-    );
+    const hit = before.items.find((row) => String(row.hash ?? "").toUpperCase() === hashes[index]);
     if (!hit || !hit.fileid) {
-      return { code: 400, message: `未在歌单中找到可删除的歌曲：${hashes[index]}` };
+      return {
+        code: 502,
+        message: `删歌失败：未能定位歌曲的 fileid（上游歌单曲目读取延迟），请重试：${hashes[index]}`,
+      };
     }
     fileIds.push(Number(hit.fileid));
   }
@@ -501,7 +607,9 @@ export const playlist_tracks: KGModule = async (params: KGParams) => {
     return { code: 502, message: `删歌失败：${err}` };
   }
 
-  const after = await readListSongs(ctx, listid);
+  const after = await waitListSongs(ctx, listid, (items) =>
+    hashes.every((hash) => !items.some((row) => String(row.hash ?? "").toUpperCase() === hash)),
+  );
   const still = hashes.filter((hash) =>
     after.items.some((row) => String(row.hash ?? "").toUpperCase() === hash),
   );
@@ -528,7 +636,9 @@ export const playlist_subscribe: KGModule = async (params: KGParams) => {
 
   const snapshot = await readMyLists(ctx);
   const collected = snapshot.items.find(
-    (item) => Number(item.type ?? 0) === 1 && String(item.list_create_listid ?? "") === id,
+    (item) =>
+      Number(item.type ?? 0) === 1 &&
+      (String(item.musiclib_id ?? "") === id || String(item.list_create_listid ?? "") === id),
   );
 
   if (subscribed) {
@@ -536,7 +646,16 @@ export const playlist_subscribe: KGModule = async (params: KGParams) => {
 
     const origin = await readPublicPlaylist(id);
     if (!origin) {
-      return { code: 502, message: "无法获取该公开歌单的创建者信息（suid / specialid），未执行收藏" };
+      return {
+        code: 502,
+        message: "无法获取该公开歌单的创建者信息（suid / specialid），未执行收藏",
+      };
+    }
+    if (!origin.globalSpecialid || !origin.sourceUserid || !origin.sourceListid) {
+      return {
+        code: 502,
+        message: "无法获取该公开歌单的源歌单标识（global_specialid），未执行收藏",
+      };
     }
 
     const res = await sendGatewayRequest(
@@ -549,9 +668,11 @@ export const playlist_subscribe: KGModule = async (params: KGParams) => {
         type: 1,
         source: 1,
         is_pri: 0,
-        list_create_userid: Number(origin.suid),
-        list_create_listid: Number(origin.specialid),
-        list_create_gid: `collection_3_${origin.suid}_${origin.specialid}_0`,
+        // 源歌单身份取自 global_specialid：精选号不是云歌单号，
+        // 直接用精选号提交会被上游以 error_code=30203 拒收
+        list_create_userid: Number(origin.sourceUserid),
+        list_create_listid: Number(origin.sourceListid),
+        list_create_gid: origin.globalSpecialid,
         from_shupinmv: 0,
       },
       ctx,
@@ -563,14 +684,15 @@ export const playlist_subscribe: KGModule = async (params: KGParams) => {
       return { code: 502, message: `收藏歌单失败：${err}` };
     }
 
-    // 服务端收藏成功后会重新分配本地 listid，只能按原始歌单号比对
-    const after = await readMyLists(ctx);
-    const hit = after.items.find(
-      (item) =>
-        Number(item.type ?? 0) === 1 &&
-        String(item.list_create_listid ?? "") === String(origin.specialid),
+    // 服务端收藏成功后会重新分配本地 listid，只能按源歌单全局标识比对
+    const found = await waitMyLists(ctx, (items) =>
+      items.some(
+        (item) =>
+          Number(item.type ?? 0) === 1 &&
+          String(item.list_create_gid ?? "") === origin.globalSpecialid,
+      ),
     );
-    if (!hit) return { code: 502, message: "收藏后读回校验失败：收藏列表中未找到该歌单" };
+    if (!found) return { code: 502, message: "收藏后读回校验失败：收藏列表中未找到该歌单" };
 
     return { code: 200, id: String(origin.specialid), subscribed: true, verified: true };
   }
@@ -606,8 +728,8 @@ export const playlist_subscribe: KGModule = async (params: KGParams) => {
     return { code: 502, message: `取消收藏失败：${err}` };
   }
 
-  const after = await readMyLists(ctx);
-  if (findByListId(after.items, String(collected.listid))) {
+  const removed = await waitMyLists(ctx, (items) => !findByListId(items, String(collected.listid)));
+  if (!removed) {
     return { code: 502, message: "取消收藏后读回校验失败：收藏仍在列表中" };
   }
 

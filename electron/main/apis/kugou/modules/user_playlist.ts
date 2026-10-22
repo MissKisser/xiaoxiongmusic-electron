@@ -1,19 +1,21 @@
 /**
  * 酷狗「我的歌单」读取模块
  *
- * 走概念版（lite）网关的 cloudlist 路由：
+ * 走网关的 cloudlist 路由（客户端标识跟随当前登录模式）：
  * - 我的歌单列表：/v7/get_all_list
  * - 云端歌单里的歌：/v4/get_list_all_file
  *
- * 已实测：这两条路径在正式版标识下取不到（20017 / 502），必须用概念版。
+ * 登录 token 与客户端标识绑定：网关会校验二者是否同源，用另一套标识签名会被
+ * 以 error_code=20017 拒收，因此这里不固定标识，跟随当前登录模式。
  * 目录语义：type=0 自建，type=1 收藏（与网易云的 subtype 含义一致）。
- * listid=1「默认收藏」、listid=3「我喜欢」、listid=4 概念版「我喜欢的歌」。
+ * listid=1「默认收藏」、listid=3「我喜欢」，概念版另有 listid=4「我喜欢的歌」。
  */
 
 import { kgGatewayRequest } from "../core/request";
 import { fillCover } from "../core/config";
 import { extractEntryTitle } from "../core/song_title";
 import { rsaEncryptKugou } from "../core/crypto";
+import { readPublicPlaylist } from "./playlist";
 import { getSessionCookies } from "../../../database/PlatformSessionDB";
 import { coreLog } from "../../../logger";
 import type { KGModule, KGParams } from "../core/types";
@@ -38,6 +40,14 @@ interface KgPlaylistItem {
   update_time?: number;
   is_def?: number;
   status?: number;
+  /** 源歌单号（收藏歌单才有）：源歌单在源账号下的歌单号 */
+  list_create_listid?: number | string;
+  /** 源歌单的 gid（收藏歌单才有） */
+  list_create_gid?: string;
+  /** 收藏记录的全局标识（收藏歌单才有） */
+  global_collection_id?: string;
+  /** 源歌单的精选号（收藏歌单才有，读源歌单曲目的键） */
+  musiclib_id?: number | string;
 }
 
 /**
@@ -152,14 +162,55 @@ const mapCloudSong = (song: KgSongItem) => {
 };
 
 /**
- * 读取当前账号的云端歌单列表（自建 + 收藏）
+ * 把云歌单条目映射为对外结构
+ *
+ * 收藏歌单（type=1）在「我的歌单」里只是一条**收藏记录**：
+ * `listid` 是本地收藏号，云歌单接口按这个号查不到曲目，曲目在源歌单里。
+ * 源歌单的真实标识是 `list_create_listid`（源歌单号）+ `list_create_userid`
+ * （源歌单作者）；源歌单是公开歌单时，`list_create_listid` 即公开歌单号。
+ * @param item 上游歌单条目
+ * @param subscribed 是否为收藏歌单
+ * @returns 对外歌单对象
  */
-export const user_playlist_list: KGModule = async () => {
-  const session = getSessionCookies("kugou");
-  if (!session.token || !session.userid) {
-    return { code: 401, message: "未登录" };
-  }
+const mapPlaylistItem = (item: KgPlaylistItem, subscribed: boolean) => ({
+  listid: String(item.listid ?? ""),
+  name: item.name ?? "",
+  type: item.type ?? (subscribed ? 1 : 0),
+  count: item.count ?? 0,
+  creator: item.list_create_username ?? "",
+  cover: fillCover(item.pic, COVER_SIZE) ?? "",
+  intro: item.intro ?? "",
+  createTime: item.create_time ?? 0,
+  updateTime: item.update_time ?? 0,
+  isDefault: item.is_def === 1,
+  /** 是否为收藏（订阅）歌单 */
+  subscribed,
+  /** 源歌单号（收藏歌单才有） */
+  originListid: String(item.list_create_listid ?? ""),
+  /** 源歌单作者 userid（收藏歌单才有） */
+  originUserid: String(item.list_create_userid ?? ""),
+  /** 源歌单的 gid（收藏歌单才有） */
+  originGid: String(item.list_create_gid ?? ""),
+  /** 收藏记录的全局标识（收藏歌单才有） */
+  globalCollectionId: String(item.global_collection_id ?? ""),
+  /** 源歌单的精选号（收藏歌单才有，读源歌单曲目的键） */
+  originSpecialid: String(item.musiclib_id ?? ""),
+});
 
+/**
+ * 读取账号的云歌单条目快照
+ * @param session 会话凭据
+ * @returns 上游歌单条目列表与目录计数
+ */
+const readPlaylistItems = async (session: {
+  userid: string;
+  token: string;
+}): Promise<{
+  items: KgPlaylistItem[];
+  listCount: number;
+  collectCount: number;
+  albumCount: number;
+}> => {
   const response = await kgGatewayRequest<{
     data?: {
       info?: KgPlaylistItem[];
@@ -180,42 +231,52 @@ export const user_playlist_list: KGModule = async () => {
       pagesize: 100,
     },
   });
-
   const data = response?.data ?? {};
-  const info = data.info ?? [];
-  const owned = info.filter((item) => item.type !== 1);
-  const favorites = info.filter((item) => item.type === 1);
-
+  const items = data.info ?? [];
+  const owned = items.filter((item) => Number(item.type ?? 0) !== 1);
+  const favorites = items.filter((item) => Number(item.type ?? 0) === 1);
   return {
-    code: 200,
-    total: info.length,
+    items,
     listCount: data.list_count ?? owned.length,
     collectCount: data.collect_count ?? favorites.length,
     albumCount: data.album_count ?? 0,
-    owned: owned.map((item) => ({
-      listid: String(item.listid ?? ""),
-      name: item.name ?? "",
-      type: item.type ?? 0,
-      count: item.count ?? 0,
-      creator: item.list_create_username ?? "",
-      cover: fillCover(item.pic, COVER_SIZE) ?? "",
-      intro: item.intro ?? "",
-      createTime: item.create_time ?? 0,
-      updateTime: item.update_time ?? 0,
-      isDefault: item.is_def === 1,
-    })),
-    favorites: favorites.map((item) => ({
-      listid: String(item.listid ?? ""),
-      name: item.name ?? "",
-      type: item.type ?? 1,
-      count: item.count ?? 0,
-      creator: item.list_create_username ?? "",
-      cover: fillCover(item.pic, COVER_SIZE) ?? "",
-      intro: item.intro ?? "",
-      createTime: item.create_time ?? 0,
-      updateTime: item.update_time ?? 0,
-      isDefault: item.is_def === 1,
-    })),
+  };
+};
+
+/**
+ * 在歌单条目里定位收藏记录
+ * @param items 歌单条目列表
+ * @param listid 本地收藏号
+ * @returns 命中的收藏记录，未命中时返回 null
+ */
+const findCollectedEntry = (items: KgPlaylistItem[], listid: string): KgPlaylistItem | null =>
+  items.find((item) => Number(item.type ?? 0) === 1 && String(item.listid ?? "") === listid) ??
+  null;
+
+/**
+ * 读取当前账号的云端歌单列表（自建 + 收藏）
+ */
+export const user_playlist_list: KGModule = async () => {
+  const session = getSessionCookies("kugou");
+  if (!session.token || !session.userid) {
+    return { code: 401, message: "未登录" };
+  }
+
+  const snapshot = await readPlaylistItems({
+    userid: session.userid,
+    token: session.token,
+  });
+  const owned = snapshot.items.filter((item) => Number(item.type ?? 0) !== 1);
+  const favorites = snapshot.items.filter((item) => Number(item.type ?? 0) === 1);
+
+  return {
+    code: 200,
+    total: snapshot.items.length,
+    listCount: snapshot.listCount,
+    collectCount: snapshot.collectCount,
+    albumCount: snapshot.albumCount,
+    owned: owned.map((item) => mapPlaylistItem(item, false)),
+    favorites: favorites.map((item) => mapPlaylistItem(item, true)),
   };
 };
 
@@ -264,6 +325,67 @@ export const playlist_detail: KGModule = async (params: KGParams) => {
 
   const data = response?.data ?? {};
   const songs = data.info ?? [];
+
+  // 收藏歌单的曲目在源歌单里：本地收藏号在云歌单命名空间下查不到曲目，
+  // 此时按源歌单标识解析；源歌单是公开歌单时走公开歌单通道读取。
+  if (songs.length === 0) {
+    const snapshot = await readPlaylistItems({
+      userid: session.userid,
+      token: session.token,
+    });
+    const collected = findCollectedEntry(snapshot.items, listid);
+    if (collected) {
+      // 收藏记录在云歌单命名空间下没有曲目，曲目在源歌单里；
+      // 源歌单的精选号在 musiclib_id 上，公开歌单通道按精选号取曲目
+      const sourceId = String(collected.musiclib_id ?? "");
+      const sourceUserId = String(collected.list_create_userid ?? "");
+      const sourceListid = String(collected.list_create_listid ?? "");
+      if (sourceId) {
+        try {
+          const source = await readPublicPlaylist(sourceId, page, pageSize);
+          if (source.songs.length > 0) {
+            return {
+              code: 200,
+              id: listid,
+              page,
+              pageSize,
+              total: source.total,
+              songs: source.songs,
+              subscribed: true,
+              sourceId,
+              sourceUserId,
+              sourceListid,
+              sourceName: source.name,
+              sourceCreator: source.creator,
+              sourceCount: collected.count ?? 0,
+              sourceReadable: true,
+            };
+          }
+        } catch (err) {
+          coreLog.warn("[kg-user] 读取收藏歌单源歌单失败:", err);
+        }
+      }
+      // 源歌单不可读：如实回报，不把「读不到」当成「没有歌」
+      return {
+        code: 200,
+        id: listid,
+        page,
+        pageSize,
+        total: 0,
+        songs: [],
+        subscribed: true,
+        sourceId,
+        sourceUserId,
+        sourceListid,
+        sourceName: collected.name ?? "",
+        sourceCreator: collected.list_create_username ?? "",
+        sourceCount: collected.count ?? 0,
+        sourceReadable: false,
+        message: "源歌单当前不可读",
+      };
+    }
+  }
+
   return {
     code: 200,
     id: String(data.listid ?? listid),

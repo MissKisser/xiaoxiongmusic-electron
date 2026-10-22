@@ -265,6 +265,72 @@ const normalizeSpecialSong = (
 /**
  * 读取酷狗公开歌单
  *
+ * 收藏歌单的源歌单是公开歌单时，「我的歌单」详情据此解析源歌单曲目，
+ * 故这里把读取逻辑单独导出，供公开歌单模块与「我的歌单」模块共用。
+ * @param specialId 公开歌单号
+ * @param page 页码，从 1 开始
+ * @param pageSize 每页数量
+ * @returns 歌单头部与曲目
+ */
+export const readPublicPlaylist = async (specialId: string, page: number, pageSize: number) => {
+  const infoResponse = await kgRequest<{ data?: RawEntry }>(
+    `http://mobilecdn.kugou.com/api/v3/special/info?specialid=${encodeURIComponent(specialId)}&format=json`,
+    { allowBusinessError: true },
+  );
+  const info = infoResponse.data || {};
+
+  const songsResponse = await kgRequest<{
+    data?: { info?: RawEntry[]; total?: number };
+  }>(
+    `http://mobilecdn.kugou.com/api/v3/special/song?specialid=${encodeURIComponent(specialId)}&page=${page}&pagesize=${pageSize}&format=json`,
+    { allowBusinessError: true },
+  );
+  const songs = songsResponse?.data?.info || [];
+  const total = Number(songsResponse?.data?.total || songs.length);
+
+  const coverTemplate = info.imgurl || "";
+
+  // 歌曲条目不带专辑名，按 album_id 批量反查
+  const albumIds = [...new Set(songs.map((song) => String(song.album_id || "")).filter(Boolean))];
+  let albums = new Map<string, AlbumInfo>();
+  try {
+    albums = await resolveAlbums(albumIds);
+  } catch (err) {
+    coreLog.warn("[kg-playlist] 解析歌单专辑信息失败:", err);
+  }
+
+  return {
+    id: String(info.specialid || specialId),
+    name: decodeName(info.specialname),
+    description: decodeName(info.intro),
+    creator: decodeName(info.nickname),
+    creatorId: info.suid === undefined ? "" : String(info.suid),
+    cover: fillCover(coverTemplate, 300) ?? "",
+    coverOriginal: fillCover(coverTemplate, 480) ?? "",
+    playCount: Number(info.playcount || 0),
+    collectCount: Number(info.collectcount || 0),
+    commentCount: Number(info.commentcount || 0),
+    publishTime: info.publishtime || "",
+    tags: (Array.isArray(info.tags) ? info.tags : []).map((tag: RawEntry) => ({
+      id: String(tag.tagid || ""),
+      name: tag.tagname || "",
+    })),
+    total: Number(info.songcount || total || songs.length),
+    /** 歌单涉及的专辑，按专辑 ID 索引 */
+    albums: [...albums.entries()].map(([albumId, album]) => ({
+      id: albumId,
+      name: album.name,
+      cover: album.cover,
+    })),
+    songs: songs.map((song) => normalizeSpecialSong(song, coverTemplate, albums)),
+    /** 上游原始响应 */
+    raw: { info, songs },
+  };
+};
+
+/**
+ * 读取酷狗公开歌单
+ *
  * @param params.id - 歌单 ID
  * @param params.page - 页码，从 1 开始
  * @param params.pageSize - 每页条数
@@ -283,60 +349,12 @@ export const playlist: KGModule = async (params: KGParams) => {
   );
 
   try {
-    const infoResponse = await kgRequest<{ data?: RawEntry }>(
-      `http://mobilecdn.kugou.com/api/v3/special/info?specialid=${encodeURIComponent(specialId)}&format=json`,
-      { allowBusinessError: true },
-    );
-    const info = infoResponse.data || {};
-
-    const songsResponse = await kgRequest<{
-      data?: { info?: RawEntry[]; total?: number };
-    }>(
-      `http://mobilecdn.kugou.com/api/v3/special/song?specialid=${encodeURIComponent(specialId)}&page=${page}&pagesize=${pageSize}&format=json`,
-      { allowBusinessError: true },
-    );
-    const songs = songsResponse?.data?.info || [];
-    const total = Number(songsResponse?.data?.total || songs.length);
-
-    const coverTemplate = info.imgurl || "";
-
-    // 歌曲条目不带专辑名，按 album_id 批量反查
-    const albumIds = [...new Set(songs.map((song) => String(song.album_id || "")).filter(Boolean))];
-    let albums = new Map<string, AlbumInfo>();
-    try {
-      albums = await resolveAlbums(albumIds);
-    } catch (err) {
-      coreLog.warn("[kg-playlist] 解析歌单专辑信息失败:", err);
-    }
-
+    const detail = await readPublicPlaylist(specialId, page, pageSize);
     return {
       code: 200,
-      id: String(info.specialid || specialId),
-      name: decodeName(info.specialname),
-      description: decodeName(info.intro),
-      creator: decodeName(info.nickname),
-      creatorId: info.suid === undefined ? "" : String(info.suid),
-      cover: fillCover(coverTemplate, 300) ?? "",
-      coverOriginal: fillCover(coverTemplate, 480) ?? "",
-      playCount: Number(info.playcount || 0),
-      collectCount: Number(info.collectcount || 0),
-      commentCount: Number(info.commentcount || 0),
-      publishTime: info.publishtime || "",
-      tags: (Array.isArray(info.tags) ? info.tags : []).map((tag: RawEntry) => ({
-        id: String(tag.tagid || ""),
-        name: tag.tagname || "",
-      })),
+      ...detail,
       page,
       pageSize,
-      total: Number(info.songcount || total || songs.length),
-      /** 歌单涉及的专辑，按专辑 ID 索引 */
-      albums: [...albums.entries()].map(([albumId, album]) => ({
-        id: albumId,
-        name: album.name,
-        cover: album.cover,
-      })),
-      songs: songs.map((song) => normalizeSpecialSong(song, coverTemplate, albums)),
-      raw: { info, songs },
     };
   } catch (err) {
     coreLog.error("[kg-playlist] 读取公开歌单失败:", err);

@@ -170,6 +170,8 @@ const toDispatchPlaylist = (playlist: PlatformPlaylist): DispatchPlaylist => ({
   dirId: playlist.dirId,
   subscribed: playlist.subscribed === true,
   isLiked: playlist.isLiked === true,
+  originListid: playlist.originListid,
+  originSpecialid: playlist.originSpecialid,
 });
 
 /**
@@ -659,8 +661,15 @@ export const likeSong = async (
     return result;
   }
   // 模块返回失败：读回确认写入是否实际生效
-  const after = await readLikedTotal(platform);
-  const countChanged = liked ? after > before : after < before;
+  // 上游的读取是最终一致的（多节点复制延迟），这里轮询几次再下结论，
+  // 避免写入其实已生效、只是读回拿到旧值时误报失败
+  let after = await readLikedTotal(platform);
+  let countChanged = liked ? after > before : after < before;
+  for (let attempt = 0; attempt < 3 && !countChanged; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    after = await readLikedTotal(platform);
+    countChanged = liked ? after > before : after < before;
+  }
   let stateMatched = false;
   if (!countChanged && platform === "qqmusic") {
     const state = await readQqSongLikedState(song);

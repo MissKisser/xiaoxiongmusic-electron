@@ -123,6 +123,12 @@ export interface DispatchPlaylist {
   subscribed: boolean;
   /** 是否为「我喜欢的音乐」歌单 */
   isLiked?: boolean;
+  /** 源歌单号（酷狗收藏歌单：源歌单在源账号下的歌单号） */
+  originListid?: string;
+  /** 源歌单的精选号（酷狗收藏歌单：公开歌单通道按此取曲目） */
+  originSpecialid?: string;
+  /** 收藏歌单的源歌单是否可读（酷狗收藏歌单） */
+  sourceReadable?: boolean;
 }
 
 /** 分派层歌单详情结果 */
@@ -255,6 +261,8 @@ const fromPlatformPlaylist = (playlist: PlatformPlaylist): DispatchPlaylist => (
   dirId: playlist.dirId,
   subscribed: playlist.subscribed === true,
   isLiked: playlist.isLiked === true,
+  originListid: playlist.originListid,
+  originSpecialid: playlist.originSpecialid,
 });
 
 /**
@@ -277,6 +285,7 @@ export const toCoverType = (playlist: DispatchPlaylist): CoverType => ({
   },
   createTime: playlist.createTime,
   updateTime: playlist.updateTime,
+  sourceReadable: playlist.sourceReadable,
 });
 
 /**
@@ -508,16 +517,18 @@ export const dispatchPlaylistDetail = async (
     console.error("读取酷狗云歌单失败，尝试公开歌单：", error);
     return dispatchPublicPlaylistDetail(options.id, page, pageSize);
   }
-  // 云歌单读不到曲目时，同样回落到公开精选歌单
+  const entry = await findPlaylistEntry(platform, options.id);
+  // 云歌单读不到曲目时，同样回落到公开精选歌单：
+  // 收藏歌单的本地 listid 只是收藏记录号，源歌单的精选号才是公开歌单号
   if (res.tracks.length === 0 && options.withTracks !== false) {
+    const publicId = entry?.originSpecialid ?? String(options.id);
     try {
-      const publicRes = await dispatchPublicPlaylistDetail(options.id, page, pageSize);
+      const publicRes = await dispatchPublicPlaylistDetail(publicId, page, pageSize);
       if (publicRes.tracks.length > 0) return publicRes;
     } catch (error) {
       console.error("读取酷狗公开歌单失败：", error);
     }
   }
-  const entry = await findPlaylistEntry(platform, options.id);
   const playlist: DispatchPlaylist = {
     id: res.id,
     name: res.name || entry?.name || "",
@@ -531,7 +542,12 @@ export const dispatchPlaylistDetail = async (
     updateTime: entry?.updateTime,
     platform: res.platform,
     platformId: res.platformId,
-    subscribed: false,
+    // 收藏歌单：源歌单号随条目带出，详情读不到时据此回落公开歌单通道
+    subscribed: res.subscribed === true || entry?.subscribed === true,
+    originListid: res.originListid ?? entry?.originListid,
+    originSpecialid: entry?.originSpecialid,
+    // 源歌单不可读时曲目为空，界面据此如实说明而不是当成空歌单
+    sourceReadable: res.sourceReadable,
   };
   return {
     detail: toCoverType(playlist),

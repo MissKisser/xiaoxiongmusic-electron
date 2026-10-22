@@ -61,6 +61,14 @@ interface KgPlaylistDetailResponse {
   total?: number;
   hasMore?: boolean;
   songs?: Array<Record<string, any>>;
+  /** 是否为收藏（订阅）歌单 */
+  subscribed?: boolean;
+  /** 收藏歌单的源歌单是否可读 */
+  sourceReadable?: boolean;
+  /** 收藏歌单的源歌单名 */
+  sourceName?: string;
+  /** 收藏歌单的源歌单曲目数 */
+  sourceCount?: number;
   message?: string;
 }
 
@@ -254,6 +262,12 @@ export const normalizeKgPlaylist = (playlist: Record<string, any>): PlatformPlay
     owned: !subscribed,
     subscribed,
     isDefault: playlist?.isDefault === true,
+    // 收藏歌单的真实标识是源歌单，本地 listid 只是收藏记录号
+    originListid: String(playlist?.originListid ?? playlist?.list_create_listid ?? "") || undefined,
+    originUserid: String(playlist?.originUserid ?? playlist?.list_create_userid ?? "") || undefined,
+    originSpecialid: String(playlist?.originSpecialid ?? playlist?.musiclib_id ?? "") || undefined,
+    globalCollectionId:
+      String(playlist?.globalCollectionId ?? playlist?.global_collection_id ?? "") || undefined,
   };
 };
 
@@ -278,6 +292,11 @@ export const normalizeKgPlaylistDetail = (
     platformId: String(detail?.id ?? "") || undefined,
     tracks: (detail?.songs ?? []).map(normalizeKgSong),
     hasMore: detail?.hasMore === true,
+    // 收藏歌单的源歌单可读性：源歌单不可读时曲目为空，界面据此给出明确说明
+    subscribed: detail?.subscribed === true,
+    sourceReadable: detail?.sourceReadable,
+    sourceName: detail?.sourceName,
+    sourceCount: detail?.sourceCount,
   };
 };
 

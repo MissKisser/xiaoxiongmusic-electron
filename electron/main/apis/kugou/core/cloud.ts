@@ -30,15 +30,6 @@ export const KG_CLOUDLIST_ROUTER = "cloudlist.service.kugou.com";
 /** Android 客户端 UA */
 const KG_ANDROID_UA = "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi";
 
-/** 概念版客户端标识（云歌单读写协议专用） */
-export const KG_CLOUD_APPID = 3116;
-
-/** 概念版客户端版本号 */
-export const KG_CLOUD_CLIENTVER = 11440;
-
-/** 概念版签名盐值（appkey） */
-export const KG_CLOUD_SIGN_SALT = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA";
-
 /** 概念版 RSA 公钥 */
 const KG_CLOUD_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDECi0Np2UR87scwrvTr72L6oO01rBbbBPriSDFPxr3Z5syug0O24QyQO8bg27+0+4kBzTBTBOZ/WWU0WryL1JSXRTXLgFVxtzIY41Pe7lPOgsfTCn5kZcvKhYKJesKnnJDNr5/abvTGf+rHG3YRwsCHcQ08/q6ifSioBszvb3QiwIDAQAB
@@ -58,6 +49,8 @@ export interface KgRequestContext {
   clientver: number;
   /** 签名盐值 */
   signSalt: string;
+  /** RSA 公钥（协议 B 传参用，缺省时用概念版公钥） */
+  publicKey?: string;
   /** 设备 MID（十进制字符串） */
   mid: string;
   /** 设备指纹 */
@@ -140,7 +133,10 @@ const randomAes = (): string => {
  * @returns 纯 JSON 文本
  */
 const stripTag = (text: string): string =>
-  text.trim().replace(/^<!--KG_TAG_RES_START-->/, "").replace(/<!--KG_TAG_RES_END-->$/, "");
+  text
+    .trim()
+    .replace(/^<!--KG_TAG_RES_START-->/, "")
+    .replace(/<!--KG_TAG_RES_END-->$/, "");
 
 /**
  * 解析 JSON 文本
@@ -159,8 +155,7 @@ const parseJson = (text: string): any => {
  * 计算本应用使用的设备 MID
  * @returns MID 十进制字符串
  */
-export const getCloudDeviceMid = (): string =>
-  BigInt(`0x${md5(KG_MID_SEED)}`).toString(10);
+export const getCloudDeviceMid = (): string => BigInt(`0x${md5(KG_MID_SEED)}`).toString(10);
 
 /**
  * 构造协议 A 请求：Android 客户端签名 + 明文 JSON body
@@ -216,6 +211,9 @@ export const buildGatewayRequest = (
 
 /**
  * 构造协议 B 请求：RSA 传参 + AES-128-CBC 加密 body
+ *
+ * 客户端标识、签名盐值与 RSA 公钥都取自请求上下文，与协议 A 及读模块保持
+ * 同一套（概念版 / 标准版）标识；公钥不匹配时网关无法解出 `p`。
  * @param path - 网关相对路径
  * @param body - 业务请求体
  * @param ctx - 请求上下文
@@ -228,9 +226,11 @@ export const buildCloudRequest = (
 ): BuiltRequest => {
   const aes = randomAes();
   const { key, iv } = deriveAesKey(aes);
-  const keyParam = md5(`${ctx.appid}${ctx.signSalt}${ctx.clientver}${ctx.clienttime}`).toLowerCase();
+  const keyParam = md5(
+    `${ctx.appid}${ctx.signSalt}${ctx.clientver}${ctx.clienttime}`,
+  ).toLowerCase();
   const p = publicEncrypt(
-    { key: KG_CLOUD_PUBLIC_KEY, padding: constants.RSA_PKCS1_PADDING },
+    { key: ctx.publicKey ?? KG_CLOUD_PUBLIC_KEY, padding: constants.RSA_PKCS1_PADDING },
     Buffer.from(JSON.stringify({ aes, uid: ctx.userid, token: ctx.token }), "utf8"),
   )
     .toString("hex")
@@ -257,11 +257,7 @@ export const buildCloudRequest = (
     "kg-rf": "B9EDA08A64250DEFFBCADDEE00F8F25F",
   };
 
-  const cipher = createCipheriv(
-    "aes-128-cbc",
-    Buffer.from(key, "utf8"),
-    Buffer.from(iv, "utf8"),
-  );
+  const cipher = createCipheriv("aes-128-cbc", Buffer.from(key, "utf8"), Buffer.from(iv, "utf8"));
   const cipherText = Buffer.concat([
     cipher.update(Buffer.from(JSON.stringify(body ?? {}), "utf8")),
     cipher.final(),
@@ -303,7 +299,11 @@ export const sendGatewayRequest = async (
   path: string,
   body: Record<string, unknown>,
   ctx: KgRequestContext,
-  options?: { params?: Record<string, unknown>; headers?: Record<string, string>; timeoutMs?: number },
+  options?: {
+    params?: Record<string, unknown>;
+    headers?: Record<string, string>;
+    timeoutMs?: number;
+  },
 ): Promise<KgSendResult> => {
   const built = buildGatewayRequest(path, body, ctx, options);
   const res = await fetch(built.url, {

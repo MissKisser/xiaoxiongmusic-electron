@@ -77,7 +77,11 @@
         <!-- 平台歌单曲目不可读 -->
         <n-empty
           v-if="isUnsupportedPlaylist"
-          description="该歌单类型暂不支持读取曲目"
+          :description="
+            collectedSourceUnreadable
+              ? '源歌单当前不可读（已删除或未公开）'
+              : '该歌单类型暂不支持读取曲目'
+          "
           style="margin-top: 60px"
           size="large"
         >
@@ -196,6 +200,11 @@ const isUnsupportedPlaylist = computed<boolean>(
     !loading.value &&
     (detailData.value?.count ?? 0) > 0 &&
     listData.value.length === 0,
+);
+
+// 收藏歌单的源歌单不可读（源歌单已删除或未公开，如实说明而非按空歌单呈现）
+const collectedSourceUnreadable = computed<boolean>(
+  () => detailData.value?.sourceReadable === false,
 );
 
 // 当前正在请求的歌单 ID，用于防止竞态条件

@@ -180,6 +180,13 @@ export type CoverType = {
    * QQ 音乐为 mid，酷狗为歌单号 / 专辑号；`id` 仍是平台数字 ID。
    */
   platformId?: string;
+  /**
+   * 收藏歌单的源歌单是否可读
+   *
+   * 酷狗收藏歌单的曲目在源歌单里；源歌单已删除或未公开时曲目为空，
+   * 该字段为 false，详情页据此给出明确说明而不是当成空歌单。
+   */
+  sourceReadable?: boolean;
 };
 
 /** 本地歌单类型 */
