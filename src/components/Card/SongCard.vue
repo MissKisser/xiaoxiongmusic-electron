@@ -39,8 +39,18 @@
               }"
               class="name-text"
             >
-              {{ settingStore.hideLyricBrackets ? removeBrackets(song?.name) : (song?.name || "未知曲目") }}
-              <n-text v-if="song.alia?.length && !settingStore.hideLyricBrackets" class="alia" depth="3"> ({{ song.alia }}) </n-text>
+              {{
+                settingStore.hideLyricBrackets
+                  ? removeBrackets(song?.name)
+                  : song?.name || "未知曲目"
+              }}
+              <n-text
+                v-if="song.alia?.length && !settingStore.hideLyricBrackets"
+                class="alia"
+                depth="3"
+              >
+                ({{ song.alia }})
+              </n-text>
             </n-ellipsis>
           </div>
           <n-flex :size="4" :wrap="false" class="desc" align="center">
@@ -95,7 +105,7 @@
                 v-for="ar in song.artists"
                 :key="ar.id"
                 class="ar"
-                @click="openJumpArtist(song.artists, ar.id)"
+                @click="openJumpArtist(song.artists, ar.id, song.platform)"
               >
                 {{ ar.name }}
               </n-text>
@@ -103,7 +113,11 @@
             <div v-else-if="song.type === 'radio'" class="artists">
               <n-text class="ar"> 电台节目 </n-text>
             </div>
-            <div v-else class="artists" @click="openJumpArtist(song.artists)">
+            <div
+              v-else
+              class="artists"
+              @click="openJumpArtist(song.artists, undefined, song.platform)"
+            >
               <n-text class="ar"> {{ song.artists || "未知艺术家" }} </n-text>
             </div>
           </n-flex>

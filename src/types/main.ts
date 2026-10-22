@@ -13,6 +13,13 @@ export type MetaData = {
    * `id` 仍是平台数字 ID，两者并存构成平台条目的双 id 口径。
    */
   platformId?: string;
+  /**
+   * 来源平台
+   *
+   * 缺省为网易云；第三方平台的歌手条目会带上该字段，
+   * 歌手详情页据此选择对应的数据源。
+   */
+  platform?: ApiPlatform;
 };
 
 export type DjData = {

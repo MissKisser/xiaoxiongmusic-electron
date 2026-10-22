@@ -26,19 +26,22 @@
 
 <script setup lang="ts">
 import type { SongType, MetaData } from "@/types/main";
+import type { ApiPlatform } from "@/types/shared";
 import { usePlatformStore, useSettingStore } from "@/stores";
 import { searchArtist, artistDetail } from "@/api/artist";
+import { jumpToArtist } from "@/utils/artist";
 import { uniq } from "lodash-es";
 
 const props = defineProps<{
   artist: SongType["artists"];
+  /** 内容来源平台（歌曲 / 歌单 / 专辑所属平台） */
+  platform?: ApiPlatform;
 }>();
 
 const emit = defineEmits<{
   close: [];
 }>();
 
-const router = useRouter();
 const settingStore = useSettingStore();
 const platformStore = usePlatformStore();
 
@@ -56,6 +59,7 @@ const getArtistData = async () => {
       id: Number(artist.id) || 0,
       name: artist.name,
       cover: artist.cover,
+      platform: artist.platform ?? props.platform,
       platformId: artist.platformId,
     }));
     return;
@@ -126,16 +130,9 @@ const getArtistData = async () => {
 
 // 跳转至歌手
 const jumpArtist = (item: MetaData) => {
-  const platformId = item.platformId;
-  if (!platformId && !item.id) return;
+  if (!item.platformId && !item.id) return;
   emit("close");
-  router.push({
-    name: "artist",
-    query: {
-      id: platformId ?? item.id,
-      ...(platformId ? { platform: platformStore.currentPlatform } : {}),
-    },
-  });
+  jumpToArtist(item);
 };
 
 onMounted(getArtistData);

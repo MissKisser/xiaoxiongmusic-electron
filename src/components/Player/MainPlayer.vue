@@ -44,7 +44,11 @@
             <!-- 名称 -->
             <TextContainer
               :key="musicStore.playSong.name"
-              :text="settingStore.hideLyricBrackets ? removeBrackets(musicStore.playSong.name) : musicStore.playSong.name"
+              :text="
+                settingStore.hideLyricBrackets
+                  ? removeBrackets(musicStore.playSong.name)
+                  : musicStore.playSong.name
+              "
               :speed="0.2"
               class="name"
             />
@@ -89,12 +93,28 @@
                   v-for="(item, index) in musicStore.playSong.artists"
                   :key="index"
                   class="ar-item"
-                  @click="openJumpArtist(musicStore.playSong.artists, item.id)"
+                  @click="
+                    openJumpArtist(
+                      musicStore.playSong.artists,
+                      item.id,
+                      musicStore.playSong.platform,
+                    )
+                  "
                 >
                   {{ item.name }}
                 </n-text>
               </template>
-              <n-text v-else class="ar-item" @click="openJumpArtist(musicStore.playSong.artists)">
+              <n-text
+                v-else
+                class="ar-item"
+                @click="
+                  openJumpArtist(
+                    musicStore.playSong.artists,
+                    undefined,
+                    musicStore.playSong.platform,
+                  )
+                "
+              >
                 {{ musicStore.playSong.artists || "未知艺术家" }}
               </n-text>
             </div>

@@ -75,7 +75,7 @@
                     v-for="(ar, arIndex) in detailData.artists"
                     :key="arIndex"
                     class="ar"
-                    @click="openJumpArtist(detailData.artists, ar.id)"
+                    @click="openJumpArtist(detailData.artists, ar.id, detailData.platform)"
                   >
                     {{ ar.name || "未知艺术家" }}
                   </n-text>
@@ -83,7 +83,7 @@
                 <div
                   v-else-if="config.showArtist"
                   class="artists text-hidden"
-                  @click="openJumpArtist(detailData.artists || '')"
+                  @click="openJumpArtist(detailData.artists || '', undefined, detailData.platform)"
                 >
                   <n-text class="ar"> {{ detailData.artists || "未知艺术家" }} </n-text>
                 </div>

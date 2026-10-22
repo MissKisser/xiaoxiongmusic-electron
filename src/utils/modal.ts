@@ -4,9 +4,9 @@ import type { ApiPlatform } from "@/types/shared";
 import { CURRENT_AGREEMENT_VERSION } from "@/constants/agreement";
 import { NScrollbar } from "naive-ui";
 import { isLogin } from "./auth";
+import { jumpToArtist } from "./artist";
 import { isArray, isFunction } from "lodash-es";
-import { useDataStore, usePlatformStore, useSettingStore } from "@/stores";
-import router from "@/router";
+import { useDataStore, useSettingStore } from "@/stores";
 import Login from "@/components/Modal/Login/Login.vue";
 import LoginPlatformQR from "@/components/Modal/Login/LoginPlatformQR.vue";
 import JumpArtist from "@/components/Modal/JumpArtist.vue";
@@ -104,22 +104,14 @@ export const openPlatformLogin = (platform: ApiPlatform) => {
  * 跳转到歌手
  * @param data 歌手信息
  * @param id 歌手 id
- * @returns
+ * @param platform 内容来源平台（歌曲 / 歌单 / 专辑所属平台）
  */
-export const openJumpArtist = (data: SongType["artists"], id?: number) => {
-  const platformStore = usePlatformStore();
+export const openJumpArtist = (data: SongType["artists"], id?: number, platform?: ApiPlatform) => {
   // 若 data 为数组且只有一个元素，则直接跳转
   if (isArray(data) && data.length <= 2 && id) {
-    // 第三方平台的歌手以平台主键定位
     const target = data.find((artist) => Number(artist.id) === id);
-    const platformId = target?.platformId;
-    router.push({
-      name: "artist",
-      query: {
-        id: platformId ?? id,
-        ...(platformId ? { platform: platformStore.currentPlatform } : {}),
-      },
-    });
+    // 未匹配到条目时按应用内 id 兜底
+    jumpToArtist(target ?? { id, name: "" }, platform);
     return;
   }
   const modal = window.$modal.create({
@@ -129,7 +121,7 @@ export const openJumpArtist = (data: SongType["artists"], id?: number) => {
     style: { width: "600px" },
     title: "跳转到歌手",
     content: () => {
-      return h(JumpArtist, { artist: data, onClose: () => modal.destroy() });
+      return h(JumpArtist, { artist: data, platform, onClose: () => modal.destroy() });
     },
   });
 };

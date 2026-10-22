@@ -33,7 +33,7 @@
                       v-for="(ar, index) in currentSong.artists"
                       class="clickable-text"
                       :key="ar.id"
-                      @click="$router.push({ name: 'artist', query: { id: ar.id } })"
+                      @click="jumpToArtist(ar, currentSong?.platform)"
                     >
                       {{ settingStore.hideBracketedContent ? removeBrackets(ar.name) : ar.name }}
                       <span v-if="index < currentSong.artists.length - 1"> / </span>
@@ -307,6 +307,7 @@ import {
   songFirstListenInfo,
 } from "@/api/song";
 import { formatSongsList, removeBrackets } from "@/utils/format";
+import { jumpToArtist } from "@/utils/artist";
 import { useSettingStore } from "@/stores";
 import dayjs from "dayjs";
 import { useSongMenu } from "@/composables/useSongMenu";

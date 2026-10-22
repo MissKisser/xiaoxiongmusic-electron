@@ -2,7 +2,11 @@
   <div :class="['player-data', settingStore.playerType, { center, light }]">
     <!-- 名称 -->
     <div class="name">
-      <span class="name-text text-hidden">{{ settingStore.hideLyricBrackets ? removeBrackets(musicStore.playSong.name) : (musicStore.playSong.name || "未知曲目") }}</span>
+      <span class="name-text text-hidden">{{
+        settingStore.hideLyricBrackets
+          ? removeBrackets(musicStore.playSong.name)
+          : musicStore.playSong.name || "未知曲目"
+      }}</span>
       <!-- 额外信息 -->
       <n-flex
         v-if="statusStore.playUblock || musicStore.playSong.pc"
@@ -28,7 +32,10 @@
       </n-flex>
     </div>
     <!-- 别名 -->
-    <span v-if="musicStore.playSong.alia && !settingStore.hideLyricBrackets" class="alia text-hidden">
+    <span
+      v-if="musicStore.playSong.alia && !settingStore.hideLyricBrackets"
+      class="alia text-hidden"
+    >
       {{ musicStore.playSong.alia }}
     </span>
     <n-flex :align="center ? 'center' : undefined" size="small" vertical>
@@ -62,11 +69,7 @@
             :class="{ loading: qualityLoading }"
             @click="handlePopselectClick"
           >
-            {{
-              !statusStore.songQuality
-                ? "未知音质"
-                : statusStore.songQuality
-            }}
+            {{ !statusStore.songQuality ? "未知音质" : statusStore.songQuality }}
           </span>
         </n-popselect>
         <!-- 歌词模式 -->
@@ -90,7 +93,7 @@
             v-for="ar in musicStore.playSong.artists"
             :key="ar.id"
             class="ar"
-            @click="jumpPage({ name: 'artist', query: { id: ar.id } })"
+            @click="jumpArtist(ar)"
           >
             {{ ar.name }}
           </span>
@@ -135,7 +138,7 @@
 <script setup lang="ts">
 import type { RouteLocationRaw } from "vue-router";
 import type { DropdownOption } from "naive-ui";
-import type { SongLevelDataType } from "@/types/main";
+import type { MetaData, SongLevelDataType } from "@/types/main";
 import { useMusicStore, useStatusStore, useSettingStore } from "@/stores";
 import { debounce, isObject } from "lodash-es";
 import { songQuality } from "@/api/song";
@@ -143,6 +146,7 @@ import { songLevelData, getSongLevelsData, AI_AUDIO_LEVELS } from "@/utils/meta"
 import { formatFileSize, handleSongQuality } from "@/utils/helper";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { removeBrackets } from "@/utils/format";
+import { jumpToArtist } from "@/utils/artist";
 
 defineProps<{
   center?: boolean;
@@ -327,6 +331,19 @@ const jumpPage = debounce(
     if (!go) return;
     statusStore.showFullPlayer = false;
     router.push(go);
+  },
+  300,
+  {
+    leading: true,
+    trailing: false,
+  },
+);
+
+// 跳转歌手详情
+const jumpArtist = debounce(
+  (artist: MetaData) => {
+    statusStore.showFullPlayer = false;
+    jumpToArtist(artist, musicStore.playSong.platform);
   },
   300,
   {

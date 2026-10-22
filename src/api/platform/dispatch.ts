@@ -1241,6 +1241,7 @@ const pickAlbumArtists = (songs: SongType[]): CoverType["artists"] => {
     id: Number(artist.id) || 0,
     name: artist.name,
     cover: artist.cover,
+    platform: artist.platform,
     platformId: artist.platformId,
   }));
 };

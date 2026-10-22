@@ -29,7 +29,7 @@ import {
   type MetaData,
   type SongType,
 } from "@/types/main";
-import { toNumericId } from "./common";
+import { toNumericId, resolveArtistPlatformId } from "./common";
 
 /** 归一化后的歌手（网易云形状） */
 export interface PlatformArtist {
@@ -542,8 +542,10 @@ export const toSongType = (song: PlatformSong): SongType => ({
     id: toNumericId(artist.id, artist.mid || artist.name),
     name: artist.name,
     cover: artist.picUrl,
+    // 来源平台随歌手条目透出，歌手跳转据此选择数据源
+    platform: song.platform,
     // QQ 音乐用 mid、酷狗用 author_id 作为歌手的平台主键
-    platformId: artist.mid ?? (artist.id !== "" ? String(artist.id) : undefined),
+    platformId: resolveArtistPlatformId(song.platform, artist),
   })),
   album: {
     id: toNumericId(song.album.id, song.album.platformId || song.album.name),

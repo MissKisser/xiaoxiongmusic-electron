@@ -6,6 +6,7 @@
  * 统一收敛到这里，平台文件只保留各自的归一化差异。
  */
 
+import type { ApiPlatform } from "@/types/shared";
 import type { PlatformArtist } from "./types";
 
 /**
@@ -50,6 +51,25 @@ export const normalizeArtistEntry = (
   name: String(singer?.name ?? ""),
   mid: mid || undefined,
 });
+
+/**
+ * 取歌手条目的平台定位主键
+ *
+ * QQ 音乐以 mid 定位，缺 mid 时无法定位歌手，主键留空；
+ * 酷狗以 author_id 定位，上游只给歌手名的曲目主键留空
+ * （酷狗歌手接口支持按名反查，名字不是主键）。
+ * @param platform 来源平台
+ * @param artist 归一化歌手
+ * @returns 平台内主键，取不到时为 undefined
+ */
+export const resolveArtistPlatformId = (
+  platform: ApiPlatform,
+  artist: PlatformArtist,
+): string | undefined => {
+  if (platform === "qqmusic") return artist.mid || undefined;
+  const id = String(artist.id ?? "").trim();
+  return /^\d+$/.test(id) ? id : undefined;
+};
 
 /** 派生数字 id 的保留区间下界（平台真实数字 id 均远小于该值） */
 const DERIVED_ID_BASE = 2000000000;
