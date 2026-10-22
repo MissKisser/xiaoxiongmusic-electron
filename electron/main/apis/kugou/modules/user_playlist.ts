@@ -197,6 +197,16 @@ const mapPlaylistItem = (item: KgPlaylistItem, subscribed: boolean) => ({
   intro: item.intro ?? "",
   createTime: item.create_time ?? 0,
   updateTime: item.update_time ?? 0,
+  /**
+   * 系统歌单标记（原始数值）
+   *
+   * 上游用 `is_def` 区分系统歌单：1 是「默认收藏」，2 是「我喜欢的歌」。
+   * 「我喜欢的歌」的歌单号按账号分配，没有跨账号通用的固定值，
+   * 因此读侧要按这个语义定位红心歌单，与写操作侧（`playlist_tracks` 的
+   * `is_def === 2` 口径）保持一致。
+   */
+  isDef: Number(item.is_def ?? 0),
+  /** 是否为「默认收藏」系统歌单 */
   isDefault: item.is_def === 1,
   /** 是否为收藏（订阅）歌单 */
   subscribed,
