@@ -90,6 +90,15 @@ const currentRequestId = ref<number>(0);
 const platformRequestId = ref<number>(0);
 
 /**
+ * 当前列表所属的平台
+ *
+ * 平台切换后旧平台的曲目必须整体离场：歌单号按账号分配，
+ * 同一个歌单号在新平台下指向完全不同的歌单，
+ * 旧列表留在界面上就是「我喜欢的音乐没有跟着平台切换」。
+ */
+const listPlatform = ref<ApiPlatform | null>(null);
+
+/**
  * 网易云「我喜欢的音乐」缓存是否属于当前账号
  *
  * 网易云的用户喜欢数据与页面缓存都没有账号维度，
@@ -281,6 +290,8 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
     if (detailData.value) {
       dataStore.setLikeSongsList(detailData.value, listData.value);
     }
+    // 列表归属平台：平台切换时据此判断屏幕上的曲目是不是上一个平台的
+    listPlatform.value = "netease";
     setLoading(false);
   } catch (error) {
     console.error("获取我喜欢的音乐失败：", error);
@@ -328,6 +339,8 @@ const getPlatformLikedSongs = async (refresh = false) => {
     } while (page <= 50);
     setDetailData(detail);
     setListData(uniqBy(tracks, "id"));
+    // 列表归属平台：平台切换时据此判断屏幕上的曲目是不是上一个平台的
+    listPlatform.value = platform;
     // 按平台的红心判据同步全局喜欢集合
     syncLikedState(platform, tracks);
     setLoading(false);
@@ -530,12 +543,28 @@ const removeSong = (ids: number[]) => {
   setListData(listData.value.filter((song) => !ids.includes(song.id)));
 };
 
+/**
+ * 载入第三方平台的「我喜欢的音乐」
+ *
+ * 屏幕上的列表若属于其它平台（平台刚切换，或离开本页期间平台被切过），
+ * 旧平台的曲目必须立即离场：先清空列表与滚动位置，再取新平台的数据，
+ * 否则旧平台的曲目会一直留到新数据到达，看起来就是「没有切换」。
+ * 同平台刷新保留旧列表，避免刷新时列表闪空。
+ * @param refresh 是否保留旧列表直至新数据到达
+ */
+const loadPlatformLikedSongs = async (refresh: boolean) => {
+  const platform = platformStore.currentPlatform;
+  // 列表属于其它平台：硬重置（清空列表 + 归零滚动位置）
+  const stale = listPlatform.value !== null && listPlatform.value !== platform;
+  await getPlatformLikedSongs(refresh && !stale);
+};
+
 onActivated(async () => {
   if (!isActivated.value) {
     isActivated.value = true;
   } else if (isPlatformSource.value) {
     // 第三方平台：重新拉取当前平台的喜欢歌曲
-    await getPlatformLikedSongs(true);
+    await loadPlatformLikedSongs(true);
   } else {
     // 检查是否需要更新缓存
     const needsUpdate = checkNeedsUpdate();
@@ -548,7 +577,8 @@ onActivated(async () => {
 // 平台切换后按新平台刷新喜欢歌曲
 const offPlatformChange = onPlatformChange(() => {
   if (isPlatformSource.value) {
-    void getPlatformLikedSongs(true);
+    // 切到第三方平台：旧平台的曲目先离场，再取新平台的数据
+    void loadPlatformLikedSongs(false);
     return;
   }
   // 切回网易云：按网易云既有链路刷新我喜欢的音乐

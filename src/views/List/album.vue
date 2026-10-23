@@ -361,8 +361,19 @@ onMounted(() => {
   getAlbumDetail(albumId.value, routePlatform.value);
 });
 
-// 平台切换：重新拉取专辑详情
-const stopPlatformWatch = onPlatformChange(() => {
+/**
+ * 平台切换后按新平台处理专辑页
+ *
+ * 专辑号是平台内主键：路由钉住平台的专辑在切到别的平台后，
+ * 那个专辑号在新平台下指向完全不同的专辑，留在原处显示的就不是当前平台的数据；
+ * 未钉平台的专辑页随当前平台走，按新平台重取即可。
+ */
+const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  if (routePlatform.value && routePlatform.value !== platform) {
+    // 钉在别的平台的专辑：回到当前平台的首页
+    router.push({ name: "home" });
+    return;
+  }
   getAlbumDetail(albumId.value, routePlatform.value, true);
 });
 

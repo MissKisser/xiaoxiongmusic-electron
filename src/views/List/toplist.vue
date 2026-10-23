@@ -70,7 +70,7 @@
 import type { SongType } from "@/types/main";
 import type { ApiPlatform } from "@/types/shared";
 import type { PlatformLeaderboardBoard } from "@/api/platform/types";
-import { usePlatformStore, useStatusStore } from "@/stores";
+import { usePlatformStore, useStatusStore, onPlatformChange } from "@/stores";
 import { dispatchLeaderboardDetail, dispatchLeaderboardGroups } from "@/api/platform/dispatch";
 import { useListActions } from "@/composables/List/useListActions";
 
@@ -293,8 +293,35 @@ onActivated(() => {
   if (loadedKey.value !== boardKey.value) loadBoard();
 });
 
+/**
+ * 平台切换后按新平台重取榜单
+ *
+ * 榜单号是平台内主键：路由钉住平台的榜单在切到别的平台后，
+ * 那个榜单号在新平台下指向完全不同的榜单，留在原处显示的就不是当前平台的数据；
+ * 未钉平台的榜单随当前平台走，重取即可。
+ */
+const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  const pinned = route.query.platform as string | undefined;
+  if (pinned === "qqmusic" || pinned === "kugou") {
+    if (pinned !== platform) {
+      // 钉在别的平台的榜单：回到当前平台的排行榜列表
+      router.push({ name: "discover-toplists" });
+      return;
+    }
+    // 钉在当前平台的榜单：重取该榜单
+    loadBoard();
+    return;
+  }
+  // 未钉平台：榜单随当前平台走，按新平台重取
+  loadBoard();
+});
+
 onMounted(() => {
   loadBoard();
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
 });
 </script>
 

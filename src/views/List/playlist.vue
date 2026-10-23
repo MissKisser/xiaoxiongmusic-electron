@@ -133,7 +133,7 @@ import {
 import { formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { isLogin, toLikePlaylist, updateUserLikePlaylist } from "@/utils/auth";
-import { useDataStore, useLocalStore, usePlatformStore } from "@/stores";
+import { useDataStore, useLocalStore, usePlatformStore, onPlatformChange } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
 import { uniqBy } from "lodash-es";
 import { useLikedSongsSync } from "@/composables/useLikedSongsSync";
@@ -878,8 +878,26 @@ onActivated(() => {
 });
 
 onDeactivated(() => loadingMsgShow(false));
+
+/**
+ * 平台切换后离开旧平台的歌单
+ *
+ * 歌单号是平台内主键：同一个歌单号在新平台下指向完全不同的歌单，
+ * 停留在旧平台的歌单详情页上，界面上显示的就不是当前平台的数据。
+ * 本地歌单与平台无关，不受此约束。
+ */
+const offPlatformChange = onPlatformChange(({ platform }) => {
+  if (isLocalPlaylist.value) return;
+  // 路由未带平台参数时按网易云歌单处理
+  const shown = routePlatform.value ?? "netease";
+  if (shown === platform) return;
+  // 回到当前平台的首页，避免旧平台的歌单继续留在界面上
+  router.push({ name: "home" });
+});
+
 onUnmounted(() => {
   stopLikedSync();
+  offPlatformChange();
   loadingMsgShow(false);
 });
 onMounted(() => {

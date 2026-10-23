@@ -64,9 +64,16 @@ const isSongFM = computed<boolean>(
 const visibleTabs = computed(() => DISCOVER_TABS[platformStore.currentPlatform] ?? []);
 
 // 平台切换：当前所在子页在目标平台不可见时回到首个可见子页
-const stopPlatformWatch = onPlatformChange(() => {
+const stopPlatformWatch = onPlatformChange(({ platform }) => {
   const name = router.currentRoute.value.name?.toString() ?? "";
   if (!name) return;
+  // 刷歌视图整页替换发现页内容，不属于任何子页
+  if (router.currentRoute.value.query.fm === "song") {
+    // 刷歌是 QQ 音乐与酷狗音乐的能力，切回网易云后回到发现页
+    if (platform === "netease") router.push({ name: "discover-playlists" });
+    // 仍在第三方平台：留在刷歌页，推荐流由该页自行按新平台重取
+    return;
+  }
   if (visibleTabs.value.some((tab) => tab.name === name)) return;
   const fallback = visibleTabs.value[0];
   if (!fallback) return;

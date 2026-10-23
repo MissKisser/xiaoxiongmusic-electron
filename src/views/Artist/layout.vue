@@ -435,8 +435,19 @@ watch(
   { immediate: true },
 );
 
-// 平台切换：重新拉取歌手详情
-const stopPlatformWatch = onPlatformChange(() => {
+/**
+ * 平台切换后按新平台处理歌手页
+ *
+ * 歌手号是平台内主键：路由钉住平台的歌手在切到别的平台后，
+ * 那个歌手号在新平台下指向完全不同的歌手，留在原处显示的就不是当前平台的数据；
+ * 未钉平台的歌手页随当前平台走，按新平台重取即可。
+ */
+const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  if (routePlatform.value && routePlatform.value !== platform) {
+    // 钉在别的平台的歌手：回到当前平台的首页
+    router.push({ name: "home" });
+    return;
+  }
   if (artistId.value) getArtistDetail(artistId.value);
 });
 

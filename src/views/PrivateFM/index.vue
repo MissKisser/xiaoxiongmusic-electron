@@ -82,7 +82,7 @@
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
-import { useMusicStore, usePlatformStore, useStatusStore } from "@/stores";
+import { useMusicStore, usePlatformStore, useStatusStore, onPlatformChange } from "@/stores";
 import type { MetaData } from "@/types/main";
 import { coverLoaded } from "@/utils/helper";
 import { debounce } from "lodash-es";
@@ -188,6 +188,25 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+});
+
+/**
+ * 平台切换后按新平台重取推荐流
+ *
+ * 推荐流列表随音乐 store 持久化，切换平台后旧列表仍在；
+ * 不重取的话，「刷歌」页面上显示的就是上一个平台的推荐流。
+ */
+const stopPlatformWatch = onPlatformChange(async () => {
+  loading.value = true;
+  try {
+    await songManager.initPersonalFM();
+  } finally {
+    loading.value = false;
+  }
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
 });
 </script>
 
