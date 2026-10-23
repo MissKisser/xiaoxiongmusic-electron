@@ -232,12 +232,21 @@ watchDebounced(
   { debounce: 300 },
 );
 
-// 平台切换后清空建议数据
+// 平台切换后按新平台重取建议
+//
+// 平台切换不改动搜索框里的关键词，建议只随关键词变化重新拉取，
+// 只清空不重取会让下拉面板一直是空的；留着旧平台的结果又会串台。
 const stopPlatformWatch = onPlatformChange(() => {
   // 作废在途响应，避免旧平台的建议覆盖新平台
   suggestRequestId.value += 1;
   searchSuggestData.value = {};
   nextTick(calcSearchSuggestHeights);
+  // 关键词仍在输入框里时，按新平台重取一次建议
+  const keyword = statusStore.searchInputValue;
+  if (!keyword || !settingStore.useOnlineService) return;
+  getSearchSuggest(keyword).catch((error) => {
+    console.error("切换平台后刷新搜索建议失败：", error);
+  });
 });
 
 onUnmounted(() => {
