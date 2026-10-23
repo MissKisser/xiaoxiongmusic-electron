@@ -10,12 +10,15 @@
       :config="listConfig"
       :play-button-text="playButtonText"
       :more-options="moreOptions"
+      :hide-comment-tab="isKugou"
       @update:search-value="handleSearchUpdate"
       @play-all="playAllSongs"
       @tab-change="handleTabChange"
     >
       <template #action-buttons>
+        <!-- 订阅播客：网易云专属，酷狗没有听书收藏接口 -->
         <n-button
+          v-if="!isKugou"
           :focusable="false"
           strong
           secondary
@@ -39,8 +42,12 @@
           :height="songListHeight"
           :radioId="radioId"
           :doubleClickAction="searchData?.length ? 'add' : 'all'"
-          type="radio"
+          :type="isKugou ? 'song' : 'radio'"
+          :load-more="isKugou"
+          :hidden-album="isKugou"
+          :hidden-size="isKugou"
           @scroll="handleListScroll"
+          @reach-bottom="loadMoreChapters"
         />
         <n-empty
           v-else
@@ -65,8 +72,9 @@
 import type { DropdownOption, MessageReactive } from "naive-ui";
 import { formatCoverList, formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
-import { useDataStore } from "@/stores";
+import { useDataStore, onPlatformChange, usePlatformStore } from "@/stores";
 import { radioAllProgram, radioDetail } from "@/api/radio";
+import { kgAudiobookDetail } from "@/api/platform/kugouAudiobook";
 import { useListDetail } from "@/composables/List/useListDetail";
 import { useListSearch } from "@/composables/List/useListSearch";
 import { useListScroll } from "@/composables/List/useListScroll";
@@ -77,6 +85,10 @@ import ListComment from "@/components/List/ListComment.vue";
 
 const router = useRouter();
 const dataStore = useDataStore();
+const platformStore = usePlatformStore();
+
+// 当前平台是否为酷狗（酷狗下该入口是听书）
+const isKugou = computed<boolean>(() => platformStore.currentPlatform === "kugou");
 
 const {
   detailData,
@@ -87,6 +99,7 @@ const {
   setListData,
   appendListData,
   setLoading,
+  resetData,
 } = useListDetail();
 const { searchValue, searchData, displayData, clearSearch, performSearch } =
   useListSearch(listData);
@@ -148,47 +161,74 @@ const playButtonText = computed(() => {
 });
 
 // 更多操作
-const moreOptions = computed<DropdownOption[]>(() => [
-  {
-    label: "刷新缓存",
-    key: "refresh-cache",
-    props: {
-      onClick: () => getRadioDetail(radioId.value, true),
-    },
-    icon: renderIcon("Refresh"),
-  },
-  {
-    label: "刷新播客",
-    key: "refresh",
-    props: {
-      onClick: () => getRadioDetail(radioId.value),
-    },
-    icon: renderIcon("Refresh"),
-  },
-  {
-    label: "复制分享链接",
-    key: "copy",
-    props: {
-      onClick: () =>
-        copyData(`https://music.163.com/#/djradio?id=${radioId.value}`, "已复制分享链接到剪贴板"),
-    },
-    icon: renderIcon("Share"),
-  },
-  {
-    label: "打开源页面",
-    key: "open",
-    props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/djradio?id=${radioId.value}`);
+const moreOptions = computed<DropdownOption[]>(() => {
+  // 酷狗听书没有可分享的官方页面，只提供刷新
+  if (isKugou.value) {
+    return [
+      {
+        label: "刷新听书专辑",
+        key: "refresh",
+        props: {
+          onClick: () => getRadioDetail(radioId.value, true),
+        },
+        icon: renderIcon("Refresh"),
       },
+    ];
+  }
+  return [
+    {
+      label: "刷新缓存",
+      key: "refresh-cache",
+      props: {
+        onClick: () => getRadioDetail(radioId.value, true),
+      },
+      icon: renderIcon("Refresh"),
     },
-    icon: renderIcon("Link"),
-  },
-]);
+    {
+      label: "刷新播客",
+      key: "refresh",
+      props: {
+        onClick: () => getRadioDetail(radioId.value),
+      },
+      icon: renderIcon("Refresh"),
+    },
+    {
+      label: "复制分享链接",
+      key: "copy",
+      props: {
+        onClick: () =>
+          copyData(`https://music.163.com/#/djradio?id=${radioId.value}`, "已复制分享链接到剪贴板"),
+      },
+      icon: renderIcon("Share"),
+    },
+    {
+      label: "打开源页面",
+      key: "open",
+      props: {
+        onClick: () => {
+          window.open(`https://music.163.com/#/djradio?id=${radioId.value}`);
+        },
+      },
+      icon: renderIcon("Link"),
+    },
+  ];
+});
+
+// 酷狗听书：章节分页状态
+const audiobookPage = ref<number>(1);
+const audiobookHasMore = ref<boolean>(false);
+
+// 酷狗听书每页章节数
+const AUDIOBOOK_PAGE_SIZE = 30;
 
 // 获取播客基础信息
 const getRadioDetail = async (id: number, refresh: boolean = false) => {
   if (!id) return;
+  // 酷狗：听书专辑详情与章节
+  if (isKugou.value) {
+    await getAudiobookDetail(id);
+    return;
+  }
   // 设置当前请求的播客 ID，用于防止竞态条件
   currentRequestId.value = id;
   // 设置加载状态
@@ -219,6 +259,52 @@ const getRadioDetail = async (id: number, refresh: boolean = false) => {
   setDetailData(formatCoverList(detail.data)[0]);
   // 获取全部节目
   await getRadioAllProgram(id, detailData.value?.count as number);
+};
+
+// 获取酷狗听书专辑详情与首屏章节
+const getAudiobookDetail = async (id: number) => {
+  if (!id) return;
+  // 设置当前请求的专辑 ID，用于防止竞态条件
+  currentRequestId.value = id;
+  setLoading(true);
+  clearSearch();
+  // 清空上一份内容，避免平台切换后残留
+  if (detailData.value?.id !== id) {
+    setDetailData(null);
+  }
+  setListData([]);
+  audiobookPage.value = 1;
+  audiobookHasMore.value = false;
+  try {
+    const result = await kgAudiobookDetail(id, 1, AUDIOBOOK_PAGE_SIZE);
+    if (currentRequestId.value !== id) return;
+    setDetailData(result.detail);
+    setListData(result.chapters);
+    audiobookPage.value = 1;
+    audiobookHasMore.value = result.hasMore;
+  } catch (error) {
+    console.error("Error getting kugou audiobook detail:", error);
+    window.$message.error("获取听书专辑详情失败，请重试");
+  } finally {
+    if (currentRequestId.value === id) setLoading(false);
+  }
+};
+
+// 加载更多酷狗听书章节
+const loadMoreChapters = async () => {
+  if (loading.value || !audiobookHasMore.value) return;
+  const id = radioId.value;
+  if (!id || currentRequestId.value !== id) return;
+  const page = audiobookPage.value + 1;
+  try {
+    const result = await kgAudiobookDetail(id, page, AUDIOBOOK_PAGE_SIZE);
+    if (currentRequestId.value !== id) return;
+    audiobookPage.value = page;
+    audiobookHasMore.value = result.hasMore;
+    appendListData(result.chapters);
+  } catch (error) {
+    console.error("Error loading kugou audiobook chapters:", error);
+  }
 };
 
 // 后台检查更新
@@ -326,6 +412,25 @@ onActivated(() => {
 });
 
 onDeactivated(() => loadingMsgShow(false));
-onUnmounted(() => loadingMsgShow(false));
 onMounted(() => getRadioDetail(radioId.value));
+
+/**
+ * 平台切换后按新平台处理播客页
+ *
+ * 网易云下是播客电台，酷狗下是听书：两者的数据源完全不同，
+ * 切换后必须清空旧内容并按新平台重取，不能残留上一平台的数据。
+ */
+const stopPlatformWatch = onPlatformChange(() => {
+  // 页面被 KeepAlive 缓存：离开本页后仍会收到平台变更通知，此时不处理
+  if (router.currentRoute.value.name !== "radio") return;
+  resetData();
+  clearSearch();
+  currentTab.value = "songs";
+  getRadioDetail(radioId.value, true);
+});
+
+onUnmounted(() => {
+  stopPlatformWatch();
+  loadingMsgShow(false);
+});
 </script>

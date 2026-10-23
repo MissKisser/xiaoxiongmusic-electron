@@ -130,8 +130,9 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
         {
           key: "radio-hot",
           link: "radio-hot",
-          label: "播客电台",
-          show: !settingStore.sidebarHide.hideRadioHot,
+          // 酷狗下同一入口是听书；QQ 音乐既无播客也无听书数据源，入口整体隐藏
+          label: isKugouPlatform.value ? "听书" : "播客电台",
+          show: !settingStore.sidebarHide.hideRadioHot && !isQqPlatform.value,
           icon: renderIcon("Record", {
             style: {
               transform: "translateY(-1px)",

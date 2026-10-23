@@ -25,10 +25,6 @@ import type { ApiPlatform } from "@/types/shared";
  * 故隐藏入口并在路由守卫里拦截直达。
  */
 export const NETEASE_ONLY_ROUTES: string[] = [
-  // 播客电台
-  "radio",
-  "radio-hot",
-  "radio-type",
   // 我的云盘
   "cloud",
   // 每日推荐
@@ -52,6 +48,14 @@ export const NETEASE_ONLY_ROUTES: string[] = [
 ];
 
 /**
+ * 有声内容路由
+ *
+ * 网易云下是播客电台，酷狗下是听书（同属「有声内容」入口），
+ * 两个平台各走各的数据源；QQ 音乐两端都没有数据源。
+ */
+export const RADIO_ROUTES: string[] = ["radio", "radio-hot", "radio-type"];
+
+/**
  * 平台级路由限制
  *
  * 某些子页只在部分平台有数据源，
@@ -59,7 +63,7 @@ export const NETEASE_ONLY_ROUTES: string[] = [
  */
 export const PLATFORM_UNSUPPORTED_ROUTES: Record<ApiPlatform, string[]> = {
   netease: [],
-  qqmusic: [],
+  qqmusic: [...RADIO_ROUTES],
   kugou: [],
 };
 

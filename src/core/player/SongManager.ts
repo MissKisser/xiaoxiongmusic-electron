@@ -26,6 +26,7 @@ import { formatSongsList } from "@/utils/format";
 import { handleSongQuality } from "@/utils/helper";
 import { openUserLogin } from "@/utils/modal";
 import { sanitizeUrl } from "@/utils/sanitize";
+import { isAudiobookSong } from "@/utils/songPlatform";
 
 /**
  * 歌曲播放地址信息
@@ -394,9 +395,15 @@ class SongManager {
     const settingStore = useSettingStore();
     const hash = song.platformId ?? String(song.id);
     const level = getPlatformLevel("kugou", settingStore.songLevel);
+    // 听书章节的音频要靠专辑号与章节号定位，取链时带上；
+    // 普通酷狗歌曲按原口径只带 hash，避免影响既有取链行为
+    const isAudiobook = isAudiobookSong(song);
+    const album = typeof song.album === "object" && song.album ? song.album : null;
+    const albumId = isAudiobook ? Number(album?.platformId ?? album?.id ?? 0) : 0;
+    const albumAudioId = isAudiobook ? Number(song.id) : 0;
     let res: PlatformSongUrl;
     try {
-      res = await kgSongUrl(hash, level);
+      res = await kgSongUrl(hash, level, { albumId, albumAudioId });
     } catch (error) {
       console.error(`❌ [${song.id}] 酷狗播放地址获取失败:`, error);
       return { id: song.id, url: undefined, isTrial: false, unlockSource: "official" };
@@ -408,10 +415,11 @@ class SongManager {
       privilege: res.privilege,
       level: res.level,
     });
-    // 播放状态与授权位留给最终失败提示用（付费墙 / 无授权）
+    // 播放状态与授权位留给最终失败提示用（付费墙 / 无授权 / 未登录）
     if (!res.available) {
       this.lastPlatformFailure = {
         platform: "kugou",
+        reason: res.reason,
         status: res.status,
         privilege: res.privilege,
       };
@@ -741,7 +749,9 @@ class SongManager {
       if (!songId) return;
 
       // 是否可解锁（移除 isElectron 限制，允许 Web 端也使用解锁功能）
-      const canUnlock = nextSong.type !== "radio" && settingStore.useSongUnlock;
+      // 听书章节不参与换源：章节标题在音乐库里没有对应曲目
+      const canUnlock =
+        nextSong.type !== "radio" && !isAudiobookSong(nextSong) && settingStore.useSongUnlock;
 
       // 官方链接（与正式播放同口径：云盘歌曲同样按 exhigh 取音质）
       const official = await this.getOnlineUrl(nextSong, songId, !!nextSong.pc);
@@ -871,7 +881,10 @@ class SongManager {
     // 在线获取
     try {
       // 是否可解锁（移除 isElectron 限制，允许 Web 端也使用解锁功能）
-      const canUnlock = song.type !== "radio" && settingStore.useSongUnlock;
+      // 听书章节不参与换源：章节标题在音乐库里没有对应曲目，
+      // 换源只会命中同名不同版本的曲子。
+      const canUnlock =
+        song.type !== "radio" && !isAudiobookSong(song) && settingStore.useSongUnlock;
 
       // 官方链接（按来源平台分派：网易云 / QQ 音乐 / 酷狗音乐）
       const official = await this.getOnlineUrl(song, songId, !!song.pc);

@@ -52,7 +52,10 @@
               <!-- 信息 -->
               <div class="data">
                 <n-text class="name text-hidden">{{ songData.name || "未知曲目" }}</n-text>
-                <div v-if="Array.isArray(songData?.artists)" class="artists">
+                <div v-if="isAudiobookSong(songData)" class="artists">
+                  <n-text class="ar" depth="3"> {{ AUDIOBOOK_TEXT }} </n-text>
+                </div>
+                <div v-else-if="Array.isArray(songData?.artists)" class="artists">
                   <n-text v-for="ar in songData.artists" :key="ar.id" depth="3" class="ar">
                     {{ ar.name }}
                   </n-text>
@@ -113,6 +116,7 @@
 import { useStatusStore, useDataStore } from "@/stores";
 import VirtualScroll from "@/components/UI/VirtualScroll.vue";
 import { usePlayerController } from "@/core/player/PlayerController";
+import { AUDIOBOOK_TEXT, isAudiobookSong } from "@/utils/songPlatform";
 
 const dataStore = useDataStore();
 const statusStore = useStatusStore();

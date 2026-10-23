@@ -12,6 +12,7 @@ import { isWordLevelFormat, parseSmartLrc } from "@/utils/lyricParser";
 import { isPlaceholderLyric, stripLyricMetadata } from "@/utils/lyricStripper";
 import { extractLyricAuthors } from "@/utils/lyric/lyricAuthor";
 import { getConverter } from "@/utils/opencc";
+import { isAudiobookSong } from "@/utils/songPlatform";
 import { type LyricLine, parseLrc, parseTTML, parseYrc } from "@applemusic-like-lyrics/lyric";
 import { cloneDeep, escapeRegExp, isEmpty } from "lodash-es";
 
@@ -1115,6 +1116,12 @@ class LyricManager {
         lyricData = this.handleLyricExclude(lyricData);
         lyricData = await this.applyChineseVariant(lyricData);
         this.setFinalLyric(lyricData, req);
+        return;
+      }
+      // 听书章节没有歌词：章节在音乐库里没有对应曲目，
+      // 平台歌词接口的模糊匹配会命中无关歌曲，这里直接跳过
+      if (isAudiobookSong(song)) {
+        this.resetSongLyric();
         return;
       }
       // 检查歌词覆盖

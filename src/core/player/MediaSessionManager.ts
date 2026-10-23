@@ -1,6 +1,7 @@
 import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { isElectron } from "@/utils/env";
 import { getPlaySongData } from "@/utils/format";
+import { AUDIOBOOK_TEXT, isAudiobookSong } from "@/utils/songPlatform";
 import { msToS } from "@/utils/time";
 import { SystemMediaEvent } from "@emi";
 import axios from "axios";
@@ -212,15 +213,19 @@ class MediaSessionManager {
     coverUrl: string;
   } {
     const isRadio = song!.type === "radio";
+    // 听书章节的副标题按「听书」兜底，网易云播客按「播客电台」
+    const isAudiobook = isAudiobookSong(song);
     const musicStore = useMusicStore();
 
     return {
       title: song!.name,
-      artist: isRadio
-        ? "播客电台"
-        : Array.isArray(song!.artists)
-          ? song!.artists.map((a) => a.name).join("/")
-          : String(song!.artists),
+      artist: isAudiobook
+        ? AUDIOBOOK_TEXT
+        : isRadio
+          ? "播客电台"
+          : Array.isArray(song!.artists)
+            ? song!.artists.map((a) => a.name).join("/")
+            : String(song!.artists),
       album: isRadio
         ? "播客电台"
         : typeof song!.album === "object"

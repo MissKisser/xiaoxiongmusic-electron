@@ -116,6 +116,14 @@ export type SongType = {
    * song: 歌曲 | radio: 电台 | streaming: 流媒体
    */
   type: "song" | "radio" | "streaming";
+  /**
+   * 内容形态标记
+   *
+   * 酷狗听书章节标记为 `audiobook`：它按酷狗普通歌曲形态参与播放，
+   * 界面据此把副标题显示为「听书」，并在取链时带上专辑号与章节号。
+   * 网易云播客走的是另一套 `type: "radio"` 语义，两者互不影响。
+   */
+  mediaKind?: "audiobook";
   /** 流媒体播放 URL */
   streamUrl?: string;
   /** 原始 ID（流媒体服务器的 ID） */

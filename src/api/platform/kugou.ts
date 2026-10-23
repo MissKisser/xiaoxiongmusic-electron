@@ -15,6 +15,7 @@ import {
   normalizeArtistEntry,
   secureUrl,
   splitArtistsByPlatform,
+  toMillisDateTime,
   toMillisTimestamp,
   toNumericId,
 } from "./common";
@@ -25,6 +26,7 @@ import {
   type PlatformAlbumDetail,
   type PlatformArtist,
   type PlatformArtistDetail,
+  type PlatformBoardTrack,
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformCoverEntry,
@@ -431,6 +433,8 @@ export const normalizeKgSongUrl = (raw: KgSongUrlResponse): PlatformSongUrl => (
   status: raw?.status,
   privilege: raw?.privilege ?? null,
   trialDuration: Number(raw?.trial?.duration ?? 0) || undefined,
+  // 未登录时模块返回 301，翻译成明确的登录缺失原因
+  reason: raw?.code === 301 ? "need_login" : undefined,
   message: raw?.message,
 });
 
@@ -592,16 +596,25 @@ export const kgPlaylistDetail = async (
  * 解析酷狗歌曲的播放地址
  * @param song 归一化歌曲（或直接给歌曲 hash）
  * @param quality 首选音质档位
+ * @param options 附加定位参数
+ * @param options.albumId 专辑号，听书章节等需要带上
+ * @param options.albumAudioId 专辑内曲目号，听书章节需要带上
  * @returns 归一化后的播放地址
  */
 export const kgSongUrl = async (
   song: PlatformSong | string,
   quality = "hq",
+  options: { albumId?: number; albumAudioId?: number } = {},
 ): Promise<PlatformSongUrl> => {
   const hash = typeof song === "string" ? song : (song.platformId ?? String(song.id));
   // 播放状态（付费墙 / 无授权）与授权位放在响应体里，
   // 这里取回业务体而不直接抛异常，交给播放层翻译成用户可读提示。
-  const res = await platformRequestBody<KgSongUrlResponse>(KUGOU, "song_url", { hash, quality });
+  const res = await platformRequestBody<KgSongUrlResponse>(KUGOU, "song_url", {
+    hash,
+    quality,
+    ...(options.albumId ? { albumId: options.albumId } : {}),
+    ...(options.albumAudioId ? { albumAudioId: options.albumAudioId } : {}),
+  });
   return { ...normalizeKgSongUrl(res), id: hash };
 };
 
@@ -1133,10 +1146,29 @@ interface KgLeaderboardDetailResponse {
 }
 
 /**
+ * 归一化榜单卡片里的曲目预览
+ *
+ * 榜单清单源给出前几首时才有值，
+ * 平台清单源不带曲目时返回空数组，卡片据此只保留信息位。
+ * @param board 主进程返回的榜单条目
+ * @returns 曲名 / 歌手两段式的预览条目
+ */
+const normalizeKgBoardTracks = (board: Record<string, any>): PlatformBoardTrack[] => {
+  const list = Array.isArray(board?.tracks) ? board.tracks : [];
+  return list.slice(0, 3).map((item) => ({
+    first: String(item?.title ?? item?.name ?? ""),
+    second: String(item?.singer ?? item?.artist ?? ""),
+  }));
+};
+
+/**
  * 归一化酷狗榜单条目
  *
  * 榜单号取 `rankid`（主进程把清单条目的 `topId` 与 `rankId` 都归一到它），
  * 封面在主进程已替换好尺寸（300px），此处原样带出。
+ *
+ * 更新时间在归一化层统一转成毫秒时间戳：
+ * 上游给的是日期文本（如 `2026-10-23 08:30:01`），直接渲染会显示成原始字符串。
  * @param board 主进程返回的榜单条目
  * @param groupName 所属分组名
  * @returns 归一化榜单条目
@@ -1150,7 +1182,8 @@ const normalizeKgBoard = (
   subTitle: String(board?.subTitle ?? ""),
   intro: String(board?.intro ?? ""),
   period: String(board?.period ?? ""),
-  updateTime: String(board?.updateTime ?? ""),
+  updateTime: toMillisDateTime(board?.updateTime),
+  tracks: normalizeKgBoardTracks(board),
   cover: String(board?.cover ?? ""),
   total: Number(board?.total ?? 0),
   groupName,
@@ -1244,6 +1277,8 @@ export interface KgHotArtistsResult {
   types: KgArtistType[];
   /** 歌手条目 */
   artists: PlatformArtistDetail[];
+  /** 歌手总数（上游下发，页面据此判断是否还有下一页） */
+  total: number;
 }
 
 /** 主进程酷狗热门歌手模块的原生返回 */
@@ -1309,5 +1344,6 @@ export const kgHotArtists = async (
       name: String(item?.name ?? ""),
     })),
     artists: (res?.artists ?? []).map(toKgHotArtistEntry),
+    total: Number(res?.total ?? 0),
   };
 };

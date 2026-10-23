@@ -2,6 +2,7 @@ import { SongType, CoverType, ArtistType, CommentType, MetaData, CatType } from 
 import { msToTime } from "./time";
 import { flatMap, isArray, uniqBy } from "lodash-es";
 import { handleSongQuality } from "./helper";
+import { AUDIOBOOK_TEXT, isAudiobookSong } from "./songPlatform";
 import { useDataStore, useMusicStore, useStatusStore } from "@/stores";
 
 /**
@@ -336,8 +337,10 @@ export const getPlayerInfoObj = (
   const name = `${playSongData.name || "未知歌曲"}`;
 
   // 歌手
-  const artist =
-    playSongData.type === "radio"
+  // 听书章节按「听书」兜底（播音者已在章节标题里），网易云播客按「播客电台」
+  const artist = isAudiobookSong(playSongData)
+    ? AUDIOBOOK_TEXT
+    : playSongData.type === "radio"
       ? "播客电台"
       : Array.isArray(playSongData.artists)
         ? playSongData.artists.map((artists: { name: string }) => artists.name).join(sep)

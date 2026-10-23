@@ -6,7 +6,7 @@
  *   通用失败用模块自身的 `code` 表达 —— 写操作与读操作共用；
  * - **播放失败原因**：QQ 音乐用 `reason`（`need_pay` / `no_authorization` /
  *   `filename_rejected` / `vkey_error`），酷狗用 `status`（1 可播 / 2 付费墙 /
- *   3 该账号完全无授权）与 `privilege` —— 只出现在播放链路。
+ *   3 该账号完全无授权）与 `privilege`；两平台在未登录时都用 `need_login` —— 只出现在播放链路。
  *
  * 这里把两套表达统一翻译成用户可读文案，
  * 写操作层（`manage.ts`）与播放层（`SongManager.ts`）共用同一份翻译表。
@@ -25,12 +25,13 @@ export const KG_ERROR_TEXT: Record<string, string> = {
   "30203": "平台限制了本次操作，请稍后再试",
 };
 
-/** QQ 音乐播放失败原因 → 用户可读提示 */
+/** 平台播放失败原因 → 用户可读提示 */
 export const PLATFORM_REASON_TEXT: Record<string, string> = {
   need_pay: "该歌曲需要付费，已尝试换源未成功",
   no_authorization: "当前账号没有该歌曲的播放权限，已尝试换源未成功",
   filename_rejected: "该歌曲暂不可播放，已尝试换源未成功",
   vkey_error: "播放凭证获取失败，已尝试换源未成功",
+  need_login: "需要登录对应平台账号后才能播放该内容",
 };
 
 /** 播放最终失败时的兜底提示 */

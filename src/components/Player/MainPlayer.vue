@@ -87,7 +87,12 @@
             />
             <!-- 歌手 -->
             <div v-else class="artists">
-              <n-text v-if="musicStore.playSong.type === 'radio'" class="ar-item">播客电台</n-text>
+              <n-text v-if="isAudiobookSong(musicStore.playSong)" class="ar-item">
+                {{ AUDIOBOOK_TEXT }}
+              </n-text>
+              <n-text v-else-if="musicStore.playSong.type === 'radio'" class="ar-item">
+                播客电台
+              </n-text>
               <template v-else-if="Array.isArray(musicStore.playSong.artists)">
                 <n-text
                   v-for="(item, index) in musicStore.playSong.artists"
@@ -243,6 +248,7 @@ import {
 } from "@/utils/modal";
 import { convertSecondsToTime } from "@/utils/time";
 import { removeBrackets } from "@/utils/format";
+import { AUDIOBOOK_TEXT, isAudiobookSong } from "@/utils/songPlatform";
 import type { DropdownOption } from "naive-ui";
 
 const router = useRouter();
@@ -380,6 +386,8 @@ const isShowLyrics = computed(() => {
     !statusStore.lyricLoading &&
     settingStore.barLyricShow &&
     musicStore.playSong.type !== "radio" &&
+    // 听书章节不展示歌词：副标题位置留给「听书」文案
+    !isAudiobookSong(musicStore.playSong) &&
     statusStore.playStatus &&
     statusStore.lyricIndex !== -1
   );

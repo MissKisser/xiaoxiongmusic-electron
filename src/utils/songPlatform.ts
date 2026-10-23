@@ -52,3 +52,17 @@ export const isSongOfPlatform = (
   if (song.path) return true;
   return resolveSongPlatform(song) === platform;
 };
+
+/** 听书内容在界面上的文案 */
+export const AUDIOBOOK_TEXT = "听书";
+
+/**
+ * 判断歌曲是否为听书章节
+ *
+ * 酷狗听书章节按普通歌曲形态参与播放（平台、hash、专辑号都取酷狗口径），
+ * 额外用 `mediaKind` 标记出「这是听书」，界面据此显示「听书」文案。
+ * @param song 歌曲
+ * @returns 是否为听书章节
+ */
+export const isAudiobookSong = (song?: SongType | null): boolean =>
+  Boolean(song?.mediaKind === "audiobook");
