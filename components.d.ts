@@ -179,6 +179,7 @@ declare module 'vue' {
     SleepTimerModal: typeof import('./src/components/Player/SettingsModals/SleepTimerModal.vue')['default']
     SongCard: typeof import('./src/components/Card/SongCard.vue')['default']
     SongDataCard: typeof import('./src/components/Card/SongDataCard.vue')['default']
+    SongFM: typeof import('./src/components/Player/PlayerComponents/SongFM.vue')['default']
     SongInfoEditor: typeof import('./src/components/Modal/SongInfoEditor.vue')['default']
     SongList: typeof import('./src/components/List/SongList.vue')['default']
     SongListCard: typeof import('./src/components/Card/SongListCard.vue')['default']

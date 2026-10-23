@@ -13,7 +13,7 @@
             :height="90"
             :description="dailyDescription"
             size="small"
-            @click="playDailyRecommend"
+            @click="openDailyRecommend"
           />
           <!-- 我喜欢的音乐 -->
           <SongListCard
@@ -27,46 +27,7 @@
           />
         </n-flex>
         <!-- 刷歌 -->
-        <n-card class="fm-card" hoverable @click="openSongFM">
-          <div class="fm-body">
-            <!-- 封面 -->
-            <n-image
-              :key="fmSong?.id"
-              :src="fmSong?.coverSize?.m || fmSong?.cover"
-              class="fm-cover"
-              preview-disabled
-              lazy
-              @load="coverLoaded"
-            >
-              <template #placeholder>
-                <div class="fm-cover-loading">
-                  <img src="/images/song.jpg?asset" class="loading-img" alt="loading-img" />
-                </div>
-              </template>
-            </n-image>
-            <!-- 信息 -->
-            <div class="fm-info">
-              <n-text class="name text-hidden">
-                {{ fmSong?.name || "暂无曲目" }}
-              </n-text>
-              <div v-if="fmArtists.length" class="artists text-hidden">
-                <SvgIcon name="Artist" :depth="3" />
-                <n-text v-for="ar in fmArtists" :key="ar.id" class="ar">
-                  {{ ar.name }}
-                </n-text>
-              </div>
-              <div v-if="fmAlbumName" class="album text-hidden">
-                <SvgIcon name="Album" :depth="3" />
-                <n-text class="album-text">{{ fmAlbumName }}</n-text>
-              </div>
-              <!-- 标识 -->
-              <div class="radio">
-                <SvgIcon :depth="3" name="Radio" />
-                <n-text :depth="3">刷歌</n-text>
-              </div>
-            </div>
-          </div>
-        </n-card>
+        <SongFM />
       </div>
       <!-- 取数失败：区块骨架保留，并给出重试入口 -->
       <n-alert v-if="cardError" type="error" class="card-error" :show-icon="false">
@@ -138,9 +99,9 @@
 </template>
 
 <script setup lang="ts">
-import type { CoverType, MetaData, SongType } from "@/types/main";
+import type { CoverType, SongType } from "@/types/main";
 import { NText } from "naive-ui";
-import { onPlatformChange, usePlatformStore, useSettingStore } from "@/stores";
+import { onPlatformChange, useMusicStore, usePlatformStore, useSettingStore } from "@/stores";
 import {
   dispatchHotSearch,
   dispatchLikedSongs,
@@ -148,17 +109,17 @@ import {
   type DispatchHotSearchItem,
 } from "@/api/platform/dispatch";
 import { kgDailyRecommend, qqDailyRecommend } from "@/api/platform/daily";
-import { kgSongFM, qqSongFM } from "@/api/platform/songfm";
-import { usePlayerController } from "@/core/player/PlayerController";
-import { coverLoaded } from "@/utils/helper";
+import { useSongManager } from "@/core/player/SongManager";
 import SvgIcon from "@/components/Global/SvgIcon.vue";
 import CoverList from "@/components/List/CoverList.vue";
 import SongListCard from "@/components/Card/SongListCard.vue";
+import SongFM from "@/components/Player/PlayerComponents/SongFM.vue";
 
 const router = useRouter();
 const platformStore = usePlatformStore();
 const settingStore = useSettingStore();
-const player = usePlayerController();
+const musicStore = useMusicStore();
+const songManager = useSongManager();
 
 /** 各区块取数失败时的统一提示文案 */
 const ERROR_TEXT: Record<string, string> = {
@@ -180,8 +141,6 @@ const dailyCover = ref<string>("");
 const likedSongs = ref<SongType[]>([]);
 const likedCover = ref<string>("");
 const likedCount = ref<number>(0);
-// 刷歌首曲
-const fmSong = ref<SongType | null>(null);
 // 公共区块加载状态
 const loading = ref<boolean>(true);
 // 卡片区失败提示
@@ -200,19 +159,6 @@ let cardsPlatform = "";
 const isLoggedIn = computed<boolean>(
   () => !!platformStore.platformProfiles[platformStore.currentPlatform],
 );
-
-/** 刷歌首曲的歌手列表 */
-const fmArtists = computed<MetaData[]>(() => {
-  const artists = fmSong.value?.artists;
-  return Array.isArray(artists) ? artists : [];
-});
-
-/** 刷歌首曲的专辑名 */
-const fmAlbumName = computed<string>(() => {
-  const album = fmSong.value?.album;
-  if (!album) return "";
-  return typeof album === "string" ? album : (album.name ?? "");
-});
 
 /** 每日推荐标题（日历 + 当日日期 + 统一名称） */
 const dailySongsTitle = computed(() => {
@@ -302,21 +248,19 @@ const loadLiked = async (): Promise<string> => {
 };
 
 /**
- * 读取刷歌推荐流的第一首
+ * 读取刷歌推荐流
  *
- * 卡片展示的是刷歌当前会播到的那首，与网易云私人 FM 卡显示当前歌同形态。
+ * 推荐流列表由全局音乐 store 持有，首页卡片与全屏刷歌界面共用同一份数据；
+ * 列表为空或不属于当前平台时由管理器重新取数。
  * @returns 失败提示文案，成功时为空串
  */
 const loadSongFM = async (): Promise<string> => {
   try {
-    const platform = platformStore.currentPlatform;
-    const songs = platform === "qqmusic" ? await qqSongFM(1) : await kgSongFM(1);
-    fmSong.value = songs[0] ?? null;
-    if (!fmSong.value) return ERROR_TEXT.fm;
+    await songManager.initPersonalFM();
+    if (!musicStore.personalFMSong?.id) return ERROR_TEXT.fm;
     return "";
   } catch (error) {
     console.error("获取刷歌推荐失败：", error);
-    fmSong.value = null;
     return ERROR_TEXT.fm;
   }
 };
@@ -343,7 +287,6 @@ const clearCards = () => {
   likedSongs.value = [];
   likedCover.value = "";
   likedCount.value = 0;
-  fmSong.value = null;
 };
 
 /**
@@ -416,27 +359,18 @@ const loadData = async () => {
 };
 
 /**
- * 播放每日推荐
+ * 进入平台每日推荐页
  *
- * 平台侧没有每日推荐歌单号，进不了歌单详情页，
- * 这里按网易云每日推荐卡的主行为（听）处理：当日曲目载入播放队列并从第一首开始播放。
+ * 平台侧没有每日推荐歌单号，但每日推荐本身是一组当日曲目，
+ * 按网易云每日推荐卡的形态进入列表页浏览。
  */
-const playDailyRecommend = async () => {
-  if (!dailySongs.value.length) {
-    window.$message.error("每日推荐暂无歌曲");
-    return;
-  }
-  await player.updatePlayList(dailySongs.value);
+const openDailyRecommend = () => {
+  router.push({ name: "platform-daily-songs" });
 };
 
 /** 进入「我喜欢的音乐」页 */
 const openLikedSongs = () => {
   router.push({ name: "like-songs" });
-};
-
-/** 进入刷歌页 */
-const openSongFM = () => {
-  router.push({ name: "discover", query: { fm: "song" } });
 };
 
 // 按热搜词搜索
@@ -516,136 +450,6 @@ onUnmounted(() => {
       .rec-list {
         display: grid !important;
         grid-template-columns: repeat(2, 1fr);
-      }
-    }
-  }
-  .fm-card {
-    border-radius: 16px;
-    cursor: pointer;
-    height: 200px;
-    :deep(.n-card-content) {
-      display: flex;
-      align-items: center;
-      padding: 20px;
-      width: 100%;
-      height: 100%;
-    }
-    .fm-body {
-      display: flex;
-      align-items: center;
-      width: 100%;
-      height: 100%;
-    }
-    .fm-cover {
-      width: 160px;
-      height: 160px;
-      min-width: 160px;
-      border-radius: 8px;
-      margin-right: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      box-shadow: 0 0 10px 6px #00000008;
-      :deep(img) {
-        width: 100%;
-        height: 100%;
-        opacity: 0;
-        transition: opacity 0.35s ease-in-out;
-      }
-    }
-    .fm-cover-loading {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      .loading-img {
-        width: 60%;
-        height: 60%;
-        object-fit: cover;
-      }
-    }
-    .fm-info {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      .n-text {
-        line-height: normal;
-      }
-      .name {
-        font-size: 22px;
-        font-weight: bold;
-      }
-      .artists {
-        margin-top: 2px;
-        font-size: 14px;
-        display: flex;
-        .n-icon {
-          font-size: 18px;
-          margin-right: 4px;
-          transform: translateY(3px);
-        }
-        .ar {
-          display: inline-flex;
-          transition: opacity 0.3s;
-          opacity: 0.6;
-          &::after {
-            content: "/";
-            margin: 0 4px;
-          }
-          &:last-child {
-            &::after {
-              display: none;
-            }
-          }
-        }
-      }
-      .album {
-        margin-top: 2px;
-        font-size: 14px;
-        display: flex;
-        .n-icon {
-          font-size: 18px;
-          margin-right: 4px;
-          transform: translateY(3px);
-        }
-        .album-text {
-          transition: opacity 0.3s;
-          opacity: 0.6;
-        }
-      }
-      .radio {
-        margin-top: auto;
-        display: flex;
-        align-items: center;
-        .n-icon {
-          margin-right: 4px;
-          transform: translateY(-1px);
-        }
-      }
-    }
-    @media (max-width: 1200px) and (min-width: 769px) {
-      .radio {
-        display: none;
-      }
-    }
-    @media (max-width: 768px) {
-      height: 120px;
-      .fm-cover {
-        min-width: 80px;
-        height: 80px;
-        width: 80px;
-      }
-      .fm-info {
-        .name {
-          font-size: 16px;
-        }
-        .album {
-          display: none;
-        }
       }
     }
   }

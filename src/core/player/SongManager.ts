@@ -1115,12 +1115,14 @@ class SongManager {
    */
   public async refreshPersonalFM() {
     const musicStore = useMusicStore();
-    if (!isLogin() && usePlatformStore().currentPlatform !== "qqmusic") {
+    const platform = usePlatformStore().currentPlatform;
+    // 网易云私人 FM 是登录态接口；QQ 音乐推荐流需要平台登录态，
+    // 酷狗推荐流匿名可用，三者都不该按网易云登录态判定
+    if (platform === "netease" && !isLogin()) {
       window.$message.error("请先登录");
       return;
     }
     try {
-      const platform = usePlatformStore().currentPlatform;
       const newList = await this.fetchSongFMList(platform);
       if (!newList || newList.length === 0) {
         throw new Error("加载推荐流列表失败");

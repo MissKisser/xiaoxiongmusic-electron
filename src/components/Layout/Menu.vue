@@ -18,6 +18,7 @@
 
 <script setup lang="ts">
 import { useMobile } from "@/composables/useMobile";
+import { useSongFM } from "@/composables/useSongFM";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
 import {
@@ -63,6 +64,8 @@ const settingStore = useSettingStore();
 const platformStore = usePlatformStore();
 const player = usePlayerController();
 const songManager = useSongManager();
+
+const { enterSongFM } = useSongFM();
 
 const { isDesktop } = useMobile();
 
@@ -551,19 +554,13 @@ const menuUpdate = async (key: string, item: MenuOption) => {
   emit("menu-click", key);
   // 私人漫游 / 刷歌
   if (key === "personal-fm") {
-    // QQ 音乐 / 酷狗：进入刷歌页并开始播放推荐流
+    // QQ 音乐 / 酷狗：开启推荐流并打开全屏播放器（刷歌没有独立页面）
     if (isSongFMPlatform.value) {
-      await songManager.initPersonalFM();
-      if (!musicStore.personalFMSong?.id) {
+      if (!(await enterSongFM())) {
         window.$message.error("开启刷歌出错，请重试");
         return;
       }
-      statusStore.personalFmMode = true;
-      statusStore.shuffleMode = "off";
-      await player.playSong();
-      statusStore.showFullPlayer = true;
       window.$message.info("已开启刷歌", { icon: renderIcon("Radio") });
-      router.push({ name: "discover", query: { fm: "song" } });
       return;
     }
     // 网易云私人漫游：确保推荐流列表属于当前平台，避免复用其它平台的缓存列表

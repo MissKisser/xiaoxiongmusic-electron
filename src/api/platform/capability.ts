@@ -62,7 +62,8 @@ export const RADIO_ROUTES: string[] = ["radio", "radio-hot", "radio-type"];
  * 这些平台下对应入口已隐藏，路由守卫同样拦截直达。
  */
 export const PLATFORM_UNSUPPORTED_ROUTES: Record<ApiPlatform, string[]> = {
-  netease: [],
+  // 平台每日推荐页是第三方平台专属页面，网易云走既有的「每日推荐」页
+  netease: ["platform-daily-songs"],
   qqmusic: [...RADIO_ROUTES],
   kugou: [],
 };

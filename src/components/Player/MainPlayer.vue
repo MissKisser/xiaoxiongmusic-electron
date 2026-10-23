@@ -139,13 +139,14 @@
           />
         </div>
       </template>
-      <!-- 不喜欢 -->
+      <!-- 不喜欢 / 换一批 -->
       <div
         v-if="statusStore.personalFmMode"
         class="play-icon"
-        v-debounce="() => songManager.personalFMTrash(musicStore.personalFMSong?.id)"
+        v-debounce="handleFMFeedback"
       >
-        <SvgIcon class="icon" :size="18" name="ThumbDown" />
+        <SvgIcon v-if="isNeteaseFM" class="icon" :size="18" name="ThumbDown" />
+        <SvgIcon v-else :size="18" name="Refresh" />
       </div>
       <!-- 上一曲 -->
       <div v-else class="play-icon" v-debounce="() => player.nextOrPrev('prev')">
@@ -234,9 +235,10 @@
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
-import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
+import { useMusicStore, usePlatformStore, useSettingStore, useStatusStore } from "@/stores";
 import { useTimeFormat } from "@/composables/useTimeFormat";
 import { useSongLiked } from "@/composables/useSongLiked";
+import { useSongFM } from "@/composables/useSongFM";
 import { useSwipe } from "@vueuse/core";
 import { copyData, coverLoaded, renderIcon } from "@/utils/helper";
 import {
@@ -255,12 +257,32 @@ const router = useRouter();
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
 const { isSongLikedNow, toggleSongLiked } = useSongLiked();
 
 const player = usePlayerController();
 const songManager = useSongManager();
+const { fmRefresh } = useSongFM();
 
 const { timeDisplay, toggleTimeFormat } = useTimeFormat();
+
+/**
+ * 是否为网易云私人 FM
+ *
+ * 网易云私人 FM 有「不喜欢」反馈接口（fm_trash），第三个控制按钮是「不喜欢」；
+ * QQ 音乐与酷狗音乐的推荐流是只读接口，没有等价反馈能力，
+ * 第三个按钮改为「换一批」——重新取一批推荐流。
+ */
+const isNeteaseFM = computed<boolean>(() => platformStore.currentPlatform === "netease");
+
+/** 推荐流控制按钮的第三项 */
+const handleFMFeedback = async () => {
+  if (isNeteaseFM.value) {
+    await songManager.personalFMTrash(musicStore.personalFMSong?.id);
+    return;
+  }
+  await fmRefresh();
+};
 
 const playerRef = ref<HTMLElement | null>(null);
 
