@@ -9,10 +9,11 @@ import { kgSongUrl } from "@/api/platform/kugou";
 import { qqLyric } from "@/api/platform/qqmusic";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { getPlatformLevel } from "@/api/platform/types";
-import { SongUnlockServer } from "@/types/shared";
+import type { ApiPlatform } from "@/types/shared";
 
 import { songLevelData } from "@/utils/meta";
 import { getPlayerInfoObj } from "@/utils/format";
+import { getUnlockPriority } from "@/utils/unlockPriority";
 
 interface DownloadTask {
   song: SongType;
@@ -376,12 +377,11 @@ class DownloadManager {
 
       if (!url && settingStore.useUnlockForDownload && canUnlock) {
         try {
-          // 第三方平台的歌曲不参与网易云解锁源：解锁按歌曲 ID 寻址，ID 口径不同必然错配
-          const isNeteaseSong = (song.platform ?? "netease") === "netease";
-          // 解锁服务优先级顺序：网易云 -> 波点音乐 -> 酷我音乐
-          const priorityOrder = isNeteaseSong
-            ? [SongUnlockServer.NETEASE, SongUnlockServer.BODIAN, SongUnlockServer.KUWO]
-            : [SongUnlockServer.BODIAN, SongUnlockServer.KUWO];
+          // 换源链与播放链同口径：优先级按歌曲所属平台分派
+          const platform: ApiPlatform = song.platform ?? "netease";
+          const priorityOrder = getUnlockPriority(platform);
+          // 第三方平台的歌曲在网易云源上只能按关键词检索（两套 id 编号空间不同，直查会错配）
+          const useKeywordLookup = platform !== "netease";
 
           const enabledServers = settingStore.songUnlockServer
             .filter((s) => s.enabled)
@@ -405,6 +405,9 @@ class DownloadManager {
                 song.name,
                 artist,
                 duration,
+                useKeywordLookup,
+                platform,
+                song.platformId,
               );
               if (result.code === 200 && result.url) {
                 url = result.url;

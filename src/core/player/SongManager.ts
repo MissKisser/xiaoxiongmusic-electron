@@ -27,6 +27,7 @@ import { handleSongQuality } from "@/utils/helper";
 import { openUserLogin } from "@/utils/modal";
 import { sanitizeUrl } from "@/utils/sanitize";
 import { isAudiobookSong } from "@/utils/songPlatform";
+import { getPlatformLabel, getUnlockPriority } from "@/utils/unlockPriority";
 
 /**
  * 歌曲播放地址信息
@@ -487,14 +488,16 @@ class SongManager {
   /**
    * 获取解锁播放链接
    *
-   * 源优先级：网易云歌曲 `网易云 → 咪咕 → 波点 → 酷我 → 长青`；
-   * QQ 音乐 / 酷狗歌曲 `网易云检索 → 咪咕 → 波点 → 酷我 → 长青` ——
+   * 源优先级按歌曲的来源平台分派（见 `@/utils/unlockPriority`）：
+   * - 酷狗歌曲 `长青 → 波点 → 咪咕 → 酷我 → 网易云`：长青支持按酷狗 hash 直查，零检索；
+   * - QQ 歌曲 `酷我 → 长青 → 波点 → 咪咕 → 网易云`：酷我关键词检索命中稳定，长青可按 QQ mid 直查；
+   * - 网易云歌曲 `网易云 → 咪咕 → 波点 → 酷我 → 长青`：网易云按自身歌曲 id 直查。
+   *
    * 网易云解锁源对第三方平台的歌曲只能**按关键词检索网易云曲库**（两套 id 编号空间不同，
    * 拿第三方 id 直查会静默播错歌），因此第三方歌曲在网易云源上走关键词寻址分支。
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
    *
-   * 链位口径：官方曲库（咪咕）在前，社区公益聚合（长青）垫底；
-   * 各源链位固定，不随运行期可用性调整。
+   * 链位口径：链位固定，不随运行期可用性调整 —— 熔断与单源失败只影响本次是否命中。
    *
    * 逐源隔离失败：单个源超时或报错只记失败，继续尝试下一个源，
    * 全部源都拿不到链接时给出平台语义的兜底提示（逐源明细只写控制台日志）。
@@ -520,7 +523,8 @@ class SongManager {
     }
 
     // 第三方平台的歌曲不参与网易云按 id 寻址，改走关键词检索
-    const isNeteaseSong = resolvePlatform(song) === "netease";
+    const platform = resolvePlatform(song);
+    const isNeteaseSong = platform === "netease";
     const useKeywordLookup = !isNeteaseSong;
     if (useKeywordLookup && !artist) {
       // 关键词寻址缺歌手时只能按歌名检索，会命中同名不同版本的曲目
@@ -528,13 +532,8 @@ class SongManager {
       console.warn(`⚠️ [${songId}] ${MISSING_ARTIST_REASON}：${songName}`);
       return { id: songId, url: undefined, failureReason: MISSING_ARTIST_REASON };
     }
-    const priorityOrder = [
-      SongUnlockServer.NETEASE,
-      SongUnlockServer.MIGU,
-      SongUnlockServer.BODIAN,
-      SongUnlockServer.KUWO,
-      SongUnlockServer.CHANGQING,
-    ];
+    // 优先级按歌曲的来源平台分派
+    const priorityOrder = getUnlockPriority(platform);
 
     // 获取启用的音源列表，并按优先级排序
     const enabledServers = settingStore.songUnlockServer.filter((s) => s.enabled).map((s) => s.key);
@@ -556,8 +555,9 @@ class SongManager {
     console.log(
       `   📋 启用的服务: ${enabledServers.map((s) => this.getUnlockSourceName(s)).join(", ")}`,
     );
-    console.log(
-      `   🎯 优先级顺序: ${sortedServers.map((s) => this.getUnlockSourceName(s)).join(" -> ")}`,
+    // 用 console.info 而非 console.log：生产构建会剔除 console.log，这条顺序日志必须留在正式产物里
+    console.info(
+      `   🎯 优先级顺序: ${sortedServers.map((s) => this.getUnlockSourceName(s)).join(" -> ")} （平台：${getPlatformLabel(platform)}）`,
     );
 
     // 检查是否有服务被跳过（在优先级列表中但未启用）
@@ -582,7 +582,7 @@ class SongManager {
           artist,
           duration,
           useKeywordLookup,
-          resolvePlatform(song),
+          platform,
           song.platformId,
         );
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {

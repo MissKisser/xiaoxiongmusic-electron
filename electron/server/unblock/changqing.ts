@@ -11,6 +11,9 @@
  * 2. 歌曲来自其它平台时，按「歌名 + 歌手」走项目自身的 QQ / 酷狗检索网关换到该平台的 id，
  *    换到的候选先过站外源同一套三重校验（歌名 / 歌手 / 时长）再取链。
  *
+ * 通道顺序按歌曲来源平台排定：歌曲自带原生 id 的通道先走（直查零检索），
+ * 需要检索换 id 的另一通道放在后面兜底。
+ *
  * 取链返回的是裸音频流（不是 JSON），因此直链就是取链地址本身。
  * 公益站返回的文件未必是请求的那一版（实测同一条 id 可返回时长明显不同的另一版），
  * 所以取链后按真实音频时长做闸门，偏差超容差即判为错版、拒绝交付。
@@ -76,6 +79,24 @@ const CHANNEL_LEVELS: Record<string, string[]> = {
 const CHANNEL_PLATFORM: Record<string, string> = {
   qq: "qqmusic",
   kg: "kugou",
+};
+
+/** 长青通道的默认尝试顺序 */
+const CHANNEL_SEQUENCE = ["qq", "kg"];
+
+/**
+ * 按歌曲来源平台排定通道顺序
+ *
+ * 歌曲自带平台原生 id（QQ mid / 酷狗 hash）时，先走该平台对应的通道：
+ * 直接按原生 id 取链，零检索；另一平台的通道需要按关键词换 id，放在后面兜底。
+ * 歌曲不是 QQ / 酷狗来源时没有直查通道，保持默认顺序。
+ * @param platform 歌曲来源平台
+ * @returns 通道尝试顺序
+ */
+const resolveChannelOrder = (platform?: string): string[] => {
+  const nativeChannel = CHANNEL_SEQUENCE.find((channel) => CHANNEL_PLATFORM[channel] === platform);
+  if (!nativeChannel) return [...CHANNEL_SEQUENCE];
+  return [nativeChannel, ...CHANNEL_SEQUENCE.filter((channel) => channel !== nativeChannel)];
 };
 
 /** 长青检索层熔断器 */
@@ -182,6 +203,7 @@ const resolveCandidates = async (
 ): Promise<ChangqingCandidate[]> => {
   const platform = CHANNEL_PLATFORM[channel];
   if (options.platform === platform && options.platformId) {
+    serverLog.log(`🔗 长青 ${channel} 通道按平台原生 id 直查（零检索）`);
     return [
       {
         id: options.platformId,
@@ -191,6 +213,7 @@ const resolveCandidates = async (
       },
     ];
   }
+  serverLog.log(`🔎 长青 ${channel} 通道按关键词检索换 id`);
   const search = channel === "qq" ? searchQqCandidates : searchKugouCandidates;
   const keywords = target.artist
     ? [`${target.title}-${target.artist}`, `${target.title} ${target.artist}`]
@@ -279,7 +302,7 @@ const getChangqingSongUrl = async (
     let upstreamFault = false;
     let hasCandidate = false;
     let hasPassedCandidate = false;
-    for (const channel of ["qq", "kg"]) {
+    for (const channel of resolveChannelOrder(options.platform)) {
       let candidates: ChangqingCandidate[] = [];
       try {
         candidates = await resolveCandidates(channel, target, options);
