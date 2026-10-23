@@ -2,13 +2,8 @@ import { TASKBAR_IPC_CHANNELS } from "@shared";
 import { type BrowserWindow, nativeTheme, screen } from "electron";
 import { debounce } from "lodash-es";
 import { useStore } from "../store";
-import { isDev, port } from "../utils/config";
 import { createWindow } from "./index";
-
-const floatingTaskbarLyricUrl =
-  isDev && process.env.ELECTRON_RENDERER_URL
-    ? `${process.env.ELECTRON_RENDERER_URL}/#/taskbar-lyric?win=taskbar-lyric&mode=floating`
-    : `http://localhost:${port}/#/taskbar-lyric?win=taskbar-lyric&mode=floating`;
+import { resolveAuxWindowUrl } from "./renderer-url";
 
 class FloatingTaskbarLyricWindow {
   private win: BrowserWindow | null = null;
@@ -73,7 +68,7 @@ class FloatingTaskbarLyricWindow {
     if (!this.win) return null;
 
     this.applyAlwaysOnTop(true);
-    this.win.loadURL(floatingTaskbarLyricUrl);
+    this.win.loadURL(resolveAuxWindowUrl("taskbar-lyric", "win=taskbar-lyric&mode=floating"));
 
     const sendTheme = () => {
       if (this.win && !this.win.isDestroyed()) {

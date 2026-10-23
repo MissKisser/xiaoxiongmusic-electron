@@ -11,9 +11,9 @@ import { debounce } from "lodash-es";
 import { join } from "node:path";
 import { processLog } from "../logger";
 import { useStore } from "../store";
-import { isDev, port } from "../utils/config";
 import { loadNativeModule } from "../utils/native-loader";
 import { createWindow } from "./index";
+import { resolveAuxWindowUrl } from "./renderer-url";
 
 type taskbarLyricModule = typeof import("@native/taskbar-lyric");
 
@@ -31,11 +31,6 @@ if (taskbarLyricNative) {
     processLog.error("[TaskbarLyric] 初始化日志失败", e);
   }
 }
-
-const taskbarLyricUrl =
-  isDev && process.env.ELECTRON_RENDERER_URL
-    ? `${process.env.ELECTRON_RENDERER_URL}/#/taskbar-lyric?win=taskbar-lyric`
-    : `http://localhost:${port}/#/taskbar-lyric?win=taskbar-lyric`;
 
 class TaskbarLyricWindow {
   private win: BrowserWindow | null = null;
@@ -114,7 +109,7 @@ class TaskbarLyricWindow {
 
     if (!this.win) return null;
 
-    this.win.loadURL(taskbarLyricUrl);
+    this.win.loadURL(resolveAuxWindowUrl("taskbar-lyric", "win=taskbar-lyric"));
 
     // 因为任务栏窗口非常小，默认嵌入的开发者工具完全无法使用，
     // 所以监听 F12 并按分离模式打开开发者工具

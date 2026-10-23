@@ -1,13 +1,9 @@
 import { BrowserWindow } from "electron";
 import { createWindow } from "./index";
-import { loadWinUrl } from "../utils/config";
+import { resolveRendererPageUrl } from "./renderer-url";
 
 class LoadWindow {
   private win: BrowserWindow | null = null;
-  private winURL: string;
-  constructor() {
-    this.winURL = loadWinUrl;
-  }
   /**
    * 主窗口事件
    * @returns void
@@ -43,7 +39,7 @@ class LoadWindow {
     });
     if (!this.win) return null;
     // 加载地址
-    this.win.loadURL(this.winURL);
+    this.win.loadURL(resolveRendererPageUrl("/web/loading/index.html"));
     // 窗口事件
     this.event();
     return this.win;

@@ -1,8 +1,9 @@
 import { BrowserWindow } from "electron";
 import { createWindow } from "./index";
 import { useStore } from "../store";
-import { appName, lyricWinUrl } from "../utils/config";
+import { appName } from "../utils/config";
 import mainWindow from "./main-window";
+import { resolveAuxWindowUrl } from "./renderer-url";
 
 class LyricWindow {
   private win: BrowserWindow | null = null;
@@ -77,7 +78,7 @@ class LyricWindow {
     });
     if (!this.win) return null;
     // 加载地址
-    this.win.loadURL(lyricWinUrl);
+    this.win.loadURL(resolveAuxWindowUrl("desktop-lyric"));
     // 窗口事件
     this.event();
     return this.win;
