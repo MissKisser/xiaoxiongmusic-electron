@@ -28,6 +28,8 @@ import {
   formatCoverList,
   formatSongsList,
 } from "@/utils/format";
+import { useDataStore } from "@/stores/data";
+import { usePlatformStore } from "@/stores/platform";
 import type { ApiPlatform } from "@/types/shared";
 import type { ArtistType, CommentType, CoverSize, CoverType, SongType } from "@/types/main";
 import {
@@ -253,6 +255,45 @@ const findPlaylistEntry = async (
   }
 };
 
+/** 自建歌单缺创建者时的本人标注 */
+const SELF_CREATOR_NAME = "我";
+
+/**
+ * 读取当前登录账号的昵称
+ *
+ * 第三方平台取平台账号资料里的昵称，网易云取本地用户资料；
+ * 只有空白字符的昵称视为没有昵称。
+ * @param platform 音源平台
+ * @returns 账号昵称，没有昵称时为空字符串
+ */
+const currentAccountName = (platform: ApiPlatform): string => {
+  if (platform === "netease") return (useDataStore().userData?.name ?? "").trim();
+  return (usePlatformStore().platformProfiles[platform]?.nickname ?? "").trim();
+};
+
+/**
+ * 组装歌单创建者名称
+ *
+ * 上游给了创建者就用上游的；
+ * 自建歌单的上游常不回创建者（创建者就是当前账号本人），此时回填当前账号昵称，
+ * 账号没有昵称时标注为本人；
+ * 第三方公开歌单与收藏歌单的上游作者缺失时留空，由界面给出中性兜底文案。
+ * @param platform 音源平台
+ * @param upstream 上游给出的创建者名称
+ * @param owned 是否为当前账号自建歌单
+ * @returns 创建者名称，上游与账号昵称都缺失时为空字符串
+ */
+const resolveCreatorName = (
+  platform: ApiPlatform,
+  upstream: string | undefined,
+  owned: boolean,
+): string => {
+  const name = (upstream ?? "").trim();
+  if (name) return name;
+  if (!owned) return "";
+  return currentAccountName(platform) || SELF_CREATOR_NAME;
+};
+
 /**
  * 把平台歌单条目转为分派层统一条目
  * @param playlist 平台归一化歌单
@@ -266,7 +307,12 @@ const fromPlatformPlaylist = (playlist: PlatformPlaylist): DispatchPlaylist => (
   count: playlist.trackCount,
   playCount: playlist.playCount,
   description: playlist.description,
-  creatorName: playlist.creator?.name,
+  // 自建歌单的创建者是本人，收藏歌单的创建者是源歌单作者
+  creatorName: resolveCreatorName(
+    playlist.platform,
+    playlist.creator?.name,
+    playlist.subscribed !== true,
+  ),
   createTime: playlist.createTime,
   updateTime: playlist.updateTime,
   platform: playlist.platform,
@@ -412,6 +458,8 @@ export const dispatchUserPlaylists = async (
     const owned: DispatchPlaylist[] = [];
     const favorites: DispatchPlaylist[] = [];
     for (const item of list) {
+      // 网易云把「我喜欢的音乐」混在用户歌单列表首位，按创建者是否为本人拆分两组
+      const isOwned = item.userId === uid || item.creator?.id === uid;
       const entry: DispatchPlaylist = {
         id: item.id,
         name: item.name,
@@ -420,14 +468,14 @@ export const dispatchUserPlaylists = async (
         count: item.count ?? 0,
         playCount: item.playCount,
         description: item.description,
-        creatorName: item.creator?.name,
+        // 自建歌单的创建者是本人，收藏歌单的创建者是源歌单作者
+        creatorName: resolveCreatorName("netease", item.creator?.name, isOwned),
         createTime: item.createTime,
         updateTime: item.updateTime,
         platform: "netease",
         subscribed: false,
       };
-      // 网易云把「我喜欢的音乐」混在用户歌单列表首位，按创建者是否为本人拆分两组
-      if (item.userId === uid || item.creator?.id === uid) owned.push(entry);
+      if (isOwned) owned.push(entry);
       else favorites.push({ ...entry, subscribed: true });
     }
     // 网易云用户歌单列表首项固定是「我喜欢的音乐」
@@ -485,44 +533,47 @@ export const dispatchPlaylistDetail = async (
       songBegin: (page - 1) * pageSize,
       songNum: pageSize,
     });
-    // 歌单头缺失时回落到公开歌单端点：广场歌单只有该端点带歌单名与封面
-    if (!res.name) {
-      let publicRes: PlatformPlaylistDetail | null = null;
+    // 歌单名 / 封面 / 创建者在歌单列表里，详情接口不回，用列表补齐
+    // （系统「我喜欢」目录只回名字不回封面；创建者缺失时同样要回列表查）
+    const needEntry = !res.name || !res.coverImgUrl || !res.creator?.name;
+    const entry = needEntry ? await findPlaylistEntry(platform, options.id) : null;
+    // 自建歌单：列表命中且非收藏，创建者就是当前账号本人
+    const owned = !!entry && !entry.subscribed;
+    // 公开歌单端点：歌单头与创建者只在这里给（登录态端点不回创建者）
+    let publicRes: PlatformPlaylistDetail | null = null;
+    if (!res.name || (!res.creator?.name && !owned)) {
       try {
         publicRes = await qqPublicPlaylistDetail(options.id);
       } catch (error) {
         console.error("读取 QQ 公开歌单头部失败：", error);
       }
-      if (publicRes?.name) {
-        const publicPlaylist: DispatchPlaylist = {
-          id: publicRes.id,
-          name: publicRes.name,
-          cover: publicRes.coverImgUrl,
-          coverSize: publicRes.coverSize,
-          count: publicRes.trackCount,
-          playCount: publicRes.playCount,
-          description: publicRes.description,
-          creatorName: publicRes.creator?.name,
-          createTime: publicRes.createTime,
-          platform: res.platform,
-          platformId: publicRes.platformId,
-          subscribed: false,
-        };
-        return {
-          detail: toCoverType(publicPlaylist),
-          // 曲目以登录态端点为准（公开端点不回曲目）
-          tracks: withTracks ? res.tracks.map(toSongType) : [],
-          count: publicPlaylist.count ?? 0,
-          hasMore: res.hasMore,
-          page,
-          pageSize,
-        };
-      }
     }
-    // 歌单名 / 封面 / 创建者在歌单列表里，详情接口不回，用列表补齐
-    // （系统「我喜欢」目录只回名字不回封面，两者缺一都要回列表补）
-    const entry =
-      res.name && res.coverImgUrl ? null : await findPlaylistEntry(platform, options.id);
+    // 歌单头缺失时回落到公开歌单端点：广场歌单只有该端点带歌单名与封面
+    if (!res.name && publicRes?.name) {
+      const publicPlaylist: DispatchPlaylist = {
+        id: publicRes.id,
+        name: publicRes.name,
+        cover: publicRes.coverImgUrl,
+        coverSize: publicRes.coverSize,
+        count: publicRes.trackCount,
+        playCount: publicRes.playCount,
+        description: publicRes.description,
+        creatorName: resolveCreatorName(platform, publicRes.creator?.name, false),
+        createTime: publicRes.createTime,
+        platform: res.platform,
+        platformId: publicRes.platformId,
+        subscribed: false,
+      };
+      return {
+        detail: toCoverType(publicPlaylist),
+        // 曲目以登录态端点为准（公开端点不回曲目）
+        tracks: withTracks ? res.tracks.map(toSongType) : [],
+        count: publicPlaylist.count ?? 0,
+        hasMore: res.hasMore,
+        page,
+        pageSize,
+      };
+    }
     const playlist: DispatchPlaylist = {
       id: res.id,
       name: res.name || entry?.name || "",
@@ -531,13 +582,18 @@ export const dispatchPlaylistDetail = async (
       count: res.trackCount || entry?.count || 0,
       playCount: res.playCount || entry?.playCount,
       description: res.description || entry?.description,
-      creatorName: res.creator?.name || entry?.creatorName,
+      // 自建歌单回填当前账号昵称，公开歌单与收藏歌单取上游作者
+      creatorName: resolveCreatorName(
+        platform,
+        res.creator?.name || entry?.creatorName || publicRes?.creator?.name,
+        owned,
+      ),
       createTime: entry?.createTime,
       updateTime: entry?.updateTime,
       platform: res.platform,
       platformId: res.platformId,
       dirId: options.dirId,
-      subscribed: false,
+      subscribed: entry?.subscribed === true,
     };
     return {
       detail: toCoverType(playlist),
@@ -583,7 +639,12 @@ export const dispatchPlaylistDetail = async (
     count: res.trackCount || entry?.count || 0,
     playCount: res.playCount || entry?.playCount,
     description: res.description || entry?.description,
-    creatorName: res.creator?.name || entry?.creatorName,
+    // 自建歌单回填当前账号昵称，收藏歌单取源歌单作者
+    creatorName: resolveCreatorName(
+      platform,
+      res.creator?.name || entry?.creatorName,
+      !!entry && !(res.subscribed === true || entry.subscribed === true),
+    ),
     createTime: entry?.createTime,
     updateTime: entry?.updateTime,
     platform: res.platform,
@@ -632,6 +693,8 @@ export const dispatchLikedSongs = async (
           cover: "",
           count: 0,
           platform: "netease",
+          // 「我喜欢的音乐」是当前账号自建歌单，创建者即本人
+          creatorName: resolveCreatorName("netease", undefined, true),
           subscribed: false,
         }),
         tracks: [],
@@ -655,6 +718,8 @@ export const dispatchLikedSongs = async (
         cover: "",
         count: 0,
         platform,
+        // 「我喜欢的音乐」是当前账号自建歌单，创建者即本人
+        creatorName: resolveCreatorName(platform, undefined, true),
         subscribed: false,
       }),
       tracks: [],
@@ -1560,7 +1625,7 @@ export const dispatchPublicPlaylistDetail = async (
       cover: res.playlist.cover,
       count: res.playlist.count,
       playCount: res.playlist.playCount,
-      creatorName: res.playlist.creatorName,
+      creatorName: resolveCreatorName("kugou", res.playlist.creatorName, false),
       description: res.playlist.description,
       platform: "kugou",
     }),

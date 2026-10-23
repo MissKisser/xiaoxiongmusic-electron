@@ -56,11 +56,11 @@
             <n-text class="name text-hidden">{{ item.name }}</n-text>
             <!-- 创建者 -->
             <n-text
-              v-if="(type === 'playlist' || type === 'radio') && item?.creator?.id"
+              v-if="(type === 'playlist' || type === 'radio') && item?.creator?.name"
               class="creator"
               depth="3"
             >
-              {{ item.creator?.name || item.creator || "未知" }}
+              {{ item.creator.name }}
             </n-text>
             <!-- 更新提示 -->
             <n-text v-if="item.updateTip" class="tip" depth="3">{{ item.updateTip }}</n-text>

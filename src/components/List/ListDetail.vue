@@ -88,7 +88,7 @@
                   <n-text class="ar"> {{ detailData.artists || "未知艺术家" }} </n-text>
                 </div>
                 <n-text v-else-if="config.showCreator">
-                  {{ detailData.creator?.name || "未知用户名" }}
+                  {{ detailData.creator?.name || "未知创建者" }}
                 </n-text>
               </div>
               <!-- 歌曲数量 -->
