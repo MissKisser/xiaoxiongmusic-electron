@@ -15,16 +15,28 @@
                     :cover="board.cover"
                     :title="board.title || '排行榜'"
                     :height="160"
-                    :description="board.subTitle || board.updateTime"
+                    :description="board.subTitle || formatTimestamp(board.updateTime)"
                     size="normal"
                     @click="handleBoardClick(board)"
                   >
                     <template #info>
                       <div class="board-meta">
-                        <n-text class="desc" depth="3">{{ board.total }} 首</n-text>
-                        <n-text v-if="board.period" class="desc" depth="3">
-                          {{ board.period }} 期
-                        </n-text>
+                        <!-- 曲目前览：与网易云榜单卡片同结构，清单源给出前几首时逐条显示 -->
+                        <div
+                          v-for="(song, songIndex) in board.tracks"
+                          :key="songIndex"
+                          class="song-item text-hidden"
+                        >
+                          <n-text class="name">{{ songIndex + 1 }}. {{ song.first }}</n-text>
+                          <n-text class="desc" depth="3">{{ song.second }}</n-text>
+                        </div>
+                        <!-- 平台特有的曲目数与期数（附加项） -->
+                        <n-flex class="meta-row" align="center" :size="12" gap="12">
+                          <n-text class="desc" depth="3">{{ board.total }} 首</n-text>
+                          <n-text v-if="board.period" class="desc" depth="3">
+                            {{ board.period }} 期
+                          </n-text>
+                        </n-flex>
                       </div>
                     </template>
                   </SongListCard>
@@ -115,6 +127,7 @@ import type { CoverType } from "@/types/main";
 import { onPlatformChange, usePlatformStore } from "@/stores";
 import { dispatchLeaderboardGroups } from "@/api/platform/dispatch";
 import { formatCoverList } from "@/utils/format";
+import { formatTimestamp } from "@/utils/time";
 
 const router = useRouter();
 const platformStore = usePlatformStore();
@@ -256,7 +269,13 @@ onUnmounted(() => {
   }
   .board-meta {
     display: flex;
-    gap: 12px;
+    flex-direction: column;
+    gap: 4px;
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
     .desc {
       font-size: 13px;
     }

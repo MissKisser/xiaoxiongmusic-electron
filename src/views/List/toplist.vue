@@ -36,43 +36,91 @@
             <n-text v-if="period" depth="3">{{ period }} 期</n-text>
             <n-text v-if="updateTime" depth="3">{{ updateTime }}</n-text>
           </n-flex>
-          <n-button
-            class="play"
-            :focusable="false"
-            :disabled="!songs.length"
-            type="primary"
-            strong
-            secondary
-            round
-            @click="playAll"
-          >
-            <template #icon>
-              <SvgIcon name="Play" />
-            </template>
-            播放全部
-          </n-button>
+          <div class="menu">
+            <n-flex class="left" align="center" :size="12">
+              <n-button
+                class="play"
+                :focusable="false"
+                :disabled="!songs.length"
+                type="primary"
+                strong
+                secondary
+                round
+                @click="playAll"
+              >
+                <template #icon>
+                  <SvgIcon name="Play" />
+                </template>
+                播放全部
+              </n-button>
+              <!-- 更多操作 -->
+              <n-dropdown
+                v-if="moreOptions.length"
+                :options="moreOptions"
+                trigger="click"
+                placement="bottom-start"
+              >
+                <n-button :focusable="false" class="more" circle strong secondary>
+                  <template #icon>
+                    <SvgIcon name="List" />
+                  </template>
+                </n-button>
+              </n-dropdown>
+            </n-flex>
+            <!-- 模糊搜索 -->
+            <n-input
+              v-if="songs.length"
+              :value="searchValue"
+              :input-props="{ autocomplete: 'off' }"
+              class="search"
+              placeholder="模糊搜索"
+              clearable
+              round
+              @update:value="handleSearch"
+            >
+              <template #prefix>
+                <SvgIcon name="Search" />
+              </template>
+            </n-input>
+          </div>
         </div>
       </div>
     </div>
     <!-- 榜单曲目 -->
     <SongList
-      :data="songs"
+      v-if="!searchValue || displayData.length"
+      :data="displayData"
       :loading="loading"
       :loadMore="hasMore"
       :height="listHeight"
       @reachBottom="loadMoreSongs"
       disabledSort
     />
+    <n-empty
+      v-else
+      :description="`搜不到关于 ${searchValue} 的任何歌曲呀`"
+      class="empty"
+      size="large"
+    >
+      <template #icon>
+        <SvgIcon name="SearchOff" />
+      </template>
+    </n-empty>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { SongType } from "@/types/main";
 import type { ApiPlatform } from "@/types/shared";
+import type { DropdownOption } from "naive-ui";
 import type { PlatformLeaderboardBoard } from "@/api/platform/types";
 import { usePlatformStore, useStatusStore, onPlatformChange } from "@/stores";
 import { dispatchLeaderboardDetail, dispatchLeaderboardGroups } from "@/api/platform/dispatch";
 import { useListActions } from "@/composables/List/useListActions";
+import { useListSearch } from "@/composables/List/useListSearch";
+import { renderIcon } from "@/utils/helper";
+import { openBatchList } from "@/utils/modal";
+import { formatTimestamp } from "@/utils/time";
 
 const route = useRoute();
 const router = useRouter();
@@ -106,6 +154,9 @@ const board = ref<PlatformLeaderboardBoard | null>(null);
 
 /** 榜单曲目 */
 const songs = ref<SongType[]>([]);
+
+/** 榜单曲目的模糊搜索 */
+const { searchValue, displayData, clearSearch, performSearch } = useListSearch(songs);
 
 /** 当前已加载到第几页 */
 const boardPage = ref<number>(1);
@@ -158,7 +209,7 @@ const total = computed<number>(() => detailTotal.value || board.value?.total || 
 const period = computed<string>(() => board.value?.period || "");
 
 /** 榜单更新时间 */
-const updateTime = computed<string>(() => board.value?.updateTime || "");
+const updateTime = computed<string>(() => formatTimestamp(board.value?.updateTime));
 
 /** 榜单所属分组名 */
 const groupName = computed<string>(() => board.value?.groupName || "");
@@ -264,6 +315,41 @@ const playAll = useDebounceFn(() => {
   playAllSongsAction(songs.value);
 }, 300);
 
+/**
+ * 更多操作
+ *
+ * 与歌单详情页同形态：刷新缓存与批量操作。
+ * @returns 更多操作菜单项
+ */
+const moreOptions = computed<DropdownOption[]>(() => [
+  {
+    label: "刷新缓存",
+    key: "refresh",
+    props: {
+      onClick: () => loadBoard(),
+    },
+    icon: renderIcon("Refresh"),
+  },
+  {
+    label: "批量操作",
+    key: "batch",
+    props: {
+      onClick: () => openBatchList(displayData.value, false),
+    },
+    icon: renderIcon("Batch"),
+  },
+]);
+
+/**
+ * 处理模糊搜索
+ * @param val 搜索关键词
+ */
+const handleSearch = (val: string) => {
+  if ((!val || !val.trim()) && !searchValue.value) return;
+  searchValue.value = val;
+  performSearch(val);
+};
+
 /** 载入当前榜单 */
 const loadBoard = () => {
   loadedKey.value = boardKey.value;
@@ -277,6 +363,7 @@ const loadBoard = () => {
   detailSubTitle.value = "";
   detailCover.value = "";
   detailTotal.value = 0;
+  clearSearch();
   void loadDetail(1);
   void loadBoardMeta();
 };
@@ -380,8 +467,32 @@ onUnmounted(() => {
           font-size: 12px;
           margin-bottom: 12px;
         }
-        .play {
-          align-self: flex-start;
+        // 操作区：播放与更多操作在左，模糊搜索在右（与歌单详情页同形态）
+        .menu {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          .left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .more {
+            width: 40px;
+            height: 40px;
+          }
+          .search {
+            height: 40px;
+            width: 130px;
+            display: flex;
+            align-items: center;
+            border-radius: 25px;
+            transition: all 0.3s var(--n-bezier);
+            &.n-input--focus {
+              width: 200px;
+            }
+          }
         }
       }
     }
@@ -390,6 +501,9 @@ onUnmounted(() => {
   :deep(.song-list) {
     flex: 1;
     min-height: 0;
+  }
+  .empty {
+    margin-top: 60px;
   }
 }
 </style>

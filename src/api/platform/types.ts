@@ -137,6 +137,19 @@ export interface PlatformLeaderboard {
 }
 
 /**
+ * 榜单卡片里的曲目预览条目
+ *
+ * 与网易云榜单卡片的曲名 / 歌手两段式一致，
+ * 便于两平台共用同一套卡片结构。
+ */
+export interface PlatformBoardTrack {
+  /** 曲名 */
+  first: string;
+  /** 歌手 */
+  second: string;
+}
+
+/**
  * 归一化后的分组榜单条目
  *
  * QQ 音乐与酷狗的榜单清单同构：条目自带榜单号、标题、副标题、简介、
@@ -154,8 +167,15 @@ export interface PlatformLeaderboardBoard {
   intro: string;
   /** 榜单期数 */
   period: string;
-  /** 更新时间 */
-  updateTime: string;
+  /** 更新时间（毫秒时间戳，平台给日期文本时在归一化层解析） */
+  updateTime?: number;
+  /**
+   * 曲目预览
+   *
+   * 榜单清单源给出前几首时才有值（与网易云榜单卡片同结构），
+   * 平台清单源不带曲目时为空，卡片据此保留信息位但不出预览。
+   */
+  tracks?: PlatformBoardTrack[];
   /** 榜单封面 */
   cover: string;
   /** 榜单曲目总数 */

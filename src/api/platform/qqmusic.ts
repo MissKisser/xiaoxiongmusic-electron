@@ -11,6 +11,7 @@ import {
   deriveStableId,
   secureUrl,
   splitArtistsByPlatform,
+  toMillisDateTime,
   toMillisTimestamp,
   toNumericId,
 } from "./common";
@@ -24,6 +25,7 @@ import {
   type PlatformAlbumDetail,
   type PlatformArtist,
   type PlatformArtistDetail,
+  type PlatformBoardTrack,
   type PlatformComment,
   type PlatformCommentPage,
   type PlatformCoverEntry,
@@ -968,7 +970,26 @@ interface QqLeaderboardDetailResponse {
 }
 
 /**
+ * 归一化榜单卡片里的曲目预览
+ *
+ * 榜单清单源给出前几首时才有值，
+ * 平台清单源不带曲目时返回空数组，卡片据此只保留信息位。
+ * @param board 主进程返回的榜单条目
+ * @returns 曲名 / 歌手两段式的预览条目
+ */
+const normalizeQqBoardTracks = (board: Record<string, any>): PlatformBoardTrack[] => {
+  const list = Array.isArray(board?.tracks) ? board.tracks : [];
+  return list.slice(0, 3).map((item) => ({
+    first: String(item?.title ?? item?.name ?? ""),
+    second: String(item?.singer ?? item?.artist ?? ""),
+  }));
+};
+
+/**
  * 归一化 QQ 榜单条目
+ *
+ * 更新时间在归一化层统一转成毫秒时间戳：
+ * 上游给的是日期文本（如 `2026-10-23`），直接渲染会显示成原始字符串。
  * @param board 主进程返回的榜单条目
  * @param groupName 所属分组名
  * @returns 归一化榜单条目
@@ -982,7 +1003,8 @@ const normalizeQqBoard = (
   subTitle: String(board?.subTitle ?? ""),
   intro: String(board?.intro ?? ""),
   period: String(board?.period ?? ""),
-  updateTime: String(board?.updateTime ?? ""),
+  updateTime: toMillisDateTime(board?.updateTime),
+  tracks: normalizeQqBoardTracks(board),
   cover: String(board?.cover ?? ""),
   total: Number(board?.total ?? 0),
   groupName,

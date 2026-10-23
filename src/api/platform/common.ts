@@ -154,3 +154,43 @@ export const toMillisTimestamp = (value: unknown): number | undefined => {
   if (!Number.isFinite(time) || time <= 0) return undefined;
   return time < SECONDS_TIMESTAMP_LIMIT ? time * 1000 : time;
 };
+
+/**
+ * 日期文本的解析模式
+ *
+ * 平台的上游时间除时间戳外还常给日期文本，形态有
+ * `2026-10-23 08:30:01`、`2026-10-23`、`2026-10-23 19:00` 等，
+ * 日期与时间之间可能是空格、制表符或 `T`。
+ */
+const DATE_TEXT_PATTERN =
+  /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/;
+
+/**
+ * 把平台给出的时间统一换算为毫秒
+ *
+ * 平台的上游时间有三种形态：秒级时间戳、毫秒级时间戳与日期文本。
+ * 数值按量级区分秒与毫秒（同 {@link toMillisTimestamp}），
+ * 文本按本地时区解析成日期，避免时区偏移把日期挪到前后一天。
+ * @param value 平台给出的时间
+ * @returns 毫秒时间戳；取不到有效值时为 undefined
+ */
+export const toMillisDateTime = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (typeof value === "number") return toMillisTimestamp(value);
+  const text = String(value).trim();
+  if (!text) return undefined;
+  // 纯数字按时间戳处理
+  if (/^\d+$/.test(text)) return toMillisTimestamp(text);
+  const matched = DATE_TEXT_PATTERN.exec(text);
+  if (!matched) return undefined;
+  const [, year, month, day, hour, minute, second] = matched;
+  const time = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour ?? 0),
+    Number(minute ?? 0),
+    Number(second ?? 0),
+  ).getTime();
+  return Number.isFinite(time) ? time : undefined;
+};
