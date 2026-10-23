@@ -223,25 +223,111 @@ export const extractHttpStatus = (error: unknown): number => {
 };
 
 /**
+ * 上游返回的业务错误
+ *
+ * 公益聚合站常以 HTTP 200 返回业务错误 JSON（如 `{"code":201,"msg":"error"}`）：
+ * 传输层成功、业务层失败。只看 HTTP 状态码会把这类响应记成「上游健康」，
+ * 死通道因此永远熔断不了。
+ */
+export type BusinessError = {
+  /** 业务错误码 */
+  code: string;
+  /** 业务错误描述 */
+  msg: string;
+};
+
+/** 视为成功的业务码 */
+const BUSINESS_SUCCESS_CODES = new Set(["0", "200"]);
+
+/** 连接类错误码（异常对象顶层 code 字段的取值） */
+const NETWORK_ERROR_CODES = [
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EAI_AGAIN",
+  "ENOTFOUND",
+];
+
+/**
+ * 把响应体解析成普通对象
+ *
+ * 只认 JSON 对象形态：裸音频流的头部是二进制，直接 JSON.parse 会抛错。
+ * @param body 响应体（字符串 / Buffer / 已解析对象）
+ * @returns 解析结果；不是 JSON 对象时返回 null
+ */
+const toPlainObject = (body: unknown): Record<string, unknown> | null => {
+  if (body && typeof body === "object" && !Buffer.isBuffer(body)) {
+    return body as Record<string, unknown>;
+  }
+  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * 解析响应体中的业务错误
+ *
+ * @param body 响应体（字符串 / Buffer / 已解析对象）
+ * @returns 业务错误；不是业务错误响应时返回 null
+ */
+export const parseBusinessError = (body: unknown): BusinessError | null => {
+  const payload = toPlainObject(body);
+  if (!payload) return null;
+  const raw = payload.code ?? payload.err_code;
+  if (raw === undefined || raw === null || raw === "") return null;
+  const code = String(raw);
+  if (BUSINESS_SUCCESS_CODES.has(code)) return null;
+  return { code, msg: String(payload.msg ?? payload.message ?? payload.err_msg ?? "") };
+};
+
+/**
+ * 判断业务错误是否属于「上游源故障」
+ *
+ * 口径：
+ * - 2xx / 5xx 语义的业务码（如 201、500）：上游没能给出可用资源，计入源故障；
+ * - 4xx 语义的业务码（如 401「无此音质档位」）：请求本身不合法，属请求侧拒绝，
+ *   不计入源故障 —— 否则一次参数错误就会把整条源熔断掉。
+ *
+ * 「本曲无版权」类逐曲拒绝由各源自己的判定处理，不经过本函数。
+ * @param business 业务错误；为 null 时返回 false
+ * @returns 是否为上游源故障
+ */
+export const isBusinessFault = (business: BusinessError | null): boolean => {
+  if (!business) return false;
+  return !/^4\d\d$/.test(business.code);
+};
+
+/**
  * 判断异常是否属于「上游源故障」
  *
  * 判定口径：5xx（含 520 / 503）、连接失败、超时、DNS 失败等；
+ * HTTP 200 但业务层失败（响应体是业务错误 JSON）同样计入；
  * 4xx 属请求侧问题，不计入源故障（否则会把参数错误误判成源挂了）。
  * @param error 异常对象
  * @returns 是否为上游源故障
  */
 export const isUpstreamFault = (error: unknown): boolean => {
+  const payload = error as {
+    response?: { status?: number; data?: unknown };
+    status?: number;
+    code?: unknown;
+    message?: unknown;
+  };
   const status = extractHttpStatus(error);
-  if (status > 0) return status >= 500;
-  const payload = error as { code?: unknown; message?: unknown };
+  if (status >= 500) return true;
+  // HTTP 200 但业务层失败：上游没能给出可用资源，计入源故障
+  const business = parseBusinessError(payload?.response?.data);
+  if (business) return isBusinessFault(business);
+  if (status > 0) return false;
   const code = String(payload?.code ?? "");
-  if (
-    ["ECONNABORTED", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ENOTFOUND"].includes(
-      code,
-    )
-  ) {
-    return true;
-  }
+  if (NETWORK_ERROR_CODES.includes(code)) return true;
   const message = String(payload?.message ?? "");
   return /timeout|超时|socket hang up|network error/i.test(message);
 };

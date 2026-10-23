@@ -23,6 +23,17 @@ const HEAD_BYTES = 131072;
 /** 探测请求超时（毫秒） */
 const PROBE_TIMEOUT = 10000;
 
+/** 响应体文本化时保留的字节数：业务错误 JSON 只有几十字节 */
+const BODY_TEXT_LIMIT = 512;
+
+/** 探测请求选项 */
+export type AudioProbeOptions = {
+  /** 中止信号：用于给整次探测加硬时限 */
+  signal?: AbortSignal;
+  /** 单次请求超时（毫秒） */
+  timeoutMs?: number;
+};
+
 /** 音频探测结论 */
 export type AudioProbe = {
   /** 响应声明的总字节数；未知时为 null */
@@ -33,6 +44,8 @@ export type AudioProbe = {
   bitrateKbps: number | null;
   /** 识别出的容器格式 */
   format: string;
+  /** 响应体开头的文本片段：用于识别上游返回的业务错误 JSON */
+  bodyText: string | null;
 };
 
 /** MPEG1 Layer3 码率表（kbps） */
@@ -52,16 +65,21 @@ const MP3_SAMPLE_RATES: Record<number, number[]> = {
  * 读取直链声明的总字节数
  * @param url 音频直链
  * @param headers 请求头
+ * @param timeoutMs 单次请求超时（毫秒）
+ * @param signal 中止信号
  * @returns 字节数；无法确定时返回 null
  */
 const probeTotalBytes = async (
   url: string,
   headers: Record<string, string>,
+  timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<number | null> => {
   try {
     const response = await axios.head(url, {
       headers,
-      timeout: PROBE_TIMEOUT,
+      timeout: timeoutMs,
+      signal,
       validateStatus: () => true,
     });
     const length = Number(response.headers["content-length"]);
@@ -75,7 +93,8 @@ const probeTotalBytes = async (
     const response = await axios.get(url, {
       headers: { ...headers, Range: `bytes=0-${HEAD_BYTES - 1}` },
       responseType: "arraybuffer",
-      timeout: PROBE_TIMEOUT,
+      timeout: timeoutMs,
+      signal,
       maxContentLength: HEAD_BYTES,
       validateStatus: () => true,
     });
@@ -98,14 +117,22 @@ const probeTotalBytes = async (
  * 读取直链的文件头
  * @param url 音频直链
  * @param headers 请求头
+ * @param timeoutMs 单次请求超时（毫秒）
+ * @param signal 中止信号
  * @returns 文件头字节；读取失败返回 null
  */
-const fetchHead = async (url: string, headers: Record<string, string>): Promise<Buffer | null> => {
+const fetchHead = async (
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Buffer | null> => {
   try {
     const response = await axios.get(url, {
       headers: { ...headers, Range: `bytes=0-${HEAD_BYTES - 1}` },
       responseType: "arraybuffer",
-      timeout: PROBE_TIMEOUT,
+      timeout: timeoutMs,
+      signal,
       maxContentLength: HEAD_BYTES,
       validateStatus: () => true,
     });
@@ -243,16 +270,20 @@ const parseMp3 = (
  *
  * @param url 音频直链
  * @param headers 取链请求头
+ * @param options 探测选项（中止信号与单次请求超时）
  * @returns 探测结论
  */
 export const probeAudio = async (
   url: string,
   headers: Record<string, string> = {},
+  options: AudioProbeOptions = {},
 ): Promise<AudioProbe> => {
-  const bytes = await probeTotalBytes(url, headers);
-  const buffer = await fetchHead(url, headers);
+  const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT;
+  const bytes = await probeTotalBytes(url, headers, timeoutMs, options.signal);
+  const buffer = await fetchHead(url, headers, timeoutMs, options.signal);
+  const bodyText = buffer ? buffer.subarray(0, BODY_TEXT_LIMIT).toString("utf8") : null;
   if (!buffer) {
-    return { bytes, durationSec: null, bitrateKbps: null, format: "unknown" };
+    return { bytes, durationSec: null, bitrateKbps: null, format: "unknown", bodyText: null };
   }
   const flac = parseFlac(buffer);
   if (flac) {
@@ -262,6 +293,7 @@ export const probeAudio = async (
       bitrateKbps:
         bytes && flac.durationSec ? Math.round((bytes * 8) / flac.durationSec / 1000) : null,
       format: "flac",
+      bodyText,
     };
   }
   const mp4 = parseMp4(buffer);
@@ -272,17 +304,30 @@ export const probeAudio = async (
       bitrateKbps:
         bytes && mp4.durationSec ? Math.round((bytes * 8) / mp4.durationSec / 1000) : null,
       format: "m4a",
+      bodyText,
     };
   }
   const wav = parseWav(buffer);
   if (wav) {
-    return { bytes, durationSec: wav.durationSec, bitrateKbps: wav.bitrateKbps, format: "wav" };
+    return {
+      bytes,
+      durationSec: wav.durationSec,
+      bitrateKbps: wav.bitrateKbps,
+      format: "wav",
+      bodyText,
+    };
   }
   if (bytes) {
     const mp3 = parseMp3(buffer, bytes);
     if (mp3) {
-      return { bytes, durationSec: mp3.durationSec, bitrateKbps: mp3.bitrateKbps, format: "mp3" };
+      return {
+        bytes,
+        durationSec: mp3.durationSec,
+        bitrateKbps: mp3.bitrateKbps,
+        format: "mp3",
+        bodyText,
+      };
     }
   }
-  return { bytes, durationSec: null, bitrateKbps: null, format: "unknown" };
+  return { bytes, durationSec: null, bitrateKbps: null, format: "unknown", bodyText };
 };

@@ -1,30 +1,24 @@
 /**
  * 长青聚合站换源
  *
- * 长青是社区公益聚合站：把各平台曲库统一成「按平台内歌曲 id 取链」的接口，站内没有检索能力。
- * 本模块接两个通道：
- * - QQ 通道：入参是 QQ 歌曲 mid；
- * - 酷狗通道：入参是酷狗歌曲 hash。
+ * 长青是社区公益聚合站：把平台曲库统一成「按平台内歌曲 id 取链」的接口，站内没有检索能力。
+ * 本模块只接 QQ 通道：入参是 QQ 歌曲 mid。
  *
- * 通道是 id 型的，id 的来源有两条：
- * 1. 歌曲本身来自该平台时，直接用歌曲自带的平台原生 id（QQ mid / 酷狗 hash），无需检索；
- * 2. 歌曲来自其它平台时，按「歌名 + 歌手」走项目自身的 QQ / 酷狗检索网关换到该平台的 id，
+ * id 的来源有两条：
+ * 1. 歌曲本身来自 QQ 时，直接用歌曲自带的 QQ mid，无需检索；
+ * 2. 歌曲来自其它平台（含酷狗）时，按「歌名 + 歌手」走项目自身的 QQ 检索网关换到 QQ mid，
  *    换到的候选先过站外源同一套三重校验（歌名 / 歌手 / 时长）再取链。
- *
- * 通道顺序按歌曲来源平台排定：歌曲自带原生 id 的通道先走（直查零检索），
- * 需要检索换 id 的另一通道放在后面兜底。
  *
  * 取链返回的是裸音频流（不是 JSON），因此直链就是取链地址本身。
  * 公益站返回的文件未必是请求的那一版（实测同一条 id 可返回时长明显不同的另一版），
  * 所以取链后按真实音频时长做闸门，偏差超容差即判为错版、拒绝交付。
  *
  * 公益站无 SLA：检索层挂熔断（连续失败到阈值即熔断，熔断期内零请求）；
- * 取链层按多主机故障转移逐个尝试。
+ * 取链层按多主机故障转移逐个尝试，单次尝试有硬时限，超时即放弃该次尝试。
  */
 import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
 import { callQQMusic } from "../../main/apis/qqmusic";
-import { callKugou } from "../../main/apis/kugou";
 import {
   FETCH_FAILED_REASON,
   MATCH_FAILED_REASON,
@@ -37,9 +31,14 @@ import {
   rankCandidates,
   type MatchTarget,
 } from "./match";
-import { probeAudio } from "./audio-probe";
+import { probeAudio, type AudioProbe } from "./audio-probe";
 import { sanitizeUrl } from "./sanitize";
-import { CircuitBreaker, isUpstreamFault } from "./resilience";
+import {
+  CircuitBreaker,
+  isBusinessFault,
+  isUpstreamFault,
+  parseBusinessError,
+} from "./resilience";
 
 /** 长青取链的请求头 */
 const UA =
@@ -51,45 +50,43 @@ const SEARCH_FAILURE_THRESHOLD = 3;
 /** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
 const SEARCH_BREAK_DURATION_MS = 10 * 60 * 1000;
 
-/** 单次换源最多尝试的候选数（每个通道） */
+/** 单次换源最多尝试的候选数 */
 const MAX_CANDIDATE_TRY = 2;
 
 /** 检索候选条数 */
 const SEARCH_LIMIT = 20;
 
+/** 单次取链尝试的硬时限（毫秒）：超时即放弃该次尝试并转下一主机 / 音质 */
+const FETCH_ATTEMPT_TIMEOUT_MS = 8000;
+
+/** 取链成功的最小响应体（字节）：裸音频流必然远大于此值 */
+const MIN_AUDIO_BYTES = 4096;
+
 /** 长青各通道的取链主机（按顺序故障转移） */
 const CHANNEL_HOSTS: Record<string, string[]> = {
-  // QQ 通道：实测只有 musicapi 主域能出整曲，另两个主机对会员曲直接 403
-  qq: [
-    "https://musicapi.haitangw.net/music/qq_kw.php",
-    "https://music.haitangw.cc/kgqq/qq.php",
-    "http://175.27.166.236/kgqq/qq.php",
-  ],
-  // 酷狗通道：musicapi 域已 404，实际存活的是 kgqq 子域
-  kg: ["https://music.haitangw.cc/kgqq/kg.php", "http://175.27.166.236/kgqq/kg.php"],
+  // QQ 通道：另两台备援主机对请求统一 302 到退化地址（死链），只保留主域这一台
+  qq: ["https://musicapi.haitangw.net/music/qq_kw.php"],
 };
 
 /** 长青各通道的音质档位（按顺序尝试） */
 const CHANNEL_LEVELS: Record<string, string[]> = {
   qq: ["standard", "exhigh"],
-  kg: ["standard", "exhigh"],
 };
 
 /** 通道对应的平台（用于取歌曲自带的原生 id） */
 const CHANNEL_PLATFORM: Record<string, string> = {
   qq: "qqmusic",
-  kg: "kugou",
 };
 
 /** 长青通道的默认尝试顺序 */
-const CHANNEL_SEQUENCE = ["qq", "kg"];
+const CHANNEL_SEQUENCE = ["qq"];
 
 /**
  * 按歌曲来源平台排定通道顺序
  *
- * 歌曲自带平台原生 id（QQ mid / 酷狗 hash）时，先走该平台对应的通道：
+ * 歌曲自带平台原生 id（QQ mid）时，先走该平台对应的通道：
  * 直接按原生 id 取链，零检索；另一平台的通道需要按关键词换 id，放在后面兜底。
- * 歌曲不是 QQ / 酷狗来源时没有直查通道，保持默认顺序。
+ * 歌曲不是 QQ 来源时没有直查通道，保持默认顺序。
  * @param platform 歌曲来源平台
  * @returns 通道尝试顺序
  */
@@ -157,41 +154,11 @@ const searchQqCandidates = async (keyword: string): Promise<ChangqingCandidate[]
 };
 
 /**
- * 检索酷狗候选
- * @param keyword 检索词
- * @returns 归一化后的候选列表
- */
-const searchKugouCandidates = async (keyword: string): Promise<ChangqingCandidate[]> => {
-  const response = (await callKugou("search", {
-    keywords: keyword,
-    type: "song",
-    page: 1,
-    limit: SEARCH_LIMIT,
-  })) as { songs?: unknown[] };
-  const songs = Array.isArray(response?.songs) ? (response.songs as unknown[]) : [];
-  const candidates: ChangqingCandidate[] = [];
-  for (const raw of songs) {
-    const song = raw as Record<string, any>;
-    const id = String(song?.hash ?? "");
-    const title = String(song?.name ?? "").trim();
-    if (!id || !title) continue;
-    const duration = Math.round(Number(song?.interval ?? 0));
-    candidates.push({
-      id,
-      title,
-      artist: String(song?.artist ?? "").trim(),
-      duration: duration > 0 ? duration : undefined,
-    });
-  }
-  return candidates;
-};
-
-/**
  * 解析通道的候选列表
  *
  * 歌曲本身就是该平台来源时，用歌曲自带的原生 id（无需检索）；
  * 否则走项目自身的检索网关按关键词换 id，检索词两种分隔形式依次尝试。
- * @param channel 通道标识（qq / kg）
+ * @param channel 通道标识
  * @param target 目标歌曲信息
  * @param options 请求附带的平台信息
  * @returns 归一化后的候选列表
@@ -214,14 +181,13 @@ const resolveCandidates = async (
     ];
   }
   serverLog.log(`🔎 长青 ${channel} 通道按关键词检索换 id`);
-  const search = channel === "qq" ? searchQqCandidates : searchKugouCandidates;
   const keywords = target.artist
     ? [`${target.title}-${target.artist}`, `${target.title} ${target.artist}`]
     : [target.title];
   const merged: ChangqingCandidate[] = [];
   const seen = new Set<string>();
   for (const keyword of keywords) {
-    const candidates = await search(keyword);
+    const candidates = await searchQqCandidates(keyword);
     for (const candidate of candidates) {
       if (seen.has(candidate.id)) continue;
       seen.add(candidate.id);
@@ -233,49 +199,104 @@ const resolveCandidates = async (
   return merged;
 };
 
+/** 单次取链尝试的结论 */
+type EndpointFetch = {
+  /** 是否取到可交付的直链 */
+  ok: boolean;
+  /** 取到的直链与探测结论；失败时为 null */
+  result: { url: string; probe: AudioProbe } | null;
+  /** 本次失败是否属于上游故障（计入熔断计数） */
+  fault: boolean;
+  /** 失败原因描述 */
+  reason: string;
+};
+
 /**
  * 从某个主机取链
+ *
+ * 每次尝试都有硬时限：公益站无 SLA，单台主机慢响应可达 7 秒以上，
+ * 多主机 × 多音质累加会把整条换源拖到分钟级。
+ *
+ * 长青的成功响应是裸音频流，业务错误响应是一小段 JSON
+ * （`{"code":201,"msg":"error"}` 之类，几十字节）。两者字节量差着几个数量级，
+ * 因此「响应体过小」与「业务错误 JSON」都归入取链失败，并按错误码语义区分归因：
+ * 上游侧错误（201 等）计入熔断故障，请求侧拒绝（401 等）不计入。
  * @param endpoint 取链地址
  * @param id 平台内歌曲 id
  * @param level 音质档位
- * @returns 直链与探测结论；失败返回 null
+ * @returns 取链结论
  */
 const fetchFromEndpoint = async (
   endpoint: string,
   id: string,
   level: string,
-): Promise<{ url: string; probe: Awaited<ReturnType<typeof probeAudio>> } | null> => {
+): Promise<EndpointFetch> => {
   const url = `${endpoint}?type=mp3&id=${encodeURIComponent(id)}&level=${encodeURIComponent(level)}`;
-  const probe = await probeAudio(url, { "User-Agent": UA });
-  if (!probe.bytes || probe.bytes < 4096) return null;
-  return { url, probe };
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, FETCH_ATTEMPT_TIMEOUT_MS);
+  try {
+    const probe = await probeAudio(url, { "User-Agent": UA }, {
+      signal: controller.signal,
+      timeoutMs: FETCH_ATTEMPT_TIMEOUT_MS,
+    });
+    if (probe.bytes && probe.bytes >= MIN_AUDIO_BYTES) {
+      return { ok: true, result: { url, probe }, fault: false, reason: "" };
+    }
+    const business = parseBusinessError(probe.bodyText);
+    if (business) {
+      return {
+        ok: false,
+        result: null,
+        fault: isBusinessFault(business),
+        reason: `业务错误 ${business.code}${business.msg ? `（${business.msg}）` : ""}`,
+      };
+    }
+    return {
+      ok: false,
+      result: null,
+      fault: true,
+      reason: timedOut ? "超过单次取链时限" : `响应体过小（${probe.bytes ?? 0} 字节）`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      result: null,
+      fault: timedOut || isUpstreamFault(error),
+      reason: timedOut ? "超过单次取链时限" : String(error),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /**
  * 在通道的各主机上取链（主机故障转移）
  * @param channel 通道标识
  * @param id 平台内歌曲 id
- * @returns 直链与探测结论；全部主机失败返回 null
+ * @returns 取链结论；全部主机失败时 result 为 null
  */
 const fetchFromChannel = async (
   channel: string,
   id: string,
-): Promise<{ url: string; probe: Awaited<ReturnType<typeof probeAudio>> } | null> => {
+): Promise<{ result: { url: string; probe: AudioProbe } | null; fault: boolean }> => {
   const hosts = CHANNEL_HOSTS[channel] ?? [];
   const levels = CHANNEL_LEVELS[channel] ?? ["standard"];
+  let fault = false;
   for (const host of hosts) {
     for (const level of levels) {
-      try {
-        const result = await fetchFromEndpoint(host, id, level);
-        if (result) return result;
-      } catch (error) {
-        if (isUpstreamFault(error)) {
-          serverLog.warn(`⚠️ 长青取链失败（${host}）：${String(error)}`);
-        }
+      const outcome = await fetchFromEndpoint(host, id, level);
+      if (outcome.ok && outcome.result) {
+        return { result: outcome.result, fault };
       }
+      fault = fault || outcome.fault;
+      serverLog.warn(`⚠️ 长青取链失败（${host} / ${level}）：${outcome.reason}`);
     }
   }
-  return null;
+  return { result: null, fault };
 };
 
 /**
@@ -318,9 +339,11 @@ const getChangqingSongUrl = async (
       hasPassedCandidate = true;
       for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
         const candidate = detail.candidate;
-        let fetched: Awaited<ReturnType<typeof fetchFromChannel>> = null;
+        let fetched: { url: string; probe: AudioProbe } | null = null;
         try {
-          fetched = await fetchFromChannel(channel, candidate.id);
+          const outcome = await fetchFromChannel(channel, candidate.id);
+          fetched = outcome.result;
+          upstreamFault = upstreamFault || outcome.fault;
         } catch (error) {
           upstreamFault = upstreamFault || isUpstreamFault(error);
           serverLog.warn(`⚠️ 长青 ${channel} 通道取链失败：${String(error)}`);

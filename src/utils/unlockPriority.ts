@@ -2,8 +2,10 @@
  * 换源链的优先级分派
  *
  * 同一批换源服务对三个平台的寻址能力并不相同，最优链位因此按「歌曲来自哪个平台」分派：
- * - 酷狗歌曲：长青支持按酷狗 hash 直查（零检索），排在首位；波点 / 咪咕 / 酷我只认关键词检索；网易云垫底；
- * - QQ 歌曲：酷我的关键词检索命中稳定，排在首位；长青支持按 QQ mid 直查；网易云垫底；
+ * - 酷狗歌曲：长青的酷狗 hash 直查通道已下线，酷狗歌曲与 QQ 歌曲走同一套
+ *   「按歌名 + 歌手检索换 id」的关键词路径，两平台链位因此同构：
+ *   波点 → 长青 → 咪咕 → 酷我 → 网易云；
+ * - QQ 歌曲：同上，波点 → 长青 → 咪咕 → 酷我 → 网易云；
  * - 网易云歌曲：网易云按自身歌曲 id 直查，排在首位；咪咕 / 波点 / 酷我按关键词检索；长青垫底。
  *
  * 链位固定，不随运行期可用性调整：熔断与单源失败只影响「本次是否命中」，不改变链位顺序。
@@ -22,15 +24,15 @@ const UNLOCK_PRIORITY: Record<ApiPlatform, readonly SongUnlockServer[]> = {
     SongUnlockServer.CHANGQING,
   ],
   qqmusic: [
-    SongUnlockServer.KUWO,
-    SongUnlockServer.CHANGQING,
     SongUnlockServer.BODIAN,
+    SongUnlockServer.CHANGQING,
     SongUnlockServer.MIGU,
+    SongUnlockServer.KUWO,
     SongUnlockServer.NETEASE,
   ],
   kugou: [
-    SongUnlockServer.CHANGQING,
     SongUnlockServer.BODIAN,
+    SongUnlockServer.CHANGQING,
     SongUnlockServer.MIGU,
     SongUnlockServer.KUWO,
     SongUnlockServer.NETEASE,
