@@ -6,7 +6,7 @@ import type { SettingState } from "../setting";
 /**
  * 当前设置 Schema 版本号
  */
-export const CURRENT_SETTING_SCHEMA_VERSION = 13;
+export const CURRENT_SETTING_SCHEMA_VERSION = 14;
 
 /**
  * 迁移函数类型
@@ -31,7 +31,6 @@ export const settingMigrations: Record<number, MigrationFunction> = {
     return {
       songUnlockServer: [
         { key: SongUnlockServer.BODIAN, enabled: true },
-        { key: SongUnlockServer.GEQUBAO, enabled: true },
         { key: SongUnlockServer.NETEASE, enabled: true },
         { key: SongUnlockServer.KUWO, enabled: false },
       ],
@@ -212,6 +211,18 @@ export const settingMigrations: Record<number, MigrationFunction> = {
     ].filter((item) => !existing.has(item.key));
     return {
       songUnlockServer: [...current, ...additions],
+    };
+  },
+  14: (state) => {
+    // 下线换源后剔除其在既有用户配置里的持久化条目：
+    // 只保留当前仍在枚举内的换源，其余源的开关状态一律保持原样，不做重置。
+    const oldState = state as Partial<SettingState>;
+    const current = Array.isArray(oldState.songUnlockServer)
+      ? oldState.songUnlockServer.map((item) => ({ ...item }))
+      : [];
+    const supportedKeys = new Set<string>(Object.values(SongUnlockServer));
+    return {
+      songUnlockServer: current.filter((item) => supportedKeys.has(item.key)),
     };
   },
 };

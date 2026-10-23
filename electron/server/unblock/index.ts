@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { serverLog } from "../../main/logger";
 import getKuwoSongUrl from "./kuwo";
 import getBodianSongUrl from "./bodian";
-import getGequbaoSongUrl from "./gequbao";
 import getMiguSongUrl from "./migu";
 import getChangqingSongUrl, { type ChangqingOptions } from "./changqing";
 import getNeteaseSongUrl from "./netease";
@@ -97,17 +96,6 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
       reply: FastifyReply,
     ) => {
       const result = await getBodianSongUrl(buildMatchInfo(req.query));
-      return reply.send(result);
-    },
-  );
-  // gequbao
-  fastify.get(
-    "/unblock/gequbao",
-    async (
-      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
-      reply: FastifyReply,
-    ) => {
-      const result = await getGequbaoSongUrl(buildMatchInfo(req.query));
       return reply.send(result);
     },
   );

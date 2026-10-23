@@ -378,15 +378,10 @@ class DownloadManager {
         try {
           // 第三方平台的歌曲不参与网易云解锁源：解锁按歌曲 ID 寻址，ID 口径不同必然错配
           const isNeteaseSong = (song.platform ?? "netease") === "netease";
-          // 解锁服务优先级顺序：网易云 -> 波点音乐 -> 歌曲宝 -> 酷我音乐
+          // 解锁服务优先级顺序：网易云 -> 波点音乐 -> 酷我音乐
           const priorityOrder = isNeteaseSong
-            ? [
-                SongUnlockServer.NETEASE,
-                SongUnlockServer.BODIAN,
-                SongUnlockServer.GEQUBAO,
-                SongUnlockServer.KUWO,
-              ]
-            : [SongUnlockServer.BODIAN, SongUnlockServer.GEQUBAO, SongUnlockServer.KUWO];
+            ? [SongUnlockServer.NETEASE, SongUnlockServer.BODIAN, SongUnlockServer.KUWO]
+            : [SongUnlockServer.BODIAN, SongUnlockServer.KUWO];
 
           const enabledServers = settingStore.songUnlockServer
             .filter((s) => s.enabled)

@@ -78,7 +78,6 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   // 网易云关键词检索源最慢：检索 + 两级取链 + 体积校验串行
   [SongUnlockServer.NETEASE]: 60000,
   [SongUnlockServer.BODIAN]: 20000,
-  [SongUnlockServer.GEQUBAO]: 20000,
   [SongUnlockServer.KUWO]: 20000,
   // 咪咕：检索 + 音质遍历取链 + 时长与体积校验
   [SongUnlockServer.MIGU]: 30000,

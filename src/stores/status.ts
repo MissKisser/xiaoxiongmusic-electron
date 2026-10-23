@@ -74,7 +74,7 @@ interface StatusState {
   currentTimeOffsetMap: Record<string, number>;
   /** 是否为解锁歌曲 */
   playUblock: boolean;
-  /** 当前使用的解锁源名称（如：netease、kuwo、gequbao、bodian） */
+  /** 当前使用的解锁源名称（如：netease、kuwo、bodian、migu） */
   unlockSource: string | null;
   /** 主内容高度 */
   mainContentHeight: number;

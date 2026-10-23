@@ -162,7 +162,6 @@ class PlayerController {
           official: "官方链接",
           netease: "网易云",
           kuwo: "酷我音乐",
-          gequbao: "歌曲宝",
           bodian: "波点音乐",
           cache: "本地缓存",
           local: "本地文件",
