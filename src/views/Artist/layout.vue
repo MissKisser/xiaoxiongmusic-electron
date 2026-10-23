@@ -1,5 +1,11 @@
 <template>
-  <div :key="artistId" :class="['artist', { small: listScrolling }]" ref="artistPageRef">
+  <div
+    :key="artistId"
+    :class="['artist', { small: listScrolling }]"
+    :style="{ '--detail-height': `${detailHeight}px` }"
+    ref="artistPageRef"
+    @transitionend="handleDetailTransitionEnd"
+  >
     <Transition name="fade" mode="out-in">
       <div v-if="artistDetailData" class="detail">
         <div class="cover">
@@ -25,7 +31,7 @@
             :src="artistDetailData.coverSize?.m || artistDetailData.cover"
           />
         </div>
-        <div class="data">
+        <div class="data" ref="dataRef">
           <div class="name text-hidden">
             <n-text class="name-text">{{ artistDetailData.name || "未知艺术家" }}</n-text>
             <n-text v-if="artistDetailData?.alia" class="name-alias" depth="3">
@@ -179,6 +185,67 @@ const componentRef = ref<InstanceType<typeof ArtistSongs> | null>(null);
 // 页面元素引用
 const artistPageRef = ref<HTMLElement | null>(null);
 
+// 头部文本列元素引用
+const dataRef = ref<HTMLElement | null>(null);
+
+/**
+ * 头部高度
+ *
+ * 头部内容（歌手名、职业、简介、按钮）随歌手信息变化，
+ * 固定高度会让弹性布局把文字压缩、裁掉笔画，
+ * 这里按内容实测高度回填，标签页与列表随之为准。
+ */
+const detailHeight = ref<number>(180);
+
+/**
+ * 按头部文本列的内容高度同步头部高度
+ *
+ * 量高时临时取消交叉轴拉伸并让折叠区取自然高度，
+ * 量到的是内容真实占位高度而不是折叠动画的中间值；
+ * 头部上下各留 20px 内边距，并保证不小于封面所需的最小高度。
+ */
+const syncDetailHeight = () => {
+  const el = dataRef.value;
+  // 列表滚动时头部处于收起态，高度由收起态样式决定，此处不参与测量
+  if (!el || listScrolling.value) return;
+  const collapse = el.querySelector<HTMLElement>(".collapse");
+  const alignSelf = el.style.alignSelf;
+  const collapseHeight = collapse?.style.height ?? "";
+  const collapseTransition = collapse?.style.transition ?? "";
+  el.style.alignSelf = "flex-start";
+  if (collapse) {
+    collapse.style.transition = "none";
+    collapse.style.height = "auto";
+  }
+  const natural = el.offsetHeight;
+  if (collapse) {
+    collapse.style.height = collapseHeight;
+    collapse.style.transition = collapseTransition;
+  }
+  el.style.alignSelf = alignSelf;
+  const next = Math.max(180, Math.ceil(natural) + 40);
+  if (next !== detailHeight.value) detailHeight.value = next;
+};
+
+/**
+ * 折叠动画结束后重测头部高度
+ *
+ * 折叠展开过程中容器高度是动画中间值，此时量高会偏小，
+ * 动画结束后再量一次才能拿到内容真实高度。
+ * @param e 过渡事件
+ */
+const handleDetailTransitionEnd = (e: TransitionEvent) => {
+  if (e.propertyName !== "height") return;
+  syncDetailHeight();
+};
+
+// 头部文本列重新挂载后按内容同步高度
+// （头部内容随进出动画整体替换，元素换新时才量得到新内容的真实高度）
+watch(dataRef, (el) => {
+  if (!el) return;
+  nextTick(() => syncDetailHeight());
+});
+
 // 歌手 ID（网易云为数字 id，第三方平台为平台主键）
 const artistId = computed<string>(() => String(route.query.id ?? ""));
 
@@ -309,16 +376,20 @@ const getArtistDetail = async (id: string) => {
     if (!id) return;
     listScrolling.value = false;
     artistDetailData.value = null;
+    detailHeight.value = 180;
     // 第三方平台：走平台数据层
     if (routePlatform.value) {
       const result = await dispatchArtistDetail(routePlatform.value, { id, limit: 1 });
       artistDetailData.value = result.detail;
-      return;
+    } else {
+      const result = await artistDetail(Number(id));
+      artistDetailData.value = formatArtistsList(result.data.artist)[0];
+      // 附加身份
+      artistDetailData.value.identify = result.data.identify?.imageDesc;
     }
-    const result = await artistDetail(Number(id));
-    artistDetailData.value = formatArtistsList(result.data.artist)[0];
-    // 附加身份
-    artistDetailData.value.identify = result.data.identify?.imageDesc;
+    // 头部高度随内容自适应，等 DOM 更新后再量高
+    await nextTick();
+    syncDetailHeight();
   } catch (error) {
     console.error("Erorr getting artist detail:", error);
     window.$message.error("获取歌手详情失败");
@@ -369,8 +440,18 @@ const stopPlatformWatch = onPlatformChange(() => {
   if (artistId.value) getArtistDetail(artistId.value);
 });
 
+// 窗口尺寸变化：重新测量头部高度
+const handleResize = () => {
+  syncDetailHeight();
+};
+
+onMounted(() => {
+  window.addEventListener("resize", handleResize);
+});
+
 onUnmounted(() => {
   stopPlatformWatch();
+  window.removeEventListener("resize", handleResize);
 });
 </script>
 
@@ -464,7 +545,10 @@ onUnmounted(() => {
       .name {
         font-size: 30px;
         font-weight: bold;
-        height: 38px;
+        // 行盒与容器等高，字形完整不被裁；最小高度兜底，防止被弹性布局压扁
+        min-height: 38px;
+        line-height: 38px;
+        flex-shrink: 0;
         margin-bottom: 8px;
         transition: all 0.3s var(--n-bezier);
         .name-alias {
@@ -486,6 +570,8 @@ onUnmounted(() => {
       .collapse {
         margin-top: 2px;
         margin-bottom: 4px;
+        // 职业 / 计数 / 简介不参与收缩，避免文字被裁
+        flex-shrink: 0;
       }
       .meta {
         margin-bottom: 4px;
@@ -502,6 +588,7 @@ onUnmounted(() => {
       .menu {
         margin-top: auto;
         width: 100%;
+        flex-shrink: 0;
         :deep(.n-button) {
           height: 40px;
           flex-shrink: 0;
@@ -590,7 +677,8 @@ onUnmounted(() => {
         padding-right: 0;
         .name {
           font-size: 22px;
-          height: 32px;
+          min-height: 32px;
+          line-height: 32px;
         }
         .menu {
           width: 100% !important;
