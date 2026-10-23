@@ -148,7 +148,7 @@ const menuOptions = computed<MenuOption[] | MenuGroupOption[]>(() => {
           label: () =>
             h("div", { class: "user-liked" }, [
               h(NText, null, () => "我喜欢的音乐"),
-              !settingStore.sidebarHide.hideHeartbeatMode
+              !settingStore.sidebarHide.hideHeartbeatMode && !isPlatformSource.value
                 ? h(NButton, {
                     type: statusStore.shuffleMode === "heartbeat" ? "primary" : "default",
                     round: true,

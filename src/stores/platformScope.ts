@@ -161,6 +161,10 @@ export const usePlatformScopeStore = defineStore("platformScope", {
       const dataStore = useDataStore();
       const musicStore = useMusicStore();
       const statusStore = useStatusStore();
+      // 心动模式为网易云专属能力，切平台时退出，避免状态残留到无此能力的平台
+      if (statusStore.shuffleMode === "heartbeat") {
+        statusStore.shuffleMode = "off";
+      }
       // 停止当前播放
       useAudioManager().stop();
       // 播放进度、歌词位置与播放面板状态
