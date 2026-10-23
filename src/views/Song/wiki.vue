@@ -33,7 +33,7 @@
                       v-for="(ar, index) in currentSong.artists"
                       class="clickable-text"
                       :key="ar.id"
-                      @click="jumpToArtist(ar, currentSong?.platform)"
+                      @click="jumpArtist(ar)"
                     >
                       {{ settingStore.hideBracketedContent ? removeBrackets(ar.name) : ar.name }}
                       <span v-if="index < currentSong.artists.length - 1"> / </span>
@@ -307,7 +307,7 @@ import {
   songFirstListenInfo,
 } from "@/api/song";
 import { formatSongsList, removeBrackets } from "@/utils/format";
-import { jumpToArtist } from "@/utils/artist";
+import { openArtistJump } from "@/utils/modal";
 import { jumpToAlbum } from "@/utils/album";
 import { useSettingStore } from "@/stores";
 import dayjs from "dayjs";
@@ -332,6 +332,16 @@ const publishTime = computed(() => {
   const createTime = currentSong.value?.createTime;
   return typeof createTime === "number" ? formatTimestamp(createTime, "YYYY-MM-DD") : "";
 });
+
+/**
+ * 跳转歌手详情
+ *
+ * 多歌手歌曲先让用户选择要进入的歌手。
+ * @param artist 被点击的歌手
+ */
+const jumpArtist = (artist: MetaData) => {
+  openArtistJump(currentSong.value?.artists, artist, currentSong.value?.platform);
+};
 
 const normalizeWikiData = (
   wiki: SongWikiData | null,

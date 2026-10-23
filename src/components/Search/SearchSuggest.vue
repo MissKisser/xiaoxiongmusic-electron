@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { searchSuggest } from "@/api/search";
+import { dispatchSearchSuggest } from "@/api/platform/suggest";
 import { onPlatformChange, useStatusStore, useSettingStore, usePlatformStore } from "@/stores";
 
 const emit = defineEmits<{
@@ -79,6 +79,8 @@ const platformStore = usePlatformStore();
 // 搜索建议数据
 const searchSuggestData = ref<any>({});
 const searchSuggestHeights = ref<number>(0);
+// 建议请求序号：平台切换或关键词变化时作废在途响应
+const suggestRequestId = ref<number>(0);
 
 // 搜索建议元素
 const directSearchRef = ref<HTMLElement | null>(null);
@@ -111,13 +113,11 @@ const searchSuggestionsType = {
 // 获取搜索建议
 const getSearchSuggest = async (keywords: string) => {
   searchSuggestData.value = {};
-  // 第三方平台无搜索建议能力：降级为回车直接搜索
-  if (platformStore.currentPlatform !== "netease") {
-    nextTick(calcSearchSuggestHeights);
-    return;
-  }
-  const result = await searchSuggest(keywords);
-  searchSuggestData.value = result.result;
+  // 请求序号：后发起的请求作废先发起的响应，避免旧结果覆盖新结果
+  const currentId = ++suggestRequestId.value;
+  const result = await dispatchSearchSuggest(platformStore.currentPlatform, keywords);
+  if (currentId !== suggestRequestId.value) return;
+  searchSuggestData.value = result;
   // 计算高度
   nextTick(calcSearchSuggestHeights);
 };
@@ -234,6 +234,8 @@ watchDebounced(
 
 // 平台切换后清空建议数据
 const stopPlatformWatch = onPlatformChange(() => {
+  // 作废在途响应，避免旧平台的建议覆盖新平台
+  suggestRequestId.value += 1;
   searchSuggestData.value = {};
   nextTick(calcSearchSuggestHeights);
 });

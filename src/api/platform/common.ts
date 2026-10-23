@@ -21,17 +21,33 @@ export const secureUrl = (url: unknown): string => {
 };
 
 /**
- * 把平台的「A / B」歌手串拆成歌手数组
+ * 歌手串分隔符
+ *
+ * QQ 音乐用 ` / ` 连接歌手；酷狗用 `、`（也有 `,` `;` `/`）连接合作歌手。
+ * 合作曲的歌手串若不拆开，会被当成一个不存在的「组合」歌手。
+ */
+const QQ_ARTIST_SEPARATORS = " / ";
+const KUGOU_ARTIST_SEPARATORS = /、|,|;|\s*\/\s*/;
+
+/**
+ * 按平台口径把平台的歌手串拆成歌手数组
  *
  * 歌手串里没有平台主键，拆分后的条目 `id` 留空，
  * 由调用方按需派生稳定数字 id。
  * @param artist 歌手串
+ * @param platform 来源平台
  * @returns 歌手数组
  */
-export const splitArtists = (artist: unknown): PlatformArtist[] => {
+export const splitArtistsByPlatform = (
+  artist: unknown,
+  platform: ApiPlatform,
+): PlatformArtist[] => {
   if (typeof artist !== "string" || !artist) return [];
-  return artist
-    .split(" / ")
+  const names =
+    platform === "kugou"
+      ? artist.split(KUGOU_ARTIST_SEPARATORS)
+      : artist.split(QQ_ARTIST_SEPARATORS);
+  return names
     .map((name) => name.trim())
     .filter(Boolean)
     .map((name) => ({ id: "", name }));

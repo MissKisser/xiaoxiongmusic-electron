@@ -1,10 +1,10 @@
 import { h } from "vue";
-import type { CoverType, UpdateInfoType, SettingType, SongType } from "@/types/main";
+import type { CoverType, UpdateInfoType, SettingType, SongType, MetaData } from "@/types/main";
 import type { ApiPlatform } from "@/types/shared";
 import { CURRENT_AGREEMENT_VERSION } from "@/constants/agreement";
 import { NScrollbar } from "naive-ui";
 import { isLogin } from "./auth";
-import { jumpToArtist } from "./artist";
+import { isThirdPartyArtist, jumpToArtist } from "./artist";
 import { isArray, isFunction } from "lodash-es";
 import { useDataStore, useSettingStore } from "@/stores";
 import Login from "@/components/Modal/Login/Login.vue";
@@ -101,19 +101,14 @@ export const openPlatformLogin = (platform: ApiPlatform) => {
 };
 
 /**
- * 跳转到歌手
+ * 打开歌手选择弹窗
+ *
+ * 列出内容里的全部歌手，用户点击其中一个才进入对应歌手页。
  * @param data 歌手信息
- * @param id 歌手 id
  * @param platform 内容来源平台（歌曲 / 歌单 / 专辑所属平台）
  */
-export const openJumpArtist = (data: SongType["artists"], id?: number, platform?: ApiPlatform) => {
-  // 若 data 为数组且只有一个元素，则直接跳转
-  if (isArray(data) && data.length <= 2 && id) {
-    const target = data.find((artist) => Number(artist.id) === id);
-    // 未匹配到条目时按应用内 id 兜底
-    jumpToArtist(target ?? { id, name: "" }, platform);
-    return;
-  }
+const openArtistModal = (data: SongType["artists"] | undefined, platform?: ApiPlatform) => {
+  if (!data) return;
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
@@ -124,6 +119,60 @@ export const openJumpArtist = (data: SongType["artists"], id?: number, platform?
       return h(JumpArtist, { artist: data, platform, onClose: () => modal.destroy() });
     },
   });
+};
+
+/**
+ * 跳转到歌手
+ *
+ * 第三方平台（QQ 音乐 / 酷狗）的多歌手歌曲先弹窗列出全部歌手，由用户选择，
+ * 避免平台把合作曲的歌手合成一个不存在的「组合」艺人；
+ * 网易云沿用既有行为：单个（或两个）歌手的歌曲直接进入被点击的歌手。
+ * @param data 歌手信息
+ * @param id 歌手 id
+ * @param platform 内容来源平台（歌曲 / 歌单 / 专辑所属平台）
+ */
+export const openJumpArtist = (data: SongType["artists"], id?: number, platform?: ApiPlatform) => {
+  // 第三方平台的多歌手歌曲：弹窗列出全部歌手
+  if (isThirdPartyArtist(data, platform) && isArray(data) && data.length >= 2) {
+    openArtistModal(data, platform);
+    return;
+  }
+  // 网易云：数组且歌手数不超过两个时，直接跳转到被点击的歌手
+  if (isArray(data) && data.length <= 2 && id) {
+    const target = data.find((artist) => Number(artist.id) === id);
+    // 未匹配到条目时按应用内 id 兜底
+    jumpToArtist(target ?? { id, name: "" }, platform);
+    return;
+  }
+  openArtistModal(data, platform);
+};
+
+/**
+ * 跳转到歌手（多歌手歌曲先让用户选择）
+ *
+ * 与 `openJumpArtist` 的差别：调用方已经持有被点击的歌手条目，
+ * 无需再用 id 在数组里回查（如播放条、歌曲百科）。
+ * 第三方平台（QQ 音乐 / 酷狗）的多歌手歌曲先弹窗列出全部歌手；
+ * 网易云沿用既有行为，直接进入被点击的歌手。
+ * @param artists 内容里的全部歌手
+ * @param clicked 被点击的歌手
+ * @param platform 内容来源平台
+ */
+export const openArtistJump = (
+  artists: SongType["artists"] | undefined,
+  clicked?: MetaData,
+  platform?: ApiPlatform,
+) => {
+  // 第三方平台的多歌手歌曲：弹窗列出全部歌手
+  if (isThirdPartyArtist(artists, platform) && isArray(artists) && artists.length >= 2) {
+    openArtistModal(artists, platform);
+    return;
+  }
+  if (clicked) {
+    jumpToArtist(clicked, platform);
+    return;
+  }
+  openArtistModal(artists, platform);
 };
 
 // 编辑歌曲信息

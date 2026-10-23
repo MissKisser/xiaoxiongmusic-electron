@@ -147,7 +147,7 @@ import { songLevelData, getSongLevelsData, AI_AUDIO_LEVELS } from "@/utils/meta"
 import { formatFileSize, handleSongQuality } from "@/utils/helper";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { removeBrackets } from "@/utils/format";
-import { jumpToArtist } from "@/utils/artist";
+import { openArtistJump } from "@/utils/modal";
 import { canJumpAlbum, jumpToAlbum } from "@/utils/album";
 
 defineProps<{
@@ -345,7 +345,8 @@ const jumpPage = debounce(
 const jumpArtist = debounce(
   (artist: MetaData) => {
     statusStore.showFullPlayer = false;
-    jumpToArtist(artist, musicStore.playSong.platform);
+    // 多歌手歌曲先让用户选择要进入的歌手
+    openArtistJump(musicStore.playSong.artists, artist, musicStore.playSong.platform);
   },
   300,
   {

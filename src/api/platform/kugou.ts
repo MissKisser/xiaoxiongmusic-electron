@@ -11,7 +11,7 @@
  * - `platformId`：酷狗的 `hash`（字符串主键），播放地址 / 歌词等接口以它为键。
  */
 
-import { normalizeArtistEntry, secureUrl, splitArtists, toNumericId } from "./common";
+import { normalizeArtistEntry, secureUrl, splitArtistsByPlatform, toNumericId } from "./common";
 import { platformRequest, platformRequestBody } from "./http";
 import { QualityType } from "@/types/main";
 import {
@@ -297,7 +297,7 @@ export const normalizeKgSong = (
   const cover = fillCover(song?.cover ?? song?.img ?? "");
   const artists: PlatformArtist[] = Array.isArray(song?.artists)
     ? song.artists.map(normalizeArtist)
-    : splitArtists(song?.artist);
+    : splitArtistsByPlatform(song?.artist, KUGOU);
   // 付费判据：基档授权位（歌曲级 `pay.privilege`，或各音质档位取最低码率那一档）
   const fee = resolveKgFee(pickBasePrivilege(song));
   const hash = String(song?.hash ?? "");

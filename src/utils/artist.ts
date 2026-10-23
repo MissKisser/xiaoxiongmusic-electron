@@ -49,6 +49,27 @@ const resolveArtistIdByName = async (platform: ApiPlatform, name: string): Promi
 };
 
 /**
+ * 判断歌手条目是否来自第三方平台
+ *
+ * 第三方平台（QQ 音乐 / 酷狗）的歌手条目自带 `platform` 字段；
+ * 网易云的歌手条目没有平台字段，内容来源平台也为空，
+ * 因此该判定不依赖当前音源平台，切平台后仍按内容归属判断。
+ * @param artists 歌手条目（数组或字符串形态）
+ * @param contentPlatform 内容来源平台
+ * @returns 是否为第三方平台
+ */
+export const isThirdPartyArtist = (
+  artists: MetaData[] | string | undefined,
+  contentPlatform?: ApiPlatform,
+): boolean => {
+  const own = Array.isArray(artists)
+    ? artists.find((artist) => artist?.platform)?.platform
+    : undefined;
+  const source = own ?? contentPlatform;
+  return source === "qqmusic" || source === "kugou";
+};
+
+/**
  * 取歌手条目的来源平台
  *
  * 优先级：歌手条目自带平台 → 内容来源平台（歌曲 / 歌单 / 专辑所属平台）

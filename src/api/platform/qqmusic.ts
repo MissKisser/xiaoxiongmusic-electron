@@ -7,7 +7,7 @@
  * 字段对照见 `src/api/platform/types.ts` 顶部表格。
  */
 
-import { deriveStableId, secureUrl, splitArtists, toNumericId } from "./common";
+import { deriveStableId, secureUrl, splitArtistsByPlatform, toNumericId } from "./common";
 import { platformRequest, platformRequestBody } from "./http";
 import { QualityType } from "@/types/main";
 import {
@@ -292,7 +292,7 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
   const albumCover = cover || album.picUrl;
   const artists: PlatformArtist[] = Array.isArray(song?.artists)
     ? song.artists.map(normalizeArtist)
-    : splitArtists(song?.artist);
+    : splitArtistsByPlatform(song?.artist, QQ_MUSIC);
   // 付费标记：QQ 上游的 pay 字段是下划线口径
   const pay = (song?.pay ?? {}) as Record<string, any>;
   const payPlay = Number(pay.pay_play ?? pay.payplay ?? 0);

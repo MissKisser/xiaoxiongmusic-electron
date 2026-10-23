@@ -27,8 +27,9 @@
 <script setup lang="ts">
 import type { SongType, MetaData } from "@/types/main";
 import type { ApiPlatform } from "@/types/shared";
-import { usePlatformStore, useSettingStore } from "@/stores";
+import { useSettingStore } from "@/stores";
 import { searchArtist, artistDetail } from "@/api/artist";
+import { deriveStableId, splitArtistsByPlatform } from "@/api/platform/common";
 import { jumpToArtist } from "@/utils/artist";
 import { uniq } from "lodash-es";
 
@@ -43,10 +44,23 @@ const emit = defineEmits<{
 }>();
 
 const settingStore = useSettingStore();
-const platformStore = usePlatformStore();
+
+// 内容来源平台
+// 第三方平台（QQ 音乐 / 酷狗）的歌手条目自带平台，取条目上的平台；
+// 网易云的歌手条目没有平台字段，落到内容来源平台（网易云不带该参数）。
+const contentPlatform = computed<ApiPlatform | null>(() => {
+  if (Array.isArray(props.artist)) {
+    const own = props.artist.find((artist) => artist?.platform)?.platform;
+    if (own) return own as ApiPlatform;
+  }
+  return props.platform ?? null;
+});
 
 // 是否为第三方平台（QQ 音乐 / 酷狗）
-const isPlatformSource = computed<boolean>(() => platformStore.currentPlatform !== "netease");
+const isPlatformSource = computed<boolean>(() => {
+  const platform = contentPlatform.value;
+  return platform === "qqmusic" || platform === "kugou";
+});
 
 const artistData = ref<MetaData[]>([]);
 
@@ -62,6 +76,19 @@ const getArtistData = async () => {
       platform: artist.platform ?? props.platform,
       platformId: artist.platformId,
     }));
+    return;
+  }
+  // 第三方平台的歌手串：按平台分隔符拆开列出候选歌手
+  // （歌手串形态没有平台主键，进入歌手页时按歌手名反查）
+  if (isPlatformSource.value && typeof props.artist === "string") {
+    const platform = contentPlatform.value;
+    artistData.value = splitArtistsByPlatform(props.artist, platform as ApiPlatform).map(
+      (artist) => ({
+        id: deriveStableId(artist.name),
+        name: artist.name,
+        platform: platform ?? undefined,
+      }),
+    );
     return;
   }
   // 写入歌手信息
@@ -132,7 +159,7 @@ const getArtistData = async () => {
 const jumpArtist = (item: MetaData) => {
   if (!item.platformId && !item.id) return;
   emit("close");
-  jumpToArtist(item);
+  jumpToArtist(item, contentPlatform.value ?? undefined);
 };
 
 onMounted(getArtistData);
