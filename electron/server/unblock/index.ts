@@ -3,6 +3,8 @@ import { serverLog } from "../../main/logger";
 import getKuwoSongUrl from "./kuwo";
 import getBodianSongUrl from "./bodian";
 import getGequbaoSongUrl from "./gequbao";
+import getMiguSongUrl from "./migu";
+import getChangqingSongUrl, { type ChangqingOptions } from "./changqing";
 import getNeteaseSongUrl from "./netease";
 import { getNeteaseSearchSongUrl } from "./netease-search";
 import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
@@ -106,6 +108,35 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
       reply: FastifyReply,
     ) => {
       const result = await getGequbaoSongUrl(buildMatchInfo(req.query));
+      return reply.send(result);
+    },
+  );
+  // migu
+  // 咪咕是第一方官方曲库：免登录检索与取链，非免费曲干净拒绝，不给试听。
+  fastify.get(
+    "/unblock/migu",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const result = await getMiguSongUrl(buildMatchInfo(req.query));
+      return reply.send(result);
+    },
+  );
+  // changqing
+  // 长青是社区公益聚合站：通道按平台内歌曲 id 取链，
+  // 歌曲自带平台原生 id 时直接用，否则按关键词走项目自身检索网关换 id。
+  fastify.get(
+    "/unblock/changqing",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const options: ChangqingOptions = {
+        platform: req.query.platform,
+        platformId: req.query.platformId,
+      };
+      const result = await getChangqingSongUrl(buildMatchInfo(req.query), options);
       return reply.send(result);
     },
   );

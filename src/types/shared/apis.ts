@@ -22,12 +22,14 @@ export enum SongUnlockServer {
   KUWO = "kuwo",
   /** 歌曲宝 */
   GEQUBAO = "gequbao",
+  /** 咪咕音乐 */
+  MIGU = "migu",
+  /** 长青聚合 */
+  CHANGQING = "changqing",
 }
 
 /** 通用响应包装 */
-export type ApiCallResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+export type ApiCallResponse = { ok: true; data?: unknown } | { ok: false; error: string };
 
 /** 平台账号资料 */
 export interface PlatformProfile {

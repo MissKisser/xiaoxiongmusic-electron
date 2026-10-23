@@ -80,6 +80,10 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   [SongUnlockServer.BODIAN]: 20000,
   [SongUnlockServer.GEQUBAO]: 20000,
   [SongUnlockServer.KUWO]: 20000,
+  // 咪咕：检索 + 音质遍历取链 + 时长与体积校验
+  [SongUnlockServer.MIGU]: 30000,
+  // 长青：可能先检索换 id 再取链，取链还要探测真实音频时长
+  [SongUnlockServer.CHANGQING]: 40000,
 };
 
 /**
@@ -93,6 +97,9 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
  * 必须走「按关键词检索网易云」的分支（`useKeywordLookup`），
  * 否则会把第三方 ID 喂给网易云接口，静默返回另一首歌。
  *
+ * 按平台内歌曲 id 寻址的解锁源（长青）额外接收歌曲的来源平台与平台原生 id，
+ * 歌曲本身来自该平台时可直接按 id 取链，无需再检索换 id。
+ *
  * 解锁请求走独立超时预算（解锁源比普通接口慢得多），
  * 且不在客户端层重试：解锁链按源逐个尝试，单个源失败即换下一个。
  * @param id 歌曲 ID
@@ -102,6 +109,8 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
  * @param artist 歌手
  * @param duration 歌曲声明时长（秒）
  * @param useKeywordLookup 是否按关键词寻址（第三方平台歌曲必须为 true）
+ * @param platform 歌曲来源平台（netease / qqmusic / kugou）
+ * @param platformId 平台内歌曲原生 id（QQ mid / 酷狗 hash）
  */
 export const unlockSongUrl = (
   id: number,
@@ -111,11 +120,13 @@ export const unlockSongUrl = (
   artist?: string,
   duration?: number,
   useKeywordLookup = false,
+  platform?: string,
+  platformId?: string,
 ) => {
   const params =
     server === SongUnlockServer.NETEASE && !useKeywordLookup
       ? { id }
-      : { keyword, songName, artist, duration };
+      : { keyword, songName, artist, duration, platform, platformId };
   return request({
     baseURL: "/api/unblock",
     url: `/${server}`,

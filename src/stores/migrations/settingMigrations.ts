@@ -6,7 +6,7 @@ import type { SettingState } from "../setting";
 /**
  * 当前设置 Schema 版本号
  */
-export const CURRENT_SETTING_SCHEMA_VERSION = 12;
+export const CURRENT_SETTING_SCHEMA_VERSION = 13;
 
 /**
  * 迁移函数类型
@@ -196,6 +196,22 @@ export const settingMigrations: Record<number, MigrationFunction> = {
       // 外部 API 局域网开关
       enableCustomApi: false,
       customApiBaseUrl: "",
+    };
+  },
+  13: (state) => {
+    // 新增换源源（咪咕 / 长青）时补进既有用户的音源列表，默认启用；
+    // 已在列表里的不重复添加，用户手工关掉的源保持原状。
+    const oldState = state as Partial<SettingState>;
+    const current = Array.isArray(oldState.songUnlockServer)
+      ? oldState.songUnlockServer.map((item) => ({ ...item }))
+      : [];
+    const existing = new Set(current.map((item) => item.key));
+    const additions = [
+      { key: SongUnlockServer.MIGU, enabled: true },
+      { key: SongUnlockServer.CHANGQING, enabled: true },
+    ].filter((item) => !existing.has(item.key));
+    return {
+      songUnlockServer: [...current, ...additions],
     };
   },
 };

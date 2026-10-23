@@ -156,14 +156,7 @@ export interface SettingState {
   proxyPort: number;
   /** 歌曲音质 */
   songLevel:
-    | "standard"
-    | "higher"
-    | "exhigh"
-    | "lossless"
-    | "hires"
-    | "jyeffect"
-    | "sky"
-    | "jymaster";
+    "standard" | "higher" | "exhigh" | "lossless" | "hires" | "jyeffect" | "sky" | "jymaster";
   /** 播放设备 */
   playDevice: "default" | string;
   /** 音频引擎: element (原生) 或 ffmpeg */
@@ -566,6 +559,8 @@ export const useSettingStore = defineStore("setting", {
       { key: SongUnlockServer.GEQUBAO, enabled: true },
       { key: SongUnlockServer.NETEASE, enabled: true },
       { key: SongUnlockServer.KUWO, enabled: false },
+      { key: SongUnlockServer.MIGU, enabled: true },
+      { key: SongUnlockServer.CHANGQING, enabled: true },
     ],
     countDownShow: true,
     barLyricShow: true,

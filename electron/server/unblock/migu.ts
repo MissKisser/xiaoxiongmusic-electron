@@ -1,0 +1,478 @@
+/**
+ * 咪咕音乐换源
+ *
+ * 咪咕是第一方官方曲库：免登录即可检索与取链，站内非免费曲以 `code=440000` 干净拒绝，
+ * 不会拿试听片段冒充整曲。
+ *
+ * 端点形态：
+ * 1. 检索 `GET https://c.musicapp.migu.cn/v1.0/content/search_all.do?text=<关键词>&...`
+ *    —— 响应整体带自有混淆（前导魔数 + 1 字节种子 + 固定密钥逐字节还原）；
+ * 2. 取链 `GET https://c.musicapp.migu.cn/strategy/listen-url/h5/v2.4?contentId=&copyrightId=&resourceType=&toneFlag=...`
+ *    —— `code=000000` 成功；响应里的 `data.song.duration` 是权威整曲时长（秒）。
+ *
+ * 检索结果不带时长字段，用各音质的字节数除以标称码率反推（取中位数，规避试听音质把时长拉偏）。
+ *
+ * 健壮性：
+ * 1. 检索层挂熔断：连续失败到阈值即熔断，熔断期内零请求，避免对死源逐首空等；
+ * 2. 取链层按有界退避重试，救回瞬时故障；
+ * 3. 成功的关键词检索结果按短缓存复用，连续切歌回到同一首歌时不再重复打检索。
+ *
+ * 所有状态都是纯内存态：进程重启即重置，不落盘、不产生界面提示，只进日志。
+ */
+import type { SongUrlResult } from "./unblock";
+import { serverLog } from "../../main/logger";
+import axios from "axios";
+import {
+  FETCH_FAILED_REASON,
+  MATCH_FAILED_REASON,
+  MISSING_ARTIST_REASON,
+  MISSING_TITLE_REASON,
+  NO_CANDIDATE_REASON,
+  UPSTREAM_UNAVAILABLE_REASON,
+  durationTolerance,
+  isPlausibleAudioLength,
+  rankCandidates,
+  type MatchTarget,
+} from "./match";
+import { probeContentLength } from "./audio-length";
+import { sanitizeUrl } from "./sanitize";
+import { CircuitBreaker, TTLCache, isUpstreamFault, sleep } from "./resilience";
+
+/** 咪咕检索端点 */
+const MIGU_SEARCH_URL = "https://c.musicapp.migu.cn/v1.0/content/search_all.do";
+
+/** 咪咕取链端点 */
+const MIGU_LISTEN_URL = "https://c.musicapp.migu.cn/strategy/listen-url/h5/v2.4";
+
+/** 咪咕响应混淆的固定密钥（公开接口的协议常量，非本机凭据） */
+const MIGU_KEY = Buffer.from("Jk8qzuePiJ1qE3mDYhLQ3T73DtDoAhLP", "utf8");
+
+/** 咪咕响应混淆的魔数（3 字节） */
+const MIGU_MAGIC = Buffer.from([0xab, 0xcd, 0x01]);
+
+/** 咪咕音质档位 → 标称码率（kbps），用于把字节数换算成时长 */
+const MIGU_TONE_KBPS: Record<string, number> = {
+  LQ: 64,
+  PQ: 128,
+  HQ: 320,
+  SQ: 800,
+  ZQ: 1000,
+  ZQ24: 2000,
+};
+
+/** 咪咕公共请求头（客户端标识随协议固定，非账号凭据） */
+const MIGU_HEADERS: Record<string, string> = {
+  Accept: "application/json, text/plain, */*",
+  Origin: "https://h5.nf.migu.cn",
+  Referer: "https://h5.nf.migu.cn/",
+  ua: "Android_migu",
+  version: "6.8.8",
+  channel: "014021I",
+  subchannel: "014021I",
+};
+
+/** 咪咕客户端 UA */
+const MIGU_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
+
+/** 检索层连续失败多少次后熔断 */
+const SEARCH_FAILURE_THRESHOLD = 3;
+
+/** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
+const SEARCH_BREAK_DURATION_MS = 10 * 60 * 1000;
+
+/** 关键词检索结果缓存时长（毫秒） */
+const SEARCH_CACHE_TTL_MS = 60000;
+
+/** 关键词检索结果缓存条目上限 */
+const SEARCH_CACHE_MAX_ENTRIES = 64;
+
+/** 单次请求超时（毫秒） */
+const REQUEST_TIMEOUT_MS = 10000;
+
+/** 取链阶段瞬时故障的重试次数 */
+const FETCH_RETRY_LIMIT = 2;
+
+/** 取链阶段重试的退避阶梯（毫秒） */
+const FETCH_BACKOFF_MS = [300, 600];
+
+/** 单次换源最多尝试的候选数 */
+const MAX_CANDIDATE_TRY = 3;
+
+/** 单个候选最多尝试的音质档位数 */
+const MAX_FORMAT_TRY = 3;
+
+/** 咪咕检索层熔断器 */
+const searchBreaker = new CircuitBreaker({
+  name: "咪咕检索",
+  failureThreshold: SEARCH_FAILURE_THRESHOLD,
+  openDurationMs: SEARCH_BREAK_DURATION_MS,
+  onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
+});
+
+/** 关键词检索结果缓存 */
+const searchCache = new TTLCache<MiguCandidate[]>(SEARCH_CACHE_TTL_MS, SEARCH_CACHE_MAX_ENTRIES);
+
+/** 咪咕音质条目（检索结果里随歌返回） */
+type MiguFormat = {
+  /** 音质档位标识（PQ / LQ / HQ …） */
+  formatType: string;
+  /** 音质资源类型，取链时按此参数取链 */
+  resourceType: string;
+  /** 该音质的文件字节数 */
+  size: number;
+};
+
+/** 咪咕检索候选 */
+type MiguCandidate = {
+  /** 咪咕内容 id（取链用） */
+  id: string;
+  /** 咪咕版权 id（取链时一并带上） */
+  copyrightId: string;
+  /** 歌名 */
+  title: string;
+  /** 歌手 */
+  artist: string;
+  /** 由字节数反推的时长（秒） */
+  duration?: number;
+  /** 该候选的音质列表（取链时遍历） */
+  formats: MiguFormat[];
+};
+
+/**
+ * 还原咪咕响应的混淆层
+ *
+ * 响应以 3 字节魔数开头，第 4 字节是种子，其后逐字节按「加种子、减密钥字节」还原。
+ * 未带魔数的响应原样返回（上游偶尔会直接给明文 JSON）。
+ * @param data 原始响应字节
+ * @returns 还原后的字节
+ */
+const decodeMiguResponse = (data: Buffer): Buffer => {
+  if (data.length < 5 || !data.subarray(0, 3).equals(MIGU_MAGIC)) return data;
+  const seed = data[3];
+  const plain = Buffer.alloc(data.length - 4);
+  for (let i = 0; i < plain.length; i++) {
+    plain[i] = (data[4 + i] + seed - MIGU_KEY[i % MIGU_KEY.length]) & 0xff;
+  }
+  return plain;
+};
+
+/**
+ * 取出候选的音质列表
+ * @param item 咪咕检索条目
+ * @returns 音质列表
+ */
+const pickFormats = (item: any): MiguFormat[] => {
+  const raw: any[] = [
+    ...(item?.rateFormats ?? []),
+    ...(item?.newRateFormats ?? []),
+    ...(item?.audioFormats ?? []),
+  ];
+  const formats: MiguFormat[] = [];
+  for (const entry of raw) {
+    const formatType = String(entry?.formatType ?? "");
+    const size = Number(entry?.size ?? entry?.iosSize ?? 0);
+    if (!formatType || !Number.isFinite(size) || size <= 0) continue;
+    // Z3D 是加密试听档，取链拿不到整曲
+    if (formatType === "Z3D") continue;
+    formats.push({ formatType, resourceType: String(entry?.resourceType ?? ""), size });
+  }
+  return formats;
+};
+
+/**
+ * 按各音质的字节数反推候选时长
+ *
+ * 咪咕检索结果不带时长字段：字节数 ÷ 该档标称码率即秒数。
+ * 免费档（PQ 128k / LQ 64k）的标称码率与实际文件一致，优先采用；
+ * 没有免费档时才退到各档估算值的中位数（试听档字节数很小，会把时长拉到几十秒）。
+ * @param formats 音质列表
+ * @returns 时长（秒）；无法估算时返回 undefined
+ */
+const estimateDuration = (formats: MiguFormat[]): number | undefined => {
+  const byType = new Map(formats.map((format) => [format.formatType, format]));
+  for (const type of ["PQ", "LQ"]) {
+    const format = byType.get(type);
+    const kbps = MIGU_TONE_KBPS[type];
+    if (format && kbps) return Math.round(format.size / ((kbps * 1000) / 8));
+  }
+  const estimates: number[] = [];
+  for (const format of formats) {
+    const kbps = MIGU_TONE_KBPS[format.formatType];
+    if (!kbps) continue;
+    estimates.push(format.size / ((kbps * 1000) / 8));
+  }
+  if (!estimates.length) return undefined;
+  estimates.sort((a, b) => a - b);
+  return Math.round(estimates[Math.floor(estimates.length / 2)]);
+};
+
+/**
+ * 解析咪咕检索响应
+ * @param data 原始响应字节
+ * @returns 归一化后的候选列表
+ */
+const parseSearchResponse = (data: Buffer): MiguCandidate[] => {
+  let payload: any = null;
+  try {
+    payload = JSON.parse(decodeMiguResponse(data).toString("utf8"));
+  } catch {
+    return [];
+  }
+  const list: any[] = payload?.songResultData?.result ?? [];
+  const candidates: MiguCandidate[] = [];
+  for (const item of list) {
+    const id = String(item?.contentId ?? "");
+    const title = String(item?.name ?? item?.songName ?? item?.title ?? "").trim();
+    if (!id || !title) continue;
+    const singers = item?.singers ?? item?.singerList ?? [];
+    const artist = Array.isArray(singers)
+      ? singers
+          .map((singer: any) => String(singer?.name ?? singer ?? ""))
+          .filter(Boolean)
+          .join(" / ")
+      : String(singers ?? "");
+    const formats = pickFormats(item);
+    const duration = estimateDuration(formats);
+    candidates.push({
+      id,
+      copyrightId: String(item?.copyrightId ?? ""),
+      title,
+      artist,
+      duration,
+      formats,
+    });
+  }
+  return candidates;
+};
+
+/**
+ * 检索咪咕候选歌曲
+ *
+ * 「歌名-歌手」与「歌名 歌手」两组关键词分别检索后合并去重：
+ * 咪咕是全文检索，两种分隔形式命中的候选池不同，合并后召回更全。
+ *
+ * @param title 歌名
+ * @param artist 歌手，可为空
+ * @returns 候选列表与「上游是否完全不可用」标记
+ */
+const searchCandidates = async (
+  title: string,
+  artist: string,
+): Promise<{ candidates: MiguCandidate[]; upstreamFailed: boolean }> => {
+  if (!searchBreaker.canRequest()) {
+    serverLog.warn(
+      `🔌 咪咕检索处于熔断状态，跳过本次检索（剩余 ${Math.ceil(
+        searchBreaker.remainingOpenMs() / 1000,
+      )} 秒）`,
+    );
+    return { candidates: [], upstreamFailed: true };
+  }
+  const keywords = artist ? [`${title}-${artist}`, `${title} ${artist}`] : [title];
+  const merged: MiguCandidate[] = [];
+  const seen = new Set<string>();
+  let failed = 0;
+  let fault = false;
+  for (const keyword of keywords) {
+    const cacheKey = keyword;
+    const cached = searchCache.get(cacheKey);
+    if (cached) {
+      serverLog.log(`♻️ 咪咕检索结果命中缓存（关键词：${keyword}）`);
+      for (const candidate of cached) {
+        if (seen.has(candidate.id)) continue;
+        seen.add(candidate.id);
+        merged.push(candidate);
+      }
+      continue;
+    }
+    try {
+      const searchSwitch = JSON.stringify({
+        song: 1,
+        album: 0,
+        singer: 0,
+        tagSong: 1,
+        mvSong: 0,
+        bestShow: 1,
+      });
+      const response = await axios.get(MIGU_SEARCH_URL, {
+        params: {
+          text: keyword,
+          pageNo: 1,
+          pageSize: 20,
+          isCopyright: 1,
+          sort: 1,
+          searchSwitch,
+        },
+        headers: MIGU_HEADERS,
+        responseType: "arraybuffer",
+        timeout: REQUEST_TIMEOUT_MS,
+        validateStatus: () => true,
+      });
+      if (response.status !== 200) {
+        failed += 1;
+        if (response.status >= 500) fault = true;
+        continue;
+      }
+      const candidates = parseSearchResponse(Buffer.from(response.data));
+      if (candidates.length) searchCache.set(cacheKey, candidates);
+      for (const candidate of candidates) {
+        if (seen.has(candidate.id)) continue;
+        seen.add(candidate.id);
+        merged.push(candidate);
+      }
+    } catch (error) {
+      failed += 1;
+      if (isUpstreamFault(error)) fault = true;
+      serverLog.warn(`⚠️ Migu 检索失败（关键词：${keyword}）：${String(error)}`);
+    }
+  }
+  const upstreamFailed = failed === keywords.length;
+  // 整轮检索都因上游故障（5xx / 超时 / 连接失败）而失败时计入熔断计数；
+  // 只要上游还有响应就认为源仍可达，清零失败计数。
+  if (upstreamFailed && fault) searchBreaker.recordFailure();
+  else searchBreaker.recordSuccess();
+  return { candidates: merged, upstreamFailed };
+};
+
+/**
+ * 按音质档位取链
+ *
+ * 遍历候选的音质：免费档优先（PQ 128k → LQ 64k），其余按字节数降序；
+ * 取链成功时一并带回上游给出的权威时长。
+ * @param candidate 咪咕候选
+ * @returns 直链、权威时长与该档码率；失败返回 null
+ */
+const fetchMiguUrl = async (
+  candidate: MiguCandidate,
+): Promise<{ url: string; duration?: number; bitrate: number } | null> => {
+  const rank = (format: MiguFormat) =>
+    format.formatType === "PQ" ? 0 : format.formatType === "LQ" ? 1 : 2;
+  const formats = [...candidate.formats].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    return b.size - a.size;
+  });
+  const notes: string[] = [];
+  for (const format of formats.slice(0, MAX_FORMAT_TRY)) {
+    const params = {
+      contentId: candidate.id,
+      copyrightId: candidate.copyrightId,
+      resourceType: format.resourceType,
+      netType: "01",
+      toneFlag: format.formatType,
+      scene: "",
+      lowerQualityContentId: candidate.id,
+    };
+    for (let attempt = 0; attempt <= FETCH_RETRY_LIMIT; attempt += 1) {
+      try {
+        const response = await axios.get(MIGU_LISTEN_URL, {
+          params,
+          headers: {
+            "Content-Type": "application/json;charset=UTF-8",
+            birth: "h5page",
+            signature: "1",
+            ...MIGU_HEADERS,
+          },
+          responseType: "arraybuffer",
+          timeout: REQUEST_TIMEOUT_MS,
+          validateStatus: () => true,
+        });
+        if (response.status >= 500) {
+          if (attempt < FETCH_RETRY_LIMIT) {
+            await sleep(FETCH_BACKOFF_MS[attempt]);
+            continue;
+          }
+          notes.push(`${format.formatType}:HTTP${response.status}`);
+          break;
+        }
+        if (response.status !== 200) {
+          notes.push(`${format.formatType}:HTTP${response.status}`);
+          break;
+        }
+        let payload: any = null;
+        try {
+          payload = JSON.parse(decodeMiguResponse(Buffer.from(response.data)).toString("utf8"));
+        } catch {
+          notes.push(`${format.formatType}:非JSON`);
+          break;
+        }
+        const code = String(payload?.code ?? "");
+        const url = String(payload?.data?.url ?? "");
+        if (code !== "000000" || !url.startsWith("http")) {
+          // 440000 表示免登录态无播放权限（站内非免费曲），属干净拒绝，不重试
+          notes.push(`${format.formatType}:${code || "无url"}`);
+          break;
+        }
+        const duration = Math.round(Number(payload?.data?.song?.duration ?? 0));
+        return {
+          url,
+          duration: duration > 0 ? duration : undefined,
+          bitrate: MIGU_TONE_KBPS[format.formatType] ?? 128,
+        };
+      } catch (error) {
+        if (attempt < FETCH_RETRY_LIMIT) {
+          await sleep(FETCH_BACKOFF_MS[attempt]);
+          continue;
+        }
+        notes.push(`${format.formatType}:${String(error)}`);
+        break;
+      }
+    }
+  }
+  serverLog.warn(
+    `⚠️ Migu 未取到播放地址（${candidate.title} / ${candidate.artist}）：${notes.join(" / ")}`,
+  );
+  return null;
+};
+
+/**
+ * 获取咪咕歌曲直链
+ * @param target 目标歌曲信息（歌名 / 歌手 / 可选时长），由路由层按请求参数构造
+ * @returns 歌曲直链结果
+ */
+const getMiguSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
+  try {
+    if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
+    if (!target.artist.trim()) return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
+    const { candidates, upstreamFailed } = await searchCandidates(target.title, target.artist);
+    if (upstreamFailed) {
+      return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+    }
+    if (!candidates.length) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
+    const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
+    if (!ranked.length) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
+      const candidate = detail.candidate as MiguCandidate;
+      const source = await fetchMiguUrl(candidate);
+      if (!source) continue;
+      // 上游给出的整曲时长优先；与请求时长偏差超容差即判为错版，拒绝交付
+      const realDuration = source.duration ?? candidate.duration;
+      if (realDuration && target.duration) {
+        const delta = Math.abs(realDuration - target.duration);
+        if (delta > durationTolerance(target.duration)) {
+          serverLog.warn(
+            `⚠️ Migu candidate rejected (${candidate.title}): 时长 ${realDuration}s 偏离请求 ${target.duration}s`,
+          );
+          continue;
+        }
+      }
+      const length = await probeContentLength(source.url, { "User-Agent": MIGU_UA });
+      const check = isPlausibleAudioLength(length, realDuration, source.bitrate, target.duration);
+      if (!check.ok) {
+        serverLog.warn(`⚠️ Migu candidate rejected (${candidate.title}): ${check.reason}`);
+        continue;
+      }
+      if (!check.verified) {
+        serverLog.warn(`⚠️ Migu 直链体积未验证 (${candidate.title}): ${check.reason}`);
+      }
+      serverLog.log("🔗 MiguSong URL:", sanitizeUrl(source.url));
+      return { code: 200, url: source.url, lengthVerified: check.verified };
+    }
+    return { code: 404, url: null, reason: FETCH_FAILED_REASON };
+  } catch (error) {
+    serverLog.error("❌ Get MiguSong URL Error:", error);
+    return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+  }
+};
+
+export default getMiguSongUrl;

@@ -229,6 +229,8 @@ class SongManager {
       [SongUnlockServer.KUWO]: "酷我音乐",
       [SongUnlockServer.GEQUBAO]: "歌曲宝",
       [SongUnlockServer.BODIAN]: "波点音乐",
+      [SongUnlockServer.MIGU]: "咪咕音乐",
+      [SongUnlockServer.CHANGQING]: "长青聚合",
     };
     return nameMap[server] || server;
   }
@@ -478,11 +480,14 @@ class SongManager {
   /**
    * 获取解锁播放链接
    *
-   * 源优先级：网易云歌曲 `网易云 → 波点 → 歌曲宝 → 酷我`；
-   * QQ 音乐 / 酷狗歌曲 `网易云检索 → 波点 → 歌曲宝 → 酷我` ——
+   * 源优先级：网易云歌曲 `网易云 → 咪咕 → 波点 → 歌曲宝 → 酷我 → 长青`；
+   * QQ 音乐 / 酷狗歌曲 `网易云检索 → 咪咕 → 波点 → 歌曲宝 → 酷我 → 长青` ——
    * 网易云解锁源对第三方平台的歌曲只能**按关键词检索网易云曲库**（两套 id 编号空间不同，
    * 拿第三方 id 直查会静默播错歌），因此第三方歌曲在网易云源上走关键词寻址分支。
    * 站外源额外携带歌曲声明时长，参与服务端「歌名 / 歌手 / 时长」三重校验。
+   *
+   * 链位口径：官方曲库（咪咕）在前，社区公益聚合（长青）垫底；
+   * 歌曲宝维持既有熔断状态，不参与位置调整。
    *
    * 逐源隔离失败：单个源超时或报错只记失败，继续尝试下一个源，
    * 全部源都拿不到链接时给出平台语义的兜底提示（逐源明细只写控制台日志）。
@@ -518,9 +523,11 @@ class SongManager {
     }
     const priorityOrder = [
       SongUnlockServer.NETEASE,
+      SongUnlockServer.MIGU,
       SongUnlockServer.BODIAN,
       SongUnlockServer.GEQUBAO,
       SongUnlockServer.KUWO,
+      SongUnlockServer.CHANGQING,
     ];
 
     // 获取启用的音源列表，并按优先级排序
@@ -569,6 +576,8 @@ class SongManager {
           artist,
           duration,
           useKeywordLookup,
+          resolvePlatform(song),
+          song.platformId,
         );
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {
           ...result,
