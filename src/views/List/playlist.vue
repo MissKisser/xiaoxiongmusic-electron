@@ -887,6 +887,9 @@ onDeactivated(() => loadingMsgShow(false));
  * 本地歌单与平台无关，不受此约束。
  */
 const offPlatformChange = onPlatformChange(({ platform }) => {
+  // 页面被 KeepAlive 缓存：离开本页后仍会收到平台变更通知。
+  // 此时按当前路由的平台参数判断，会把用户从别的页面弹走，故只在本页在前台时处理。
+  if (router.currentRoute.value.name !== "playlist") return;
   if (isLocalPlaylist.value) return;
   // 路由未带平台参数时按网易云歌单处理
   const shown = routePlatform.value ?? "netease";

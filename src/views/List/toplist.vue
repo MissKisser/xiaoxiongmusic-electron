@@ -301,6 +301,9 @@ onActivated(() => {
  * 未钉平台的榜单随当前平台走，重取即可。
  */
 const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  // 页面被 KeepAlive 缓存：离开本页后仍会收到平台变更通知。
+  // 此时按当前路由的平台参数判断，会把用户从别的页面弹走，故只在本页在前台时处理。
+  if (router.currentRoute.value.name !== "toplist") return;
   const pinned = route.query.platform as string | undefined;
   if (pinned === "qqmusic" || pinned === "kugou") {
     if (pinned !== platform) {

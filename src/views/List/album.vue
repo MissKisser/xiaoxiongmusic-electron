@@ -369,6 +369,9 @@ onMounted(() => {
  * 未钉平台的专辑页随当前平台走，按新平台重取即可。
  */
 const stopPlatformWatch = onPlatformChange(({ platform }) => {
+  // 页面被 KeepAlive 缓存：离开本页后仍会收到平台变更通知。
+  // 此时按当前路由的平台参数判断，会把用户从别的页面弹走，故只在本页在前台时处理。
+  if (router.currentRoute.value.name !== "album") return;
   if (routePlatform.value && routePlatform.value !== platform) {
     // 钉在别的平台的专辑：回到当前平台的首页
     router.push({ name: "home" });
