@@ -114,6 +114,17 @@ export const useMusicStore = defineStore("music", {
       }
     },
     /**
+     * 重置平台维度的音乐数据
+     *
+     * 正在播放的歌曲、每日推荐与推荐流都只属于一个平台，切换平台时整体作废，
+     * 避免旧平台的内容残留在新平台的界面上。
+     */
+    resetPlatformMusicData() {
+      this.resetMusicData();
+      this.personalFM = { playIndex: 0, list: [] };
+      this.dailySongsData = { timestamp: null, list: [] };
+    },
+    /**
      * 设置/更新歌曲歌词数据
      * @param updates 部分或完整歌词数据
      * @param replace 是否覆盖（true：用提供的数据覆盖并为缺省字段置空；false：合并更新）

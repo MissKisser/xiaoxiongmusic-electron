@@ -1,6 +1,6 @@
 import type { ColorScheme, RGB, SongLevelDataType } from "@/types/main";
 import { QualityType, type SortField, type SortOrder } from "@/types/main";
-import { RepeatModeType, ShuffleModeType } from "@/types/shared";
+import { RepeatModeType, ShuffleModeType, type ApiPlatform } from "@/types/shared";
 import { isDevBuild } from "@/utils/env";
 import { defineStore } from "pinia";
 
@@ -70,8 +70,8 @@ interface StatusState {
   duration: number;
   /** 实时播放进度 */
   progress: number;
-  /** 每首歌曲的进度偏移（按歌曲 id 记忆） */
-  currentTimeOffsetMap: Record<number, number>;
+  /** 每首歌曲的进度偏移（按「平台-歌曲 id」记忆，跨平台同号歌曲互不串用） */
+  currentTimeOffsetMap: Record<string, number>;
   /** 是否为解锁歌曲 */
   playUblock: boolean;
   /** 当前使用的解锁源名称（如：netease、kuwo、gequbao、bodian） */
@@ -262,54 +262,95 @@ export const useStatusStore = defineStore("status", {
       this.automixFxActive = false;
     },
     /**
+     * 生成歌曲偏移的存储键
+     *
+     * 偏移属于「某个平台上的某首歌」：同一串数字在网易云与 QQ 音乐上是两首
+     * 不同的歌，偏移必须带平台维度才不会互相串用。
+     * @param songId 歌曲 id
+     * @param platform 音源平台，缺省按网易云处理
+     * @returns 存储键
+     */
+    buildOffsetKey(songId?: number, platform?: ApiPlatform): string {
+      if (!songId) return "";
+      return `${platform ?? "netease"}:${songId}`;
+    },
+    /**
      * 获取指定歌曲的偏移
      * 单位：毫秒
+     * @param songId 歌曲 id
+     * @param platform 音源平台，缺省按网易云处理
+     * @returns 偏移量（毫秒）
      */
-    getSongOffset(songId?: number): number {
-      if (!songId) return 0;
-      const offsetTime = this.currentTimeOffsetMap?.[songId] ?? 0;
+    getSongOffset(songId?: number, platform?: ApiPlatform): number {
+      const key = this.buildOffsetKey(songId, platform);
+      if (!key) return 0;
+      const offsetTime = this.currentTimeOffsetMap?.[key] ?? 0;
       return Math.floor(offsetTime * 1000);
     },
     /**
      * 设置指定歌曲的偏移
      * @param songId 歌曲 id
      * @param offset 偏移量（单位：毫秒）
+     * @param platform 音源平台，缺省按网易云处理
      */
-    setSongOffset(songId?: number, offset: number = 0) {
-      if (!songId) return;
+    setSongOffset(songId?: number, offset: number = 0, platform?: ApiPlatform) {
+      const key = this.buildOffsetKey(songId, platform);
+      if (!key) return;
       if (!this.currentTimeOffsetMap) this.currentTimeOffsetMap = {};
       // 将毫秒转换为秒存储（保留2位小数）
       const offsetSeconds = offset / 1000;
       const fixed = Number(offsetSeconds.toFixed(2));
       if (fixed === 0) {
         // 为 0 时移除记录，避免占用空间
-        delete this.currentTimeOffsetMap[songId];
+        delete this.currentTimeOffsetMap[key];
       } else {
-        this.currentTimeOffsetMap[songId] = fixed;
+        this.currentTimeOffsetMap[key] = fixed;
       }
     },
     /**
      * 调整指定歌曲的偏移（增量）
      * @param songId 歌曲 id
      * @param delta 偏移增量（单位：毫秒，默认 500ms）
+     * @param platform 音源平台，缺省按网易云处理
      */
-    incSongOffset(songId?: number, delta: number = 500) {
-      if (!songId) return;
-      const current = this.getSongOffset(songId);
+    incSongOffset(songId?: number, delta: number = 500, platform?: ApiPlatform) {
+      const key = this.buildOffsetKey(songId, platform);
+      if (!key) return;
+      const current = this.getSongOffset(songId, platform);
       const next = current + delta;
       if (next === 0) {
-        delete this.currentTimeOffsetMap[songId];
+        delete this.currentTimeOffsetMap[key];
       } else {
-        this.setSongOffset(songId, next);
+        this.setSongOffset(songId, next, platform);
       }
     },
     /** 重置指定歌曲的偏移为 0 */
-    resetSongOffset(songId?: number) {
-      if (!songId) return;
+    resetSongOffset(songId?: number, platform?: ApiPlatform) {
+      const key = this.buildOffsetKey(songId, platform);
+      if (!key) return;
       // 直接删除该歌曲记录
-      if (this.currentTimeOffsetMap && songId in this.currentTimeOffsetMap) {
-        delete this.currentTimeOffsetMap[songId];
+      if (this.currentTimeOffsetMap && key in this.currentTimeOffsetMap) {
+        delete this.currentTimeOffsetMap[key];
       }
+    },
+    /**
+     * 迁移旧版按裸歌曲 id 记忆的进度偏移
+     *
+     * 旧数据没有平台维度，一律按网易云归属迁入。
+     */
+    migrateSongOffsets() {
+      if (!this.currentTimeOffsetMap) return;
+      const migrated: Record<string, number> = {};
+      let changed = false;
+      for (const [key, value] of Object.entries(this.currentTimeOffsetMap)) {
+        if (key.includes(":")) {
+          migrated[key] = value;
+          continue;
+        }
+        migrated[`netease:${key}`] = value;
+        changed = true;
+      }
+      if (changed) this.currentTimeOffsetMap = migrated;
     },
     /**
      * 切换循环模式
@@ -377,6 +418,27 @@ export const useStatusStore = defineStore("status", {
         shuffleMode: "off",
         listSortField: "default",
         listSortOrder: "default",
+      });
+    },
+    /**
+     * 重置平台维度的播放状态
+     *
+     * 切换平台时调用：正在播放的歌曲、播放进度与歌词位置都只属于旧平台，
+     * 整体作废；音量、循环模式、排序方式等用户偏好不受影响。
+     */
+    resetPlatformPlayStatus() {
+      this.$patch({
+        currentTime: 0,
+        duration: 0,
+        progress: 0,
+        lyricIndex: -1,
+        lyricLoading: false,
+        playStatus: false,
+        playLoading: false,
+        playListShow: false,
+        showFullPlayer: false,
+        personalFmMode: false,
+        playIndex: -1,
       });
     },
   },

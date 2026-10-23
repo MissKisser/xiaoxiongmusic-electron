@@ -56,6 +56,7 @@ import { getLyricLanguage } from "@/utils/format";
 import { usePlayerController } from "@/core/player/PlayerController";
 
 import { lyricLangFontStyle } from "@/utils/lyricFontConfig";
+import { resolveSongPlatform } from "@/utils/songPlatform";
 
 defineProps({
   currentTime: {
@@ -113,7 +114,10 @@ const jumpSeek = (line: LyricLineMouseEvent) => {
   const lineContent = line.line.getLine();
   if (!lineContent?.startTime) return;
   const time = lineContent.startTime;
-  const offsetMs = statusStore.getSongOffset(musicStore.playSong?.id);
+  const offsetMs = statusStore.getSongOffset(
+    musicStore.playSong?.id,
+    resolveSongPlatform(musicStore.playSong),
+  );
   player.setSeek(time - offsetMs);
   player.play();
 };

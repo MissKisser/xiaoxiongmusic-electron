@@ -72,7 +72,7 @@ import { dispatchAlbumDetail } from "@/api/platform/dispatch";
 import { formatCoverList, formatSongsList } from "@/utils/format";
 import { renderIcon, copyData } from "@/utils/helper";
 import { openBatchList } from "@/utils/modal";
-import { onPlatformChange, useDataStore } from "@/stores";
+import { onPlatformChange, useDataStore, usePlatformStore } from "@/stores";
 import { toLikeAlbum } from "@/utils/auth";
 import { useListDetail } from "@/composables/List/useListDetail";
 import { useListSearch } from "@/composables/List/useListSearch";
@@ -83,6 +83,7 @@ import ListComment from "@/components/List/ListComment.vue";
 
 const router = useRouter();
 const dataStore = useDataStore();
+const platformStore = usePlatformStore();
 
 const { saveCache, loadCache, checkNeedsUpdate } = useListDataCache();
 
@@ -137,9 +138,11 @@ const isCurrentAlbum = computed<boolean>(
 const currentRequestId = ref<string>("");
 
 // 是否处于收藏专辑
-const isLikeAlbum = computed(() =>
-  dataStore.userLikeData.albums.some((album) => album.id === detailData.value?.id),
-);
+// 网易云的专辑收藏属于网易云平台，在其它平台下不参与判据
+const isLikeAlbum = computed(() => {
+  if (platformStore.currentPlatform !== "netease") return false;
+  return dataStore.userLikeData.albums.some((album) => album.id === detailData.value?.id);
+});
 
 // 列表高度
 const songListHeight = computed(() => getSongListHeight(listScrolling.value));

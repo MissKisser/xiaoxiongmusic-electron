@@ -132,6 +132,7 @@ import { usePlayerController } from "@/core/player/PlayerController";
 import { getLyricLanguage } from "@/utils/format";
 import { isElectron } from "@/utils/env";
 import { lyricLangFontStyle } from "@/utils/lyricFontConfig";
+import { resolveSongPlatform } from "@/utils/songPlatform";
 
 const props = defineProps({
   currentTime: {
@@ -531,7 +532,10 @@ const jumpSeek = (time: number) => {
     clearTimeout(userScrollTimeoutId);
     userScrollTimeoutId = null;
   }
-  const offsetMs = statusStore.getSongOffset(musicStore.playSong?.id);
+  const offsetMs = statusStore.getSongOffset(
+    musicStore.playSong?.id,
+    resolveSongPlatform(musicStore.playSong),
+  );
   player.setSeek(time - offsetMs);
   player.play();
 };

@@ -234,7 +234,9 @@ const isUserPlaylist = computed(() => {
 });
 
 // 是否处于收藏歌单
+// 网易云的歌单收藏属于网易云平台，在其它平台下不参与判据
 const isLikePlaylist = computed(() => {
+  if (platformStore.currentPlatform !== "netease") return false;
   return dataStore.userLikeData.playlists.some((playlist) => playlist.id === detailData.value?.id);
 });
 

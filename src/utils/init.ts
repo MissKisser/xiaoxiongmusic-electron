@@ -1,4 +1,5 @@
 import { useDataStore, useSettingStore, useShortcutStore, useStatusStore } from "@/stores";
+import { initPlatformScope } from "@/stores/platformScope";
 import { useEventListener } from "@vueuse/core";
 import { watch } from "vue";
 import { openUserAgreement } from "@/utils/modal";
@@ -31,6 +32,12 @@ const init = async () => {
 
   // 加载数据
   await dataStore.loadData();
+
+  // 校验平台作用域：丢弃不属于当前平台的持久化队列与播放状态
+  await initPlatformScope();
+
+  // 迁移旧版按裸歌曲 id 记忆的进度偏移
+  statusStore.migrateSongOffsets();
 
   // 初始化 MediaSession
   mediaSessionManager.init();

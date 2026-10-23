@@ -81,6 +81,7 @@ import { usePlayerController } from "@/core/player/PlayerController";
 import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { openSetting, openCopyLyrics } from "@/utils/modal";
 import { useMobile } from "@/composables/useMobile";
+import { resolveSongPlatform } from "@/utils/songPlatform";
 
 const musicStore = useMusicStore();
 const settingStore = useSettingStore();
@@ -93,13 +94,22 @@ const { isMobile } = useMobile();
  */
 const currentSongId = computed(() => musicStore.playSong?.id as number | undefined);
 
+/**
+ * 当前歌曲所属平台
+ *
+ * 进度偏移按「平台-歌曲 id」记忆，跨平台同号歌曲互不串用。
+ */
+const currentSongPlatform = computed(() => resolveSongPlatform(musicStore.playSong));
+
 // 实时播放进度
-const playSeek = ref<number>(player.getSeek() + statusStore.getSongOffset(musicStore.playSong?.id));
+const playSeek = ref<number>(
+  player.getSeek() + statusStore.getSongOffset(currentSongId.value, currentSongPlatform.value),
+);
 
 // 实时更新播放进度
 const { pause: pauseSeek, resume: resumeSeek } = useRafFn(() => {
   const songId = musicStore.playSong?.id;
-  const offsetTime = statusStore.getSongOffset(songId);
+  const offsetTime = statusStore.getSongOffset(songId, currentSongPlatform.value);
   playSeek.value = player.getSeek() + offsetTime;
 });
 
@@ -107,7 +117,10 @@ const { pause: pauseSeek, resume: resumeSeek } = useRafFn(() => {
  * 当前进度偏移值
  */
 const currentTimeOffsetValue = computed(() => {
-  const currentTimeOffset = statusStore.getSongOffset(currentSongId.value);
+  const currentTimeOffset = statusStore.getSongOffset(
+    currentSongId.value,
+    currentSongPlatform.value,
+  );
   if (currentTimeOffset === 0) return "0";
   // 将毫秒转换为秒显示
   const offsetSeconds = parseFloat((currentTimeOffset / 1000).toFixed(2));
@@ -119,10 +132,10 @@ const currentTimeOffsetValue = computed(() => {
  */
 const offsetMilliseconds = computed({
   get: () => {
-    return statusStore.getSongOffset(currentSongId.value);
+    return statusStore.getSongOffset(currentSongId.value, currentSongPlatform.value);
   },
   set: (val: number | null) => {
-    statusStore.setSongOffset(currentSongId.value, val || 0);
+    statusStore.setSongOffset(currentSongId.value, val || 0, currentSongPlatform.value);
   },
 });
 
@@ -131,14 +144,14 @@ const offsetMilliseconds = computed({
  * @param delta 偏移量（单位：毫秒）
  */
 const changeOffset = (delta: number) => {
-  statusStore.incSongOffset(currentSongId.value, delta);
+  statusStore.incSongOffset(currentSongId.value, delta, currentSongPlatform.value);
 };
 
 /**
  * 重置进度偏移
  */
 const resetOffset = () => {
-  statusStore.resetSongOffset(currentSongId.value);
+  statusStore.resetSongOffset(currentSongId.value, currentSongPlatform.value);
 };
 
 /**
@@ -282,7 +295,9 @@ onBeforeUnmount(() => {
     backdrop-filter: blur(10px);
     color: rgb(var(--main-cover-color));
     cursor: pointer;
-    transition: background-color 0.2s, transform 0.2s;
+    transition:
+      background-color 0.2s,
+      transform 0.2s;
     &:active {
       transform: scale(0.95);
     }

@@ -155,7 +155,13 @@ import { openDescModal, openBatchList } from "@/utils/modal";
 import { artistDetail } from "@/api/artist";
 import { dispatchArtistDetail } from "@/api/platform/dispatch";
 import { formatArtistsList } from "@/utils/format";
-import { onPlatformChange, useDataStore, useSettingStore, useStatusStore } from "@/stores";
+import {
+  onPlatformChange,
+  useDataStore,
+  usePlatformStore,
+  useSettingStore,
+  useStatusStore,
+} from "@/stores";
 import { toLikeArtist } from "@/utils/auth";
 import { useSwipe } from "@vueuse/core";
 import ArtistSongs from "./songs.vue";
@@ -165,6 +171,7 @@ const router = useRouter();
 const dataStore = useDataStore();
 const settingStore = useSettingStore();
 const statusStore = useStatusStore();
+const platformStore = usePlatformStore();
 
 // 路由元素
 const componentRef = ref<InstanceType<typeof ArtistSongs> | null>(null);
@@ -290,7 +297,9 @@ const moreOptions = computed<DropdownOption[]>(() => {
 });
 
 // 是否处于收藏歌手
+// 网易云的歌手收藏属于网易云平台，在其它平台下不参与判据
 const isLikeArtist = computed(() => {
+  if (platformStore.currentPlatform !== "netease") return false;
   return dataStore.userLikeData.artists.some((ar) => ar.id === Number(artistId.value));
 });
 

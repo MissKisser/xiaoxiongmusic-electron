@@ -2,17 +2,17 @@
   <div class="history">
     <div class="title">
       <n-text class="keyword">最近播放</n-text>
-      <n-text class="size" depth="3">共 {{ dataStore.historyList?.length || 0 }} 首</n-text>
+      <n-text class="size" depth="3">共 {{ historyList.length }} 首</n-text>
     </div>
     <n-flex class="menu">
       <n-button
         :focusable="false"
-        :disabled="!dataStore.historyList?.length"
+        :disabled="!historyList.length"
         type="primary"
         strong
         secondary
         round
-        v-debounce="() => player.updatePlayList(dataStore.historyList)"
+        v-debounce="() => player.updatePlayList(historyList)"
       >
         <template #icon>
           <SvgIcon name="Play" />
@@ -21,7 +21,7 @@
       </n-button>
       <n-button
         :focusable="false"
-        :disabled="!dataStore.historyList?.length"
+        :disabled="!historyList.length"
         class="more"
         strong
         secondary
@@ -36,8 +36,8 @@
     </n-flex>
     <Transition name="fade" mode="out-in">
       <SongList
-        v-if="dataStore.historyList.length > 0"
-        :data="dataStore.historyList"
+        v-if="historyList.length > 0"
+        :data="historyList"
         :loading="true"
         hiddenCover
         hiddenSize
@@ -57,11 +57,18 @@
 </template>
 
 <script setup lang="ts">
-import { useDataStore } from "@/stores";
+import { usePlatformScopeStore } from "@/stores/platformScope";
 import { usePlayerController } from "@/core/player/PlayerController";
 
 const player = usePlayerController();
-const dataStore = useDataStore();
+const platformScopeStore = usePlatformScopeStore();
+
+/**
+ * 当前平台的最近播放
+ *
+ * 播放历史按平台分桶：三个平台的记录互不混排，切换平台只看到本平台的记录。
+ */
+const historyList = computed(() => platformScopeStore.currentHistory);
 
 // 清空最近播放
 const cleanHistory = () => {
@@ -71,7 +78,7 @@ const cleanHistory = () => {
     positiveText: "确认",
     negativeText: "取消",
     onPositiveClick: async () => {
-      await dataStore.clearHistory();
+      await platformScopeStore.clearHistory();
       window.$message.success("最近播放列表已清空");
     },
   });

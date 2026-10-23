@@ -2,6 +2,7 @@ import { AudioErrorCode } from "@/core/audio-player/BaseAudioPlayer";
 import { useBlobURLManager } from "@/core/resource/BlobURLManager";
 import { PLAYBACK_FAILED_TEXT } from "@/api/platform/errorText";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
+import { usePlatformScopeStore } from "@/stores/platformScope";
 import { type SongType } from "@/types/main";
 import { RepeatModeType, ShuffleModeType } from "@/types/shared";
 import { calculateLyricIndex } from "@/utils/calc";
@@ -11,6 +12,8 @@ import { getPlayerInfoObj, getPlaySongData } from "@/utils/format";
 import { handleSongQuality, shuffleArray, sleep } from "@/utils/helper";
 import { DJ_MODE_KEYWORDS } from "@/utils/meta";
 import lastfmScrobbler from "@/utils/lastfmScrobbler";
+import { isSameSong, resolveSongPlatform } from "@/utils/songPlatform";
+import { isSongLikedInScope } from "@/utils/songLiked";
 import { calculateProgress } from "@/utils/time";
 import { LyricLine } from "@applemusic-like-lyrics/lyric";
 import { DebouncedFunc, throttle } from "lodash-es";
@@ -121,7 +124,7 @@ class PlayerController {
           currentTime: startSeek,
           lyricLoading: true,
           songId: sid,
-          songOffset: statusStore.getSongOffset(sid),
+          songOffset: statusStore.getSongOffset(sid, resolveSongPlatform(playSongData)),
           lrcData: [],
           yrcData: [],
           lyricIndex: -1,
@@ -294,12 +297,11 @@ class PlayerController {
    * @param song 歌曲
    */
   private async afterPlaySetup(song: SongType) {
-    const dataStore = useDataStore();
     const musicStore = useMusicStore();
     const settingStore = useSettingStore();
     const songManager = useSongManager();
-    // 记录播放历史 (非电台)
-    if (song.type !== "radio") dataStore.setHistory(song);
+    // 记录播放历史 (非电台)：历史按平台分桶，各平台互不混排
+    if (song.type !== "radio") void usePlatformScopeStore().recordHistory(song);
     // 更新歌曲数据
     if (!song.path || song.type === "streaming") {
       mediaSessionManager.updateMetadata();
@@ -363,7 +365,6 @@ class PlayerController {
    * 统一音频事件绑定
    */
   private bindAudioEvents() {
-    const dataStore = useDataStore();
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
     const settingStore = useSettingStore();
@@ -390,8 +391,8 @@ class PlayerController {
         }
       }
       if (isElectron) {
-        // 更新喜欢状态
-        playerIpc.sendLikeStatus(dataStore.isLikeSong(playSongData?.id || 0));
+        // 更新喜欢状态（判据带平台维度，跨平台同号歌曲互不串显）
+        playerIpc.sendLikeStatus(isSongLikedInScope(playSongData));
         // 更新信息
         const { name, artist, album } = getPlayerInfoObj() || {};
         const playTitle = `${name} - ${artist}`;
@@ -450,7 +451,7 @@ class PlayerController {
       const duration = Math.floor(audioManager.duration * 1000) || statusStore.duration;
       // 计算歌词索引
       const songId = musicStore.playSong?.id;
-      const offset = statusStore.getSongOffset(songId);
+      const offset = statusStore.getSongOffset(songId, resolveSongPlatform(musicStore.playSong));
       const useYrc = !!(settingStore.showYrc && musicStore.songLyric.yrcData?.length);
       let rawLyrics: LyricLine[] = [];
       if (useYrc) {
@@ -477,7 +478,10 @@ class PlayerController {
         lyricIndex: statusStore.lyricIndex,
         currentTime,
         songId: musicStore.playSong?.id,
-        songOffset: statusStore.getSongOffset(musicStore.playSong?.id),
+        songOffset: statusStore.getSongOffset(
+          musicStore.playSong?.id,
+          resolveSongPlatform(musicStore.playSong),
+        ),
       });
       // 任务栏进度
       if (settingStore.showTaskbarProgress) {
@@ -880,8 +884,9 @@ class PlayerController {
     if (statusStore.personalFmMode) statusStore.personalFmMode = false;
     // 确定播放索引
     if (song && song.id) {
-      const newIndex = processedData.findIndex((s) => s.id === song.id);
-      if (musicStore.playSong.id === song.id) {
+      // 曲目身份带平台维度：跨平台同号歌曲不是同一首
+      const newIndex = processedData.findIndex((s) => isSameSong(s, song));
+      if (isSameSong(musicStore.playSong, song)) {
         // 如果是同一首歌，仅更新索引
         if (newIndex !== -1) statusStore.playIndex = newIndex;
         // 如果需要播放
@@ -933,18 +938,18 @@ class PlayerController {
     // 关闭特殊模式
     if (statusStore.personalFmMode) statusStore.personalFmMode = false;
 
-    if (musicStore.playSong.id === song.id) {
+    if (isSameSong(musicStore.playSong, song)) {
       await this.play();
       window.$message.success("已开始播放");
       return;
     }
 
     // 尝试添加
-    const currentSongId = musicStore.playSong.id;
+    const currentSong = musicStore.playSong;
     const songIndex = await dataStore.setNextPlaySong(song, statusStore.playIndex);
 
     // 修正当前播放索引
-    const newCurrentIndex = dataStore.playList.findIndex((s) => s.id === currentSongId);
+    const newCurrentIndex = dataStore.playList.findIndex((s) => isSameSong(s, currentSong));
     if (newCurrentIndex !== -1 && newCurrentIndex !== statusStore.playIndex) {
       statusStore.playIndex = newCurrentIndex;
     }

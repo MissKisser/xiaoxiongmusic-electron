@@ -1,5 +1,5 @@
 import { usePlayerController } from "@/core/player/PlayerController";
-import { useDataStore, useMusicStore, useStatusStore } from "@/stores";
+import { useMusicStore, useStatusStore } from "@/stores";
 import { SettingType } from "@/types/main";
 import { handleProtocolUrl } from "@/utils/protocol";
 import { cloneDeep } from "lodash-es";
@@ -7,6 +7,8 @@ import { toLikeSong } from "./auth";
 import { isElectron } from "./env";
 import { getPlayerInfoObj } from "./format";
 import { openSetting, openUpdateApp } from "./modal";
+import { resolveSongPlatform } from "./songPlatform";
+import { isSongLikedInScope } from "./songLiked";
 
 // 关闭更新状态
 const closeUpdateStatus = () => {
@@ -38,9 +40,9 @@ const initIpc = () => {
     window.electron.ipcRenderer.on("toggleShuffle", (_, mode) => player.toggleShuffle(mode));
     // 喜欢歌曲
     window.electron.ipcRenderer.on("toggle-like-song", async () => {
-      const dataStore = useDataStore();
       const musicStore = useMusicStore();
-      await toLikeSong(musicStore.playSong, !dataStore.isLikeSong(musicStore.playSong.id));
+      // 红心判据带平台维度：跨平台同号歌曲不是同一首
+      await toLikeSong(musicStore.playSong, !isSongLikedInScope(musicStore.playSong));
     });
     // 开启设置
     window.electron.ipcRenderer.on("openSetting", (_, type: SettingType, scrollTo?: string) =>
@@ -67,7 +69,10 @@ const initIpc = () => {
             artistName: artist,
             currentTime: statusStore.currentTime,
             songId: musicStore.playSong?.id,
-            songOffset: statusStore.getSongOffset(musicStore.playSong?.id),
+            songOffset: statusStore.getSongOffset(
+              musicStore.playSong?.id,
+              resolveSongPlatform(musicStore.playSong),
+            ),
             lrcData: songLyric.lrcData ?? [],
             yrcData: songLyric.yrcData ?? [],
             lyricIndex: statusStore.lyricIndex,
