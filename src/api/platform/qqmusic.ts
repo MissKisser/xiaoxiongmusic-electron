@@ -7,7 +7,13 @@
  * 字段对照见 `src/api/platform/types.ts` 顶部表格。
  */
 
-import { deriveStableId, secureUrl, splitArtistsByPlatform, toNumericId } from "./common";
+import {
+  deriveStableId,
+  secureUrl,
+  splitArtistsByPlatform,
+  toMillisTimestamp,
+  toNumericId,
+} from "./common";
 import { platformRequest, platformRequestBody } from "./http";
 import { QualityType } from "@/types/main";
 import {
@@ -322,6 +328,7 @@ export const normalizeQqSong = (song: Record<string, any>): PlatformSong => {
  * 归一化 QQ 歌单条目
  *
  * `dirType` 区分目录语义：0 为自建歌单，3 为收藏（订阅）歌单。
+ * 上游的创建 / 更新时间是秒级时间戳，这里统一换算为毫秒口径。
  * @param playlist QQ 原生歌单条目
  * @returns 归一化歌单
  */
@@ -342,8 +349,8 @@ export const normalizeQqPlaylist = (playlist: Record<string, any>): PlatformPlay
       id: "",
       name: String(playlist?.creator ?? ""),
     },
-    createTime: Number(playlist?.createTime) || undefined,
-    updateTime: Number(playlist?.updateTime) || undefined,
+    createTime: toMillisTimestamp(playlist?.createTime),
+    updateTime: toMillisTimestamp(playlist?.updateTime),
     platform: QQ_MUSIC,
     platformId: String(playlist?.tid ?? playlist?.id ?? "") || undefined,
     owned: !subscribed,
@@ -420,8 +427,8 @@ export const normalizeQqLyric = (raw: QqLyricResponse): PlatformLyric => ({
 export const normalizeQqComment = (raw: Record<string, any>): PlatformComment => ({
   id: raw?.id ?? "",
   content: String(raw?.content ?? ""),
-  // QQ 的 publishTime 为秒，网易云评论区按毫秒消费
-  time: Number(raw?.publishTime ?? 0) * 1000,
+  // QQ 的 publishTime 为秒，评论区按毫秒口径消费
+  time: toMillisTimestamp(raw?.publishTime) ?? 0,
   likedCount: Number(raw?.praiseNum ?? 0),
   liked: false,
   user: {
@@ -1103,6 +1110,7 @@ export const qqAlbumDetail = async (
  * 读取 QQ 音乐公开歌单详情（广场歌单）
  *
  * 广场歌单走 `song_list` 模块的详情模式，歌单名 / 封面 / 创建者都在该端点里。
+ * 创建时间为秒级时间戳，这里统一换算为毫秒口径。
  * @param id 歌单号
  * @returns 归一化后的歌单详情
  */
@@ -1125,7 +1133,7 @@ export const qqPublicPlaylistDetail = async (
       id: "",
       name: String(res?.creator ?? ""),
     },
-    createTime: Number(res?.createTime ?? 0) || undefined,
+    createTime: toMillisTimestamp(res?.createTime),
     platform: QQ_MUSIC,
     platformId: String(res?.id ?? id),
     tracks: (res?.songs ?? []).map(normalizeQqSong),

@@ -588,7 +588,8 @@ export const dispatchPlaylistDetail = async (
         res.creator?.name || entry?.creatorName || publicRes?.creator?.name,
         owned,
       ),
-      createTime: entry?.createTime,
+      // 创建 / 更新时间：账号歌单取自歌单列表，公开歌单取自公开歌单端点
+      createTime: entry?.createTime ?? publicRes?.createTime,
       updateTime: entry?.updateTime,
       platform: res.platform,
       platformId: res.platformId,

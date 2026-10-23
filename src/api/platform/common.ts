@@ -130,3 +130,27 @@ export const toNumericId = (raw: unknown, seed: string): number => {
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   return deriveStableId(seed);
 };
+
+/**
+ * 秒级时间戳的判定上界
+ *
+ * 秒级时间戳表示的日期远早于 2001 年，毫秒级时间戳从 2001 年起，
+ * 真实数据里两者的量级差异极大，用该上界即可稳定区分两种单位。
+ */
+const SECONDS_TIMESTAMP_LIMIT = 1e12;
+
+/**
+ * 把平台时间戳统一换算为毫秒
+ *
+ * 第三方平台（QQ 音乐 / 酷狗）的时间戳单位不统一：接口给的是秒级，
+ * 直接按毫秒渲染会把 2026 年的时间显示成 1970 年。
+ * 这里按量级判定单位：小于上界的视为秒级并换算，
+ * 已是毫秒的（网易云口径）按原值返回。
+ * @param value 平台给出的时间戳
+ * @returns 毫秒时间戳；取不到有效值时为 undefined
+ */
+export const toMillisTimestamp = (value: unknown): number | undefined => {
+  const time = Number(value);
+  if (!Number.isFinite(time) || time <= 0) return undefined;
+  return time < SECONDS_TIMESTAMP_LIMIT ? time * 1000 : time;
+};

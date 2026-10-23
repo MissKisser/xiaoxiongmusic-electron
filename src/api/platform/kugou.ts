@@ -11,7 +11,13 @@
  * - `platformId`：酷狗的 `hash`（字符串主键），播放地址 / 歌词等接口以它为键。
  */
 
-import { normalizeArtistEntry, secureUrl, splitArtistsByPlatform, toNumericId } from "./common";
+import {
+  normalizeArtistEntry,
+  secureUrl,
+  splitArtistsByPlatform,
+  toMillisTimestamp,
+  toNumericId,
+} from "./common";
 import { platformRequest, platformRequestBody } from "./http";
 import { QualityType } from "@/types/main";
 import {
@@ -340,6 +346,7 @@ export const normalizeKgSongFM = (song: Record<string, any>): PlatformSong => no
  *
  * `type` 区分目录语义：0 为自建歌单，1 为收藏歌单；
  * `isDefault` 标记系统默认歌单（「默认收藏」「我喜欢的歌」）。
+ * 上游的创建 / 更新时间是秒级时间戳，这里统一换算为毫秒口径。
  * @param playlist 酷狗原生歌单条目
  * @returns 归一化歌单
  */
@@ -358,8 +365,8 @@ export const normalizeKgPlaylist = (playlist: Record<string, any>): PlatformPlay
       id: "",
       name: String(playlist?.creator ?? ""),
     },
-    createTime: Number(playlist?.createTime ?? playlist?.create_time ?? 0) || undefined,
-    updateTime: Number(playlist?.updateTime ?? playlist?.update_time ?? 0) || undefined,
+    createTime: toMillisTimestamp(playlist?.createTime ?? playlist?.create_time),
+    updateTime: toMillisTimestamp(playlist?.updateTime ?? playlist?.update_time),
     platform: KUGOU,
     platformId: String(playlist?.listid ?? playlist?.id ?? "") || undefined,
     owned: !subscribed,
@@ -709,18 +716,6 @@ interface KgSearchCategoryResponse {
 }
 
 /**
- * 把酷狗的秒级时间戳换算为毫秒
- * @param value 时间戳
- * @returns 毫秒时间戳，取不到时为 undefined
- */
-const toPublishTime = (value: unknown): number | undefined => {
-  const time = Number(value);
-  if (!Number.isFinite(time) || time <= 0) return undefined;
-  // 上游给的是秒级时间戳，毫秒口径的数值远大于该量级
-  return time < 1e11 ? time * 1000 : time;
-};
-
-/**
  * 归一化酷狗搜索到的专辑
  * @param album 酷狗原生专辑条目
  * @returns 网易云形状的专辑条目
@@ -732,7 +727,7 @@ const normalizeKgSearchAlbum = (album: Record<string, any>): KgSearchCoverEntry 
   trackCount: Number(album?.trackCount ?? 0),
   creator: { nickname: String(album?.artist ?? "") },
   description: album?.intro ? String(album.intro) : undefined,
-  publishTime: toPublishTime(album?.publishTime),
+  publishTime: toMillisTimestamp(album?.publishTime),
 });
 
 /**
