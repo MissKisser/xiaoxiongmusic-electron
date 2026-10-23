@@ -465,7 +465,16 @@ const handleLocalPlaylist = (id: number) => {
   setLoading(false);
 };
 
-// 获取第三方平台歌单
+/**
+ * 获取第三方平台歌单
+ *
+ * 逐页取回曲目并即时上屏；歌单头部先落位，曲目总数过多时给出持续加载提示，
+ * 取完、请求竞态返回与异常都会收起提示。
+ * @param platform 音源平台
+ * @param getList 是否取回曲目
+ * @param target 目标歌单的定位信息
+ * @returns 无返回值
+ */
 const handlePlatformPlaylist = async (
   platform: ApiPlatform,
   getList: boolean,
@@ -479,6 +488,20 @@ const handlePlatformPlaylist = async (
   // 路由更新时目标歌单标识取自目标路由，避免读到切换前的旧歌单
   const targetId = target.id ?? platformPlaylistId.value;
   const targetDirId = target.dirId ?? platformDirId.value;
+  // 曲目总数拿到后只判定一次提示，避免分页途中反复弹出
+  let tipChecked = false;
+  // 歌单头部只落位一次，避免分页途中反复写入
+  let detailSet = false;
+  // 本次请求弹出的加载提示，只收起自己弹出的那一条
+  let tipMessage: MessageReactive | null = null;
+  /**
+   * 收起本次请求的加载提示
+   *
+   * 提示已被别的请求接管时不动它，避免过期请求关掉新请求的提示。
+   */
+  const closeTip = () => {
+    if (loadingMsg.value === tipMessage) loadingMsgShow(false);
+  };
   try {
     // 逐页取回曲目，行为与网易云链路一致
     do {
@@ -490,9 +513,23 @@ const handlePlatformPlaylist = async (
         pageSize,
       });
       // 检查是否仍然是当前请求的歌单
-      if (currentRequestId.value !== playlistId.value) return;
+      if (currentRequestId.value !== playlistId.value) {
+        closeTip();
+        return;
+      }
       detail = result.detail;
       count = result.count;
+      // 头部信息先落位，分页取回的曲目才能逐页上屏（与网易云链路一致）
+      if (detail && !detailSet) {
+        detailSet = true;
+        setDetailData(detail);
+      }
+      // 曲目总数过多时给出持续加载提示，与网易云链路保持一致
+      if (getList && !tipChecked && count > 0) {
+        tipChecked = true;
+        loadingMsgShow(true, count);
+        tipMessage = loadingMsg.value;
+      }
       if (getList && result.tracks.length) {
         tracks.push(...result.tracks);
         appendListData(result.tracks);
@@ -500,12 +537,14 @@ const handlePlatformPlaylist = async (
       page += 1;
       if (!getList || result.tracks.length === 0 || tracks.length >= count) break;
     } while (page <= 50);
-    setDetailData(detail);
     setLoading(false);
   } catch (error) {
     console.error("获取平台歌单失败：", error);
     setLoading(false);
     window.$message.error("获取歌单失败，请重试");
+  } finally {
+    // 取完、竞态返回与异常都在此收起提示
+    closeTip();
   }
 };
 
@@ -513,7 +552,9 @@ const handlePlatformPlaylist = async (
  * 重新读取平台「我喜欢的音乐」歌单的曲目
  *
  * 覆盖语义：每次都以本次读到的曲目为准，不与旧列表叠加。
+ * 后台静默刷新：不弹加载提示，避免打扰用户。
  * @param platform 音源平台
+ * @returns 无返回值
  */
 const reloadPlatformLikedTracks = async (platform: ApiPlatform) => {
   const pageSize = 300;
