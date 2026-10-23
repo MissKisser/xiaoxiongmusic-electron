@@ -25,10 +25,9 @@ import { dailyRecommendDislike } from "@/api/rec";
 import { formatSongsList } from "@/utils/format";
 import {
   getPlatformLikedSongIds,
-  isSongLiked,
-  likeSong,
   removeSongsFromPlaylist,
 } from "@/api/platform/manage";
+import { useSongLiked } from "@/composables/useSongLiked";
 
 /** 歌曲菜单 */
 export const useSongMenu = () => {
@@ -41,6 +40,7 @@ export const useSongMenu = () => {
   const downloadManager = useDownloadManager();
   const localStore = useLocalStore();
   const platformStore = usePlatformStore();
+  const { isSongLikedNow, toggleSongLiked } = useSongLiked();
 
   // 删除本地歌曲
   const deleteLocalSong = (song: SongType, emit?: (event: "removeSong", args: any[]) => void) => {
@@ -192,19 +192,6 @@ export const useSongMenu = () => {
     );
   });
 
-  // 第三方平台歌曲的喜欢 / 取消喜欢
-  const toggleLikeSong = async (song: SongType) => {
-    const platform = song.platform;
-    if (!platform || platform === "netease") return;
-    const liked = !isSongLiked(platform, song);
-    const result = await likeSong(platform, song, liked);
-    if (!result.ok) {
-      window.$message.error(result.message || "操作失败，请重试");
-      return;
-    }
-    window.$message.success(liked ? "已添加到我喜欢的音乐" : "已取消喜欢");
-  };
-
   // 从平台歌单中删除歌曲（与网易云同款确认流程）
   const deleteSongsFromPlatformPlaylist = (
     platform: ApiPlatform,
@@ -252,12 +239,14 @@ export const useSongMenu = () => {
     const isDownloading = dataStore.downloadingSongs.some((item) => item.song.id === song.id);
     // 第三方平台歌曲：网易云专有的收藏 / 下载 / 百科等写操作不适用
     const isThirdPartySong = !!song.platform && song.platform !== "netease";
-    // 第三方平台歌曲：按平台机制判断是否已喜欢
-    const isThirdPartyLiked = isThirdPartySong ? isSongLiked(song.platform!, song) : false;
+    // 红心状态按平台统一判据（与歌曲行、播放条的红心同源）
+    const isLiked = isSongLikedNow(song);
     // 第三方平台是否已登录（未登录时不可写）
     const isPlatformLoggedIn = isThirdPartySong
       ? !!platformStore.platformProfiles[song.platform!]
       : false;
+    // 喜欢入口：第三方平台需已登录，网易云沿用既有红心链路（未登录由操作本身提示）
+    const canLikeSong = isThirdPartySong ? isPlatformLoggedIn : true;
     // 预热平台喜欢歌曲 id 缓存（首次为空，随后命中缓存）
     if (isThirdPartySong) void getPlatformLikedSongIds(song.platform!);
 
@@ -294,12 +283,12 @@ export const useSongMenu = () => {
       },
       {
         key: "like-song",
-        label: isThirdPartyLiked ? "取消喜欢" : "喜欢该曲",
-        show: isThirdPartySong && !isLocal && type === "song" && isPlatformLoggedIn,
+        label: isLiked ? "取消喜欢" : "喜欢该曲",
+        show: !isLocal && type === "song" && canLikeSong,
         props: {
-          onClick: () => toggleLikeSong(song),
+          onClick: () => toggleSongLiked(song),
         },
-        icon: renderIcon(isThirdPartyLiked ? "Favorite" : "FavoriteBorder", { size: 18 }),
+        icon: renderIcon(isLiked ? "Favorite" : "FavoriteBorder", { size: 18 }),
       },
       {
         key: "mv",
@@ -491,8 +480,7 @@ export const useSongMenu = () => {
           statusStore.isDeveloperMode &&
           !isLocal &&
           type === "song" &&
-          !isDownloading &&
-          !isThirdPartySong,
+          !isDownloading,
         props: { onClick: () => openDownloadSong(song) },
         icon: renderIcon("Download"),
       },

@@ -28,6 +28,14 @@ const router = useRouter();
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 
+/**
+ * 取条目的平台维度
+ * @param item 条目
+ * @returns 第三方平台标识，网易云条目返回 null
+ */
+const itemPlatform = (item: CoverType): "qqmusic" | "kugou" | null =>
+  item.platform === "qqmusic" || item.platform === "kugou" ? item.platform : null;
+
 // 右键菜单数据
 const dropdownX = ref<number>(0);
 const dropdownY = ref<number>(0);
@@ -44,6 +52,9 @@ const openDropdown = async (
     dropdownShow.value = false;
     // 生成菜单
     nextTick().then(() => {
+      // 第三方平台条目以平台主键定位，网易云条目保持原样
+      const platform = itemPlatform(item);
+      const targetId = platform ? (item.platformId ?? item.id) : item.id;
       dropdownOptions.value = [
         {
           key: "open",
@@ -52,7 +63,10 @@ const openDropdown = async (
             onClick: () =>
               router.push({
                 name: type,
-                query: { id: item.id },
+                query: {
+                  id: targetId,
+                  ...(platform ? { platform } : {}),
+                },
               }),
           },
           icon: renderIcon("Eye"),
@@ -91,14 +105,14 @@ const openDropdown = async (
           key: "code-id",
           label: `复制${type === "playlist" ? "歌单" : type === "album" ? "专辑" : type === "video" ? "视频" : "电台"} ID`,
           props: {
-            onClick: () => copyData(item.id),
+            onClick: () => copyData(targetId),
           },
           icon: renderIcon("Copy", { size: 18 }),
         },
         {
           key: "share",
           label: `分享${type === "playlist" ? "歌单" : type === "album" ? "专辑" : type === "video" ? "视频" : "电台"}链接`,
-          show: item.id !== 0 && item.id?.toString().length < 16,
+          show: !platform && item.id !== 0 && item.id?.toString().length < 16,
           props: {
             onClick: () =>
               copyData(`https://music.163.com/#/${type}?id=${item.id}`, "已复制分享链接到剪贴板"),

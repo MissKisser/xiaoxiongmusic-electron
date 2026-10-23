@@ -301,6 +301,20 @@ export const openUpdatePlaylist = (
 // 下载歌曲
 export const openDownloadSong = (song: SongType) => {
   const dataStore = useDataStore();
+  // 第三方平台歌曲：网易云的登录与会员校验不适用，音频直链由平台下载分派按平台取
+  if (song && (song.platform ?? "netease") !== "netease") {
+    const platformModal = window.$modal.create({
+      preset: "card",
+      transformOrigin: "center",
+      autoFocus: false,
+      style: { width: "600px" },
+      title: "下载歌曲",
+      content: () => {
+        return h(DownloadModal, { songs: [song], onClose: () => platformModal.destroy() });
+      },
+    });
+    return;
+  }
   if (!isLogin()) return openUserLogin();
   // 是否可下载
   if (!song) return window.$message.warning("请正确选择歌曲");
