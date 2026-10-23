@@ -129,7 +129,6 @@
 import { useDataStore, usePlatformStore, onPlatformChange, PLATFORM_META } from "@/stores";
 import { openUserLogin, openPlatformLogin } from "@/utils/modal";
 import { getLoginState } from "@/api/login";
-import { PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
 import type { ApiPlatform } from "@/types/shared";
 import {
   toLogout,
@@ -139,12 +138,16 @@ import {
   updateSpecialUserData,
 } from "@/utils/auth";
 import { useMobile } from "@/composables/useMobile";
+import { useLikeStats } from "@/composables/useLikeStats";
 
 const router = useRouter();
 const dataStore = useDataStore();
 const platformStore = usePlatformStore();
 
 const { isDesktop } = useMobile();
+
+// 收藏统计条目（与收藏页同一真源）
+const likeStats = useLikeStats();
 
 /** 用户喜欢数据条目 */
 interface UserLikeItem {
@@ -270,53 +273,14 @@ const handlePlatform = (item: (typeof platformList.value)[number]) => {
 };
 
 // 用户喜欢数据
-const userLikeData = computed<UserLikeItem[]>(() => {
-  // 第三方平台：平台把「我创建的歌单」与「我收藏的歌单」分成两套目录语义，
-  // 两组各按自己的条目数展示，与侧边栏分组、收藏页分组同源；
-  // 专辑 / 歌手子页已隐藏，故不展示（没有的能力不显示 0）
-  if (platformStore.currentPlatform !== "netease") {
-    const items: UserLikeItem[] = [
-      {
-        label: "创建",
-        name: "like-playlists",
-        value: platformStore.playlists.owned.length,
-        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[0] },
-      },
-      {
-        label: "收藏",
-        name: "like-playlists",
-        value: platformStore.playlists.favorites.length,
-        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[1] },
-      },
-    ];
-    const liked = platformStore.playlists.owned.find((item) => item.isLiked);
-    if (liked) {
-      items.push({
-        label: "喜欢",
-        name: "like-songs",
-        value: liked.count,
-      });
-    }
-    return items;
-  }
-  return [
-    {
-      label: "歌单",
-      name: "like-playlists",
-      value: dataStore.userLikeData.playlists.length,
-    },
-    {
-      label: "专辑",
-      name: "like-albums",
-      value: dataStore.userLikeData.albums.length,
-    },
-    {
-      label: "歌手",
-      name: "like-artists",
-      value: dataStore.userLikeData.artists.length,
-    },
-  ];
-});
+const userLikeData = computed<UserLikeItem[]>(() =>
+  likeStats.value.map((item) => ({
+    label: item.label,
+    name: item.name,
+    value: item.length,
+    query: item.query,
+  })),
+);
 
 /**
  * 是否展示统计区

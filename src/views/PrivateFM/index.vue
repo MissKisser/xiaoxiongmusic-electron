@@ -59,12 +59,19 @@
                 <SvgIcon name="SkipNext" :size="26" />
               </template>
             </n-button>
-            <n-button :focusable="false" class="refresh" secondary circle @click.stop="fmRefresh">
-              <template #icon>
-                <SvgIcon name="Refresh" :size="24" />
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <n-button :focusable="false" class="refresh" secondary circle @click.stop="fmRefresh">
+                  <template #icon>
+                    <SvgIcon name="Refresh" :size="24" />
+                  </template>
+                </n-button>
               </template>
-            </n-button>
+              换一批推荐流
+            </n-tooltip>
           </n-flex>
+          <!-- 语义说明：平台推荐流没有反馈接口，第三个按钮是「换一批」而不是「不喜欢」 -->
+          <n-text class="hint" depth="3">推荐流为只读接口，不支持「不喜欢」反馈</n-text>
         </div>
       </div>
     </n-card>
@@ -302,6 +309,10 @@ onUnmounted(() => {
             width: 46px;
             height: 46px;
           }
+        }
+        .hint {
+          margin-top: 8px;
+          font-size: 12px;
         }
       }
     }

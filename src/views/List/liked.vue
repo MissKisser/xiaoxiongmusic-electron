@@ -296,6 +296,7 @@ const getPlaylistData = async (id: number, getList: boolean, refresh: boolean) =
   } catch (error) {
     console.error("获取我喜欢的音乐失败：", error);
     setLoading(false);
+    window.$message.error("获取我喜欢的音乐失败，请重试");
   }
 };
 

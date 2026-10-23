@@ -41,8 +41,9 @@
 
 <script setup lang="ts">
 import { useMobile } from "@/composables/useMobile";
+import { useLikeStats } from "@/composables/useLikeStats";
 import { onPlatformChange, useDataStore, usePlatformStore, useSettingStore } from "@/stores";
-import { LIKE_TABS, PLATFORM_PLAYLIST_TYPE_QUERY } from "@/api/platform/capability";
+import { LIKE_TABS } from "@/api/platform/capability";
 
 const router = useRouter();
 const dataStore = useDataStore();
@@ -74,53 +75,18 @@ const showStatus = computed<boolean>(() => isPlatformSource.value || dataStore.l
 // 当前平台可见的子页（平台不支持的子页隐藏）
 const visibleTabs = computed(() => LIKE_TABS[platformStore.currentPlatform] ?? []);
 
+// 收藏统计条目
+const likeStats = useLikeStats();
+
 // 喜欢数据
-const likeData = computed<LikeDataItem[]>(() => {
-  // 第三方平台：平台把自建与收藏分成两套目录，两组各显示自己的条目数
-  if (isPlatformSource.value) {
-    return [
-      {
-        icon: "PlaylistAdd",
-        name: "like-playlists",
-        length: platformStore.playlists.owned.length,
-        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[0] },
-      },
-      {
-        icon: "PlaylistAddCheck",
-        name: "like-playlists",
-        length: platformStore.playlists.favorites.length,
-        query: { type: PLATFORM_PLAYLIST_TYPE_QUERY[1] },
-      },
-    ];
-  }
-  return [
-    {
-      icon: "MusicList",
-      name: "like-playlists",
-      length: dataStore.userLikeData.playlists?.length || 0,
-    },
-    {
-      icon: "Album",
-      name: "like-albums",
-      length: dataStore.userLikeData.albums?.length || 0,
-    },
-    {
-      icon: "Artist",
-      name: "like-artists",
-      length: dataStore.userLikeData.artists?.length || 0,
-    },
-    {
-      icon: "Video",
-      name: "like-videos",
-      length: dataStore.userLikeData.mvs?.length || 0,
-    },
-    {
-      icon: "Record",
-      name: "like-radios",
-      length: dataStore.userLikeData.djs?.length || 0,
-    },
-  ];
-});
+const likeData = computed<LikeDataItem[]>(() =>
+  likeStats.value.map((item) => ({
+    icon: item.icon,
+    name: item.name,
+    length: item.length,
+    query: item.query,
+  })),
+);
 
 // 监听路由变化
 watch(

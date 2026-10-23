@@ -1,32 +1,31 @@
 <template>
   <div class="discover">
-    <!-- 刷歌（QQ 音乐推荐流）：整页替换发现页内容 -->
-    <SongFM v-if="isSongFM" class="song-fm" />
-    <template v-else>
-      <div class="title">
-        <n-text class="keyword">发现音乐</n-text>
-      </div>
-      <!-- 标签页 -->
-      <n-tabs
-        v-model:value="discoverType"
-        class="tabs"
-        type="segment"
-        @update:value="(name: string) => router.push({ name })"
-      >
-        <n-tab v-for="tab in visibleTabs" :key="tab.name" :name="tab.name">
-          {{ tab.label }}
-        </n-tab>
-      </n-tabs>
-      <!-- 路由 -->
-      <RouterView v-slot="{ Component }">
-        <Transition :name="`router-${settingStore.routeAnimation}`" mode="out-in">
-          <KeepAlive v-if="settingStore.useKeepAlive">
-            <component :is="Component" class="router-view" />
-          </KeepAlive>
-          <component v-else :is="Component" class="router-view" />
-        </Transition>
-      </RouterView>
-    </template>
+    <!-- 标题 -->
+    <div class="title">
+      <n-text class="keyword">发现音乐</n-text>
+    </div>
+    <!-- 标签页 -->
+    <n-tabs
+      v-model:value="discoverType"
+      class="tabs"
+      type="segment"
+      @update:value="(name: string) => router.push({ name })"
+    >
+      <n-tab v-for="tab in visibleTabs" :key="tab.name" :name="tab.name">
+        {{ tab.label }}
+      </n-tab>
+    </n-tabs>
+    <!-- 刷歌（QQ 音乐 / 酷狗音乐推荐流）：占据发现页内容区，仍保留站点导航上下文 -->
+    <SongFM v-if="isSongFM" class="router-view song-fm" />
+    <!-- 路由 -->
+    <RouterView v-else v-slot="{ Component }">
+      <Transition :name="`router-${settingStore.routeAnimation}`" mode="out-in">
+        <KeepAlive v-if="settingStore.useKeepAlive">
+          <component :is="Component" class="router-view" />
+        </KeepAlive>
+        <component v-else :is="Component" class="router-view" />
+      </Transition>
+    </RouterView>
   </div>
 </template>
 
@@ -39,25 +38,38 @@ const router = useRouter();
 const settingStore = useSettingStore();
 const platformStore = usePlatformStore();
 
-// 发现路由
-const discoverType = ref<string>(
-  (router.currentRoute.value?.name as string) || "discover-playlists",
-);
-
-// 路由变化时同步标签高亮：平台切换、前进后退都会走到这里
-watch(
-  () => router.currentRoute.value.name,
-  (name) => {
-    if (typeof name === "string" && name) discoverType.value = name;
-  },
-);
-
 // 是否处于刷歌视图（菜单「刷歌」入口带 fm=song 参数进入）
 // 刷歌是 QQ 音乐与酷狗音乐的推荐流能力，网易云沿用原有「私人漫游」流程，不渲染本页
 const isSongFM = computed<boolean>(
   () =>
     router.currentRoute.value.query.fm === "song" &&
     (platformStore.currentPlatform === "qqmusic" || platformStore.currentPlatform === "kugou"),
+);
+
+/**
+ * 刷歌视图的标签页选中项
+ *
+ * 刷歌是发现页的整页形态，不属于任何子页：标签页不高亮某个子页，
+ * 这样从刷歌页点任意标签页都会真正跳转（高亮子页时点击不换值，点了没反应）。
+ */
+const SONG_FM_TYPE = "song-fm";
+
+/** 当前应高亮的标签页 */
+const resolveDiscoverType = (): string => {
+  if (isSongFM.value) return SONG_FM_TYPE;
+  const name = router.currentRoute.value?.name;
+  return (typeof name === "string" && name) || "discover-playlists";
+};
+
+// 发现路由
+const discoverType = ref<string>(resolveDiscoverType());
+
+// 路由变化时同步标签高亮：平台切换、前进后退都会走到这里
+watch(
+  () => [router.currentRoute.value.name, router.currentRoute.value.query.fm],
+  () => {
+    discoverType.value = resolveDiscoverType();
+  },
 );
 
 // 当前平台可见的子页（平台不支持的子页隐藏）
