@@ -192,6 +192,22 @@ Licensed under AGPL-3.0
       </n-card>
     </div>
     <div class="set-list">
+      <n-h3 prefix="bar"> 隐私 </n-h3>
+      <n-card class="set-item">
+        <div class="label">
+          <n-text class="name">匿名上报音源可用性</n-text>
+          <n-text class="tip" :depth="3">
+            换源取链时匿名上报本次成功与否与耗时，仅含音源、成败、耗时与失败类别，不含歌名与任何身份信息
+          </n-text>
+        </div>
+        <n-switch
+          v-model:value="settingStore.anonymousProbeReport"
+          class="set"
+          :round="false"
+        />
+      </n-card>
+    </div>
+    <div class="set-list">
       <n-h3 prefix="bar"> 播放器 </n-h3>
       <n-card class="set-item">
         <div class="label">

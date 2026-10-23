@@ -179,6 +179,8 @@ export interface SettingState {
   useSongUnlock: boolean;
   /** 歌曲解锁音源 */
   songUnlockServer: { key: SongUnlockServer; enabled: boolean }[];
+  /** 匿名上报音源可用性（仅上报源/成败/耗时/失败类别，不含歌名与身份信息） */
+  anonymousProbeReport: boolean;
   /** 显示倒计时 */
   countDownShow: boolean;
   /** 显示歌词条 */
@@ -573,6 +575,7 @@ export const useSettingStore = defineStore("setting", {
       { key: SongUnlockServer.MIGU, enabled: true },
       { key: SongUnlockServer.CHANGQING, enabled: true },
     ],
+    anonymousProbeReport: true,
     countDownShow: true,
     barLyricShow: true,
     timeFormat: "current-total",

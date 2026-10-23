@@ -25,6 +25,13 @@ import { isElectron } from "@/utils/env";
 import { formatSongsList } from "@/utils/format";
 import { handleSongQuality } from "@/utils/helper";
 import { openUserLogin } from "@/utils/modal";
+import { reportUnlockProbe } from "@/utils/probeReport";
+import {
+  classifyUnlockError,
+  classifyUnlockFailure,
+  type ProbeFailCategory,
+  type ProbeSource,
+} from "@/utils/probeSampling";
 import { sanitizeUrl } from "@/utils/sanitize";
 import { isAudiobookSong } from "@/utils/songPlatform";
 import { getPlatformLabel, getUnlockPriority } from "@/utils/unlockPriority";
@@ -93,6 +100,20 @@ const MISSING_SONG_NAME_REASON = "缺少歌名，无法检索播放链接";
 
 /** 未启用任何换源服务时的拒绝原因（用户可读，不罗列内部音源名） */
 const NO_UNLOCK_SERVER_REASON = "未开启换源功能，无法获取播放链接";
+
+/**
+ * 换源服务 → 可用性上报的源标识
+ *
+ * 上报只覆盖换源解锁链上的五个站外源；官方直链（各平台自身的播放地址）
+ * 不上报 —— 它的成败属于平台侧状态，不代表音源可用性。
+ */
+const PROBE_SOURCE_BY_SERVER: Record<SongUnlockServer, ProbeSource> = {
+  [SongUnlockServer.NETEASE]: "netease",
+  [SongUnlockServer.BODIAN]: "bodian",
+  [SongUnlockServer.KUWO]: "kuwo",
+  [SongUnlockServer.MIGU]: "migu",
+  [SongUnlockServer.CHANGQING]: "changqing",
+};
 
 /**
  * 把换源链的异常翻译成用户可读的原因
@@ -235,6 +256,32 @@ class SongManager {
     };
     return nameMap[server] || server;
   }
+
+  /**
+   * 匿名上报换源结果
+   *
+   * 只上报「源 / 成败 / 耗时 / 失败类别」四个字段，不含歌名与任何身份信息；
+   * 用户关闭「匿名上报音源可用性」后完全不上报。
+   * @param server 换源服务标识
+   * @param success 本次取链是否成功
+   * @param durationMs 本次取链耗时（毫秒）
+   * @param failCategory 失败类别（成功时忽略）
+   */
+  private reportSourceProbe = (
+    server: SongUnlockServer,
+    success: boolean,
+    durationMs: number,
+    failCategory: ProbeFailCategory = "none",
+  ): void => {
+    const settingStore = useSettingStore();
+    if (!settingStore.anonymousProbeReport) return;
+    reportUnlockProbe({
+      source: PROBE_SOURCE_BY_SERVER[server],
+      success,
+      durationMs,
+      failCategory: success ? "none" : failCategory,
+    });
+  };
 
   /**
    * Web 端 URL 统一处理：通过代理转发
@@ -572,6 +619,7 @@ class SongManager {
     const failures: string[] = [];
     for (const server of sortedServers) {
       const sourceName = this.getUnlockSourceName(server);
+      const startedAt = Date.now();
       try {
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
         const result = await unlockSongUrl(
@@ -585,6 +633,7 @@ class SongManager {
           platform,
           song.platformId,
         );
+        const durationMs = Date.now() - startedAt;
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {
           ...result,
           url: sanitizeUrl(result.url),
@@ -593,6 +642,7 @@ class SongManager {
         // 检查是否成功
         if (result.code === 200 && result.url && result.url.trim() !== "") {
           const originalUrl = result.url.trim();
+          this.reportSourceProbe(server, true, durationMs);
 
           // Web 端：统一通过代理转发（与 Electron 端逻辑对齐）
           // Electron 端：直接使用原始 URL（MPV 不受浏览器限制）
@@ -630,10 +680,18 @@ class SongManager {
           };
         }
         failures.push(`${sourceName}：${result.reason || "未找到可用链接"}`);
+        this.reportSourceProbe(
+          server,
+          false,
+          durationMs,
+          classifyUnlockFailure(result.reason),
+        );
         console.warn(`⚠️ [${songId}] ${sourceName} 返回失败，继续尝试下一个服务...`);
       } catch (error) {
         // 单个源失败只记失败，继续尝试下一个服务
+        const durationMs = Date.now() - startedAt;
         failures.push(`${sourceName}：${describeUnlockError(error)}`);
+        this.reportSourceProbe(server, false, durationMs, classifyUnlockError(error));
         console.error(`❌ [${songId}] ${sourceName} 请求失败:`, error);
       }
     }
