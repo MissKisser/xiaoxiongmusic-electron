@@ -450,6 +450,18 @@ export interface SettingState {
     visible: boolean;
     order: number;
   }>;
+  /**
+   * 第三方平台首页栏目顺序和显示配置
+   *
+   * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单与热搜词），
+   * 故分开配置：网易云读 `homePageSections`，第三方平台读本项。
+   */
+  platformHomePageSections: Array<{
+    key: "square" | "hot";
+    name: string;
+    visible: boolean;
+    order: number;
+  }>;
   /** 用户协议版本 */
   userAgreementVersion: string;
   /** 自定义协议注册 **/
@@ -756,6 +768,10 @@ export const useSettingStore = defineStore("setting", {
       { key: "video", name: "推荐 MV", visible: true, order: 3 },
       { key: "radio", name: "推荐播客", visible: true, order: 4 },
       { key: "album", name: "新碟上架", visible: true, order: 5 },
+    ],
+    platformHomePageSections: [
+      { key: "square", name: "精选歌单", visible: true, order: 0 },
+      { key: "hot", name: "热搜词", visible: true, order: 1 },
     ],
     userAgreementVersion: "",
     registryProtocol: {

@@ -1,7 +1,7 @@
 /**
  * KG 模块注册表
  *
- * 平台数据面：登录、歌单读写、搜索、歌词、评论、播放地址、专辑、歌手、热门歌手、歌单详情、歌单广场、排行榜、刷歌推荐流、听书。
+ * 平台数据面：登录、歌单读写、搜索、歌词、评论、播放地址、专辑、歌手、热门歌手、歌单详情、歌单广场、排行榜、刷歌推荐流、每日推荐、听书。
  */
 
 import type { KGModule } from "../core/types";
@@ -28,6 +28,7 @@ import { playlist_square } from "./playlist_square";
 import { search } from "./search";
 import { song_url } from "./song_url";
 import { songfm } from "./songfm";
+import { dailyRecommend } from "./daily_recommend";
 
 export const modules: Record<string, KGModule> = {
   login_qr_key: loginQrKey,
@@ -56,4 +57,5 @@ export const modules: Record<string, KGModule> = {
   playlist_square,
   leaderboard_list,
   leaderboard_detail,
+  "daily/recommend": dailyRecommend,
 };

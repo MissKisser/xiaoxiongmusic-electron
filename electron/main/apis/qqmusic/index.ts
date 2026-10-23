@@ -37,6 +37,7 @@ import { leaderboard, leaderboard_detail, leaderboard_list } from "./modules/lea
 import { song_info } from "./modules/song_info";
 import { song_list } from "./modules/song_list";
 import { songfm } from "./modules/songfm";
+import { dailyRecommend } from "./modules/daily_recommend";
 import { album } from "./modules/album";
 import { artist } from "./modules/artist";
 import type { QMParams } from "./core/types";
@@ -109,6 +110,7 @@ const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
   songfm,
   album,
   artist,
+  "daily/recommend": dailyRecommend,
 };
 
 export const clearQQMusicCache = (): void => {

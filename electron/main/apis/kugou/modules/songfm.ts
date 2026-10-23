@@ -255,6 +255,8 @@ const normalizeFeedSong = (raw: RawEntry): RawEntry | null => {
 /**
  * 归一化补池曲目（扁平口径）
  *
+ * 每日推荐模块（`daily_recommend.ts`）的曲目同属扁平口径，复用本函数归一化。
+ *
  * 时长口径：上游 `time_length` 是**秒**，对外 `duration` 换算成毫秒、`interval` 保留秒。
  * 付费判据取基档授权位 `privilege`（`0` / `8` 可免费播），
  * 试听判据取 `trans_param.hash_offset.end_ms`（毫秒）。
@@ -262,7 +264,7 @@ const normalizeFeedSong = (raw: RawEntry): RawEntry | null => {
  * @param source - 来源标注
  * @returns 归一化后的曲目，无有效 hash 时返回 null
  */
-const normalizePoolSong = (raw: RawEntry, source: string): RawEntry | null => {
+export const normalizePoolSong = (raw: RawEntry, source: string): RawEntry | null => {
   const entry = raw || {};
   const trans = entry.trans_param || {};
   const hash = String(entry.hash_128 || entry.hash || "");

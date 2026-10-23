@@ -14,7 +14,7 @@
     </n-card>
     <div ref="sortableRef" class="sortable-list">
       <n-card
-        v-for="item in settingStore.homePageSections"
+        v-for="item in sections"
         :key="item.key"
         :content-style="{
           display: 'flex',
@@ -33,31 +33,79 @@
 </template>
 
 <script setup lang="ts">
-import { useSettingStore } from "@/stores";
+import { usePlatformStore, useSettingStore } from "@/stores";
 import { useSortable, type UseSortableOptions } from "@vueuse/integrations/useSortable";
 import SvgIcon from "@/components/Global/SvgIcon.vue";
 
 const settingStore = useSettingStore();
+const platformStore = usePlatformStore();
 
 const sortableRef = ref<HTMLElement | null>(null);
 
+/**
+ * 当前平台的首页栏目列表
+ *
+ * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单与热搜词），
+ * 两批配置分开存放，按当前平台取用。
+ */
+const sections = computed(() =>
+  platformStore.currentPlatform === "netease"
+    ? settingStore.homePageSections
+    : settingStore.platformHomePageSections,
+);
+
+/** 排序实例的停止函数（切换平台后需按新列表重建） */
+let stopSortable: (() => void) | undefined;
+
+/** 首页栏目条目（两个平台的栏目表结构一致） */
+type HomeSectionItem = {
+  key: string;
+  name: string;
+  visible: boolean;
+  order: number;
+};
+
 // 更新排序值
 const updateSortOrder = () => {
-  settingStore.homePageSections.forEach((item, index) => {
+  sections.value.forEach((item, index) => {
     item.order = index;
   });
 };
 
-// 拖拽（sortablejs 类型漂移导致选项字面量校验失败，运行时不受影响）
-useSortable(sortableRef, settingStore.homePageSections, {
-  animation: 150,
-  handle: ".n-icon",
-  onEnd: updateSortOrder,
-} as UseSortableOptions);
+/**
+ * 按当前平台的栏目列表重建排序实例
+ */
+const setupSortable = () => {
+  stopSortable?.();
+  const list = (
+    platformStore.currentPlatform === "netease"
+      ? settingStore.homePageSections
+      : settingStore.platformHomePageSections
+  ) as HomeSectionItem[];
+  stopSortable = useSortable(sortableRef, list, {
+    animation: 150,
+    handle: ".n-icon",
+    onEnd: updateSortOrder,
+  } as UseSortableOptions).stop;
+};
+
+// 切换平台后按新列表重建排序
+watch(
+  () => platformStore.currentPlatform,
+  () => {
+    updateSortOrder();
+    setupSortable();
+  },
+);
 
 onMounted(() => {
   // 初始化排序值
   updateSortOrder();
+  setupSortable();
+});
+
+onUnmounted(() => {
+  stopSortable?.();
 });
 </script>
 
