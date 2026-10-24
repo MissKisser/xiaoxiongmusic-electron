@@ -5,6 +5,10 @@
  * 1. 候选列表取两套酷我索引并集后按「歌名 + 歌手 + 时长」三重校验排序，不再盲取 rank0；
  * 2. 直链先按「声明时长 × 码率」校验文件体积，拦截残缺文件。
  * 波点自带的「免广告」请求属于该换源链路的一部分，保留。
+ *
+ * 健壮性：整条换源挂熔断器（检索层与取链层共用），
+ * 连续出现上游侧故障达到阈值即熔断，熔断期内零上游请求、直接快速拒绝；
+ * 请求侧错误（4xx、参数错误、签名过期）与逐曲拒绝（歌曲已下线）不计入熔断计数。
  */
 import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
@@ -24,12 +28,45 @@ import {
 import { searchKuwoCandidates } from "./kuwo-search";
 import { probeContentLength } from "./audio-length";
 import { sanitizeUrl } from "./sanitize";
+import { CircuitBreaker, extractHttpStatus, isUpstreamFault } from "./resilience";
 
 /** 波点直链码率（kbps） */
 const BODIAN_BITRATE_KBPS = 320;
 
 /** 单次解锁最多尝试的候选数 */
 const MAX_CANDIDATE_TRY = 3;
+
+/** 整条换源连续失败多少次后熔断 */
+const FAILURE_THRESHOLD = 3;
+
+/** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
+const BREAK_DURATION_MS = 10 * 60 * 1000;
+
+/** 波点取链的成功业务码 */
+const SUCCESS_CODE = 200;
+
+/**
+ * 波点逐曲拒绝的业务码
+ *
+ * 该曲在波点侧已下线，属逐曲拒绝而非源故障，不计入熔断计数。
+ */
+const PER_SONG_REJECT_CODES = new Set([20012]);
+
+/**
+ * 波点请求侧的业务码
+ *
+ * 参数错误（-10）、参数类型错误（-1，HTTP 400）与请求过期（435，签名或时间戳不合法）
+ * 都是我方请求本身的问题，不计入熔断计数。
+ */
+const REQUEST_SIDE_CODES = new Set([-10, -1, 435]);
+
+/** 波点源熔断器：检索层与取链层共用 */
+const sourceBreaker = new CircuitBreaker({
+  name: "波点",
+  failureThreshold: FAILURE_THRESHOLD,
+  openDurationMs: BREAK_DURATION_MS,
+  onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
+});
 
 /**
  * 生成随机设备 ID
@@ -114,28 +151,128 @@ const sendAdFreeRequest = () => {
 };
 
 /**
+ * 判断传输层异常是否属于波点的上游侧故障
+ *
+ * 波点用 HTTP 4xx 表达「请求不被接受」（如 musicId 类型不对），
+ * 这类响应体里同样带业务码，直接按通用规则会被误判成源故障，
+ * 因此这里先按 HTTP 状态码判定：5xx 计入上游故障，4xx 属请求侧不计入；
+ * 没有 HTTP 状态码时（连接异常 / 超时 / DNS 失败）回落到通用上游故障判定。
+ * @param error 异常对象
+ * @returns 是否为上游侧故障
+ */
+const isBodianTransportFault = (error: unknown): boolean => {
+  const status = extractHttpStatus(error);
+  if (status > 0) return status >= 500;
+  return isUpstreamFault(error);
+};
+
+/**
+ * 读取波点取链响应里的业务码
+ * @param data 响应体
+ * @returns 业务码；响应体不是预期结构时返回 null
+ */
+const readBodianCode = (data: unknown): number | null => {
+  if (!data || typeof data !== "object") return null;
+  const raw = (data as { code?: unknown }).code;
+  const code = Number(raw);
+  return Number.isFinite(code) ? code : null;
+};
+
+/**
+ * 判断波点的业务码是否属于上游侧故障
+ *
+ * 口径：
+ * - 成功码（200）：不是故障；
+ * - 逐曲拒绝码（歌曲已下线）：该曲在此源无资源，不计入；
+ * - 请求侧码（参数错误、请求过期）：我方请求的问题，不计入；
+ * - 其余业务码：上游没能给出可用资源，计入。
+ * @param code 波点业务码
+ * @returns 是否计入熔断故障计数
+ */
+const isBodianBusinessFault = (code: number): boolean => {
+  if (code === SUCCESS_CODE) return false;
+  if (PER_SONG_REJECT_CODES.has(code)) return false;
+  if (REQUEST_SIDE_CODES.has(code)) return false;
+  return true;
+};
+
+/**
  * 获取波点音乐歌曲直链
  * @param target 目标歌曲信息（歌名 / 歌手 / 可选时长），由路由层按请求参数构造
+ * @param breaker 熔断器；缺省使用模块级实例（测试可注入短熔断窗口的实例）
  * @returns 歌曲直链结果
  */
-const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
+const getBodianSongUrl = async (
+  target: MatchTarget,
+  breaker: CircuitBreaker = sourceBreaker,
+): Promise<SongUrlResult> => {
   try {
     if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
     if (!target.artist.trim()) return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
-    const candidates = await searchKuwoCandidates(target.title, target.artist, (message) =>
+    if (!breaker.canRequest()) {
+      serverLog.warn(
+        `🔌 波点处于熔断状态，跳过本次换源（剩余 ${Math.ceil(
+          breaker.remainingOpenMs() / 1000,
+        )} 秒）`,
+      );
+      return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+    }
+    const search = await searchKuwoCandidates(target.title, target.artist, (message) =>
       serverLog.warn(`⚠️ ${message}`),
     );
-    if (!candidates.length) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
-    const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
-    if (!ranked.length) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    if (search.upstreamFailed) {
+      breaker.recordFailure();
+      return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+    }
+    if (!search.candidates.length) {
+      breaker.recordSuccess();
+      return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
+    }
+    const ranked = rankCandidates(search.candidates, target).filter((detail) => detail.passed);
+    if (!ranked.length) {
+      breaker.recordSuccess();
+      return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    }
     const headers = buildHeaders();
     await sendAdFreeRequest();
+    let upstreamFault = false;
     for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
       let audioUrl = `http://bd-api.kuwo.cn/api/play/music/v2/audioUrl?&br=${"320kmp3"}&musicId=${detail.candidate.id}`;
       audioUrl = generateSign(audioUrl);
-      const result = await axios.get(audioUrl, { headers, timeout: 10000 });
-      if (typeof result.data !== "object" || !result.data?.data?.audioUrl) continue;
-      const url = result.data.data.audioUrl as string;
+      let responseData: unknown = null;
+      try {
+        const response = await axios.get(audioUrl, { headers, timeout: 10000 });
+        responseData = response.data;
+      } catch (error) {
+        upstreamFault = upstreamFault || isBodianTransportFault(error);
+        serverLog.warn(`⚠️ 波点取链失败（${detail.candidate.title}）：${String(error)}`);
+        // 传输层故障说明源整体不可达，继续试其它候选只会白等超时，直接放弃本源
+        if (upstreamFault) break;
+        continue;
+      }
+      const code = readBodianCode(responseData);
+      if (code === null) {
+        // 响应体没有业务码：上游返回的不是预期结构，属上游侧异常
+        upstreamFault = true;
+        serverLog.warn(`⚠️ 波点取链响应异常（${detail.candidate.title}）：缺少业务码`);
+        continue;
+      }
+      if (isBodianBusinessFault(code)) {
+        upstreamFault = true;
+        serverLog.warn(
+          `⚠️ 波点取链业务错误（${detail.candidate.title}）：code=${code} ${
+            (responseData as { msg?: unknown })?.msg ?? ""
+          }`,
+        );
+        continue;
+      }
+      const audio = (responseData as { data?: { audioUrl?: string } })?.data;
+      if (!audio?.audioUrl) {
+        // 业务码成功但没给直链：该曲在此源没有可用资源，属逐曲拒绝
+        serverLog.warn(`⚠️ 波点未取到直链（${detail.candidate.title}）：上游未返回地址`);
+        continue;
+      }
+      const url = audio.audioUrl as string;
       const length = await probeContentLength(url, buildProbeHeaders());
       const check = isPlausibleAudioLength(
         length,
@@ -151,11 +288,16 @@ const getBodianSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => 
         serverLog.warn(`⚠️ Bodian 直链体积未验证 (${detail.candidate.title}): ${check.reason}`);
       }
       serverLog.log("🔗 BodianSong URL:", sanitizeUrl(url));
+      breaker.recordSuccess();
       return { code: 200, url, lengthVerified: check.verified };
     }
+    if (upstreamFault) breaker.recordFailure();
+    else breaker.recordSuccess();
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get BodianSong URL Error:", error);
+    if (isBodianTransportFault(error)) breaker.recordFailure();
+    else breaker.recordSuccess();
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };

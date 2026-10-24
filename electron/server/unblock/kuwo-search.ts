@@ -14,11 +14,15 @@
  * 波点与酷我共用这一个候选池（两源实测候选池 100% 相同，差异只在取链环节），
  * 因此检索结果按短时效缓存复用：换源链里两个源连着尝试时，
  * 只有第一个源发起检索，第二个源直接复用缓存 —— 一次检索、两条取链。
+ *
+ * 故障归属：检索接口没有业务错误码载体，失败形态只有传输层故障（5xx / 超时 / 连接异常）
+ * 与请求侧问题（4xx）两类。这里把「整池为空且全部子请求都因传输层故障失败」标记为上游故障，
+ * 交由调用方计入熔断计数；上游仍有响应（哪怕没搜到歌）属业务拒绝，不计入。
  */
 import axios from "axios";
 import { serverLog } from "../../main/logger";
 import type { MatchCandidate } from "./match";
-import { TTLCache } from "./resilience";
+import { TTLCache, extractHttpStatus, isUpstreamFault } from "./resilience";
 
 /** 候选池缓存时长（毫秒）：够覆盖同一首歌的连续换源尝试 */
 const POOL_CACHE_TTL_MS = 60000;
@@ -74,15 +78,29 @@ const parseSearchResponse = (data: any): any[] => {
 };
 
 /**
+ * 判断检索子请求的失败是否属于上游侧故障
+ *
+ * 口径与长青一致：HTTP 5xx 计入上游故障，HTTP 4xx 属请求侧不计入；
+ * 没有 HTTP 状态码时（连接异常 / 超时 / DNS 失败）回落到通用上游故障判定。
+ * @param error 子请求异常
+ * @returns 是否为上游侧故障
+ */
+const isSearchUpstreamFault = (error: unknown): boolean => {
+  const status = extractHttpStatus(error);
+  if (status > 0) return status >= 500;
+  return isUpstreamFault(error);
+};
+
+/**
  * 执行一轮检索并合并去重
  * @param keywords 检索词列表
  * @param onError 子请求失败时的回调
- * @returns 去重合并后的候选列表
+ * @returns 去重合并后的候选列表与上游故障标记
  */
 const runSearch = async (
   keywords: string[],
   onError?: (message: string) => void,
-): Promise<KuwoCandidate[]> => {
+): Promise<{ candidates: KuwoCandidate[]; upstreamFailed: boolean }> => {
   const urls = keywords.flatMap((keyword) => [
     buildSearchUrl(keyword, true),
     buildSearchUrl(keyword, false),
@@ -98,8 +116,12 @@ const runSearch = async (
   );
   const merged: KuwoCandidate[] = [];
   const seen = new Set<string>();
+  let failed = 0;
+  let fault = false;
   settled.forEach((item, index) => {
     if (item.status !== "fulfilled") {
+      failed += 1;
+      if (isSearchUpstreamFault(item.reason)) fault = true;
       onError?.(`酷我检索子请求失败（${index + 1}/${urls.length}）：${String(item.reason)}`);
       return;
     }
@@ -117,7 +139,7 @@ const runSearch = async (
       });
     }
   });
-  return merged;
+  return { candidates: merged, upstreamFailed: failed === urls.length && fault };
 };
 
 /**
@@ -131,28 +153,34 @@ const runSearch = async (
  * @param title 歌名
  * @param artist 歌手，可为空
  * @param onError 子请求失败时的回调，用于记录日志
- * @returns 去重合并后的候选列表
+ * @returns 去重合并后的候选列表与上游故障标记
  */
 export const searchKuwoCandidates = async (
   title: string,
   artist: string,
   onError?: (message: string) => void,
-): Promise<KuwoCandidate[]> => {
+): Promise<{ candidates: KuwoCandidate[]; upstreamFailed: boolean }> => {
   // 键用 JSON 数组序列化，避免歌名与歌手的分界被同名内容撞掉
   const cacheKey = JSON.stringify([title, artist]);
   const cached = poolCache.get(cacheKey);
   if (cached) {
     serverLog.log(`♻️ 酷我系候选池命中缓存，跳过重复检索（${title}）`);
-    return cached;
+    return { candidates: cached, upstreamFailed: false };
   }
   const keywords = [artist ? `${title} ${artist}` : "", title].filter(Boolean);
-  const merged = await runSearch(keywords, onError);
-  if (merged.length) {
-    poolCache.set(cacheKey, merged);
-    return merged;
+  const first = await runSearch(keywords, onError);
+  if (first.candidates.length) {
+    poolCache.set(cacheKey, first.candidates);
+    return first;
   }
   onError?.("酷我检索整池为空，重试一次");
   const retried = await runSearch(keywords, onError);
-  if (retried.length) poolCache.set(cacheKey, retried);
-  return retried;
+  if (retried.candidates.length) {
+    poolCache.set(cacheKey, retried.candidates);
+    return { candidates: retried.candidates, upstreamFailed: false };
+  }
+  return {
+    candidates: retried.candidates,
+    upstreamFailed: first.upstreamFailed || retried.upstreamFailed,
+  };
 };

@@ -13,9 +13,17 @@
  * 检索结果不带时长字段，用各音质的字节数除以标称码率反推（取中位数，规避试听音质把时长拉偏）。
  *
  * 健壮性：
- * 1. 检索层挂熔断：连续失败到阈值即熔断，熔断期内零请求，避免对死源逐首空等；
+ * 1. 整条换源挂熔断器（检索层与取链层共用）：连续出现上游侧故障到阈值即熔断，
+ *    熔断期内零请求，避免对死源逐首空等；
  * 2. 取链层按有界退避重试，救回瞬时故障；
  * 3. 成功的关键词检索结果按短缓存复用，连续切歌回到同一首歌时不再重复打检索。
+ *
+ * 故障归属：咪咕用 HTTP 200 裹着业务码返回失败结论，
+ * 业务码语义按「谁该负责」划分：
+ * - 参数校验失败（299999）是我方参数问题，请求侧，不计入；
+ * - 歌曲下线（200000）、免登录态无播放权限（440000）是逐曲拒绝，不计入；
+ * - 其余业务失败码是上游没能给出可用资源，上游侧，计入。
+ * 传输层故障（5xx / 超时 / 连接异常）与响应体无法解析同样计入。
  *
  * 所有状态都是纯内存态：进程重启即重置，不落盘、不产生界面提示，只进日志。
  */
@@ -75,11 +83,29 @@ const MIGU_HEADERS: Record<string, string> = {
 const MIGU_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
-/** 检索层连续失败多少次后熔断 */
-const SEARCH_FAILURE_THRESHOLD = 3;
+/** 整条换源连续失败多少次后熔断 */
+const FAILURE_THRESHOLD = 3;
 
 /** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
-const SEARCH_BREAK_DURATION_MS = 10 * 60 * 1000;
+const BREAK_DURATION_MS = 10 * 60 * 1000;
+
+/** 咪咕检索与取链的成功业务码 */
+const SUCCESS_CODE = "000000";
+
+/**
+ * 咪咕逐曲拒绝的业务码
+ *
+ * 该曲在咪咕侧没有可播放资源（歌曲已下线、免登录态无播放权限），
+ * 属逐曲拒绝而非源故障，不计入熔断计数。
+ */
+const PER_SONG_REJECT_CODES = new Set(["200000", "440000"]);
+
+/**
+ * 咪咕请求侧的业务码
+ *
+ * 参数校验失败（检索词为空、音质档位非法等）是我方请求本身的问题，不计入熔断计数。
+ */
+const REQUEST_SIDE_CODES = new Set(["299999"]);
 
 /** 关键词检索结果缓存时长（毫秒） */
 const SEARCH_CACHE_TTL_MS = 60000;
@@ -102,11 +128,11 @@ const MAX_CANDIDATE_TRY = 3;
 /** 单个候选最多尝试的音质档位数 */
 const MAX_FORMAT_TRY = 3;
 
-/** 咪咕检索层熔断器 */
-const searchBreaker = new CircuitBreaker({
-  name: "咪咕检索",
-  failureThreshold: SEARCH_FAILURE_THRESHOLD,
-  openDurationMs: SEARCH_BREAK_DURATION_MS,
+/** 咪咕源熔断器：检索层与取链层共用 */
+const sourceBreaker = new CircuitBreaker({
+  name: "咪咕",
+  failureThreshold: FAILURE_THRESHOLD,
+  openDurationMs: BREAK_DURATION_MS,
   onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
 });
 
@@ -208,17 +234,34 @@ const estimateDuration = (formats: MiguFormat[]): number | undefined => {
 };
 
 /**
+ * 判断咪咕的业务码是否属于上游侧故障
+ *
+ * 口径：
+ * - 逐曲拒绝码（歌曲已下线、免登录态无播放权限）：该曲在此源无资源，不计入；
+ * - 请求侧码（参数校验失败）：我方参数问题，不计入；
+ * - 其余业务码（含缺失业务码的异常响应）：上游没能给出可用资源，计入。
+ * @param code 咪咕业务码
+ * @returns 是否计入熔断故障计数
+ */
+const isMiguBusinessFault = (code: string): boolean => {
+  if (PER_SONG_REJECT_CODES.has(code)) return false;
+  if (REQUEST_SIDE_CODES.has(code)) return false;
+  return true;
+};
+
+/**
  * 解析咪咕检索响应
  * @param data 原始响应字节
- * @returns 归一化后的候选列表
+ * @returns 业务码与归一化后的候选列表
  */
-const parseSearchResponse = (data: Buffer): MiguCandidate[] => {
+const parseSearchResponse = (data: Buffer): { code: string; candidates: MiguCandidate[] } => {
   let payload: any = null;
   try {
     payload = JSON.parse(decodeMiguResponse(data).toString("utf8"));
   } catch {
-    return [];
+    return { code: "", candidates: [] };
   }
+  const code = String(payload?.code ?? "");
   const list: any[] = payload?.songResultData?.result ?? [];
   const candidates: MiguCandidate[] = [];
   for (const item of list) {
@@ -243,7 +286,7 @@ const parseSearchResponse = (data: Buffer): MiguCandidate[] => {
       formats,
     });
   }
-  return candidates;
+  return { code, candidates };
 };
 
 /**
@@ -254,20 +297,12 @@ const parseSearchResponse = (data: Buffer): MiguCandidate[] => {
  *
  * @param title 歌名
  * @param artist 歌手，可为空
- * @returns 候选列表与「上游是否完全不可用」标记
+ * @returns 候选列表、整轮检索是否失败与其中的上游故障标记
  */
 const searchCandidates = async (
   title: string,
   artist: string,
-): Promise<{ candidates: MiguCandidate[]; upstreamFailed: boolean }> => {
-  if (!searchBreaker.canRequest()) {
-    serverLog.warn(
-      `🔌 咪咕检索处于熔断状态，跳过本次检索（剩余 ${Math.ceil(
-        searchBreaker.remainingOpenMs() / 1000,
-      )} 秒）`,
-    );
-    return { candidates: [], upstreamFailed: true };
-  }
+): Promise<{ candidates: MiguCandidate[]; upstreamFailed: boolean; upstreamFault: boolean }> => {
   const keywords = artist ? [`${title}-${artist}`, `${title} ${artist}`] : [title];
   const merged: MiguCandidate[] = [];
   const seen = new Set<string>();
@@ -313,7 +348,15 @@ const searchCandidates = async (
         if (response.status >= 500) fault = true;
         continue;
       }
-      const candidates = parseSearchResponse(Buffer.from(response.data));
+      const parsed = parseSearchResponse(Buffer.from(response.data));
+      if (parsed.code && parsed.code !== SUCCESS_CODE) {
+        // 上游以 HTTP 200 返回业务失败：按错误码语义区分归因
+        failed += 1;
+        if (isMiguBusinessFault(parsed.code)) fault = true;
+        serverLog.warn(`⚠️ Migu 检索业务错误（关键词：${keyword}）：code=${parsed.code}`);
+        continue;
+      }
+      const candidates = parsed.candidates;
       if (candidates.length) searchCache.set(cacheKey, candidates);
       for (const candidate of candidates) {
         if (seen.has(candidate.id)) continue;
@@ -327,11 +370,9 @@ const searchCandidates = async (
     }
   }
   const upstreamFailed = failed === keywords.length;
-  // 整轮检索都因上游故障（5xx / 超时 / 连接失败）而失败时计入熔断计数；
+  // 整轮检索都因上游故障（5xx / 超时 / 连接失败 / 上游责任业务码）而失败时计入熔断计数；
   // 只要上游还有响应就认为源仍可达，清零失败计数。
-  if (upstreamFailed && fault) searchBreaker.recordFailure();
-  else searchBreaker.recordSuccess();
-  return { candidates: merged, upstreamFailed };
+  return { candidates: merged, upstreamFailed, upstreamFault: upstreamFailed && fault };
 };
 
 /**
@@ -339,12 +380,19 @@ const searchCandidates = async (
  *
  * 遍历候选的音质：免费档优先（PQ 128k → LQ 64k），其余按字节数降序；
  * 取链成功时一并带回上游给出的权威时长。
+ *
+ * 故障归属：HTTP 5xx、超时、连接异常与响应体无法解析属上游侧故障；
+ * HTTP 4xx、逐曲拒绝码（歌曲下线 / 无播放权限）、请求侧码（参数校验失败）
+ * 与「成功码但没有直链」（该档位无资源）都不计入。
  * @param candidate 咪咕候选
- * @returns 直链、权威时长与该档码率；失败返回 null
+ * @returns 直链、权威时长与该档码率；失败时 source 为 null，并给出上游故障标记
  */
 const fetchMiguUrl = async (
   candidate: MiguCandidate,
-): Promise<{ url: string; duration?: number; bitrate: number } | null> => {
+): Promise<{
+  source: { url: string; duration?: number; bitrate: number } | null;
+  fault: boolean;
+}> => {
   const rank = (format: MiguFormat) =>
     format.formatType === "PQ" ? 0 : format.formatType === "LQ" ? 1 : 2;
   const formats = [...candidate.formats].sort((a, b) => {
@@ -353,6 +401,7 @@ const fetchMiguUrl = async (
     return b.size - a.size;
   });
   const notes: string[] = [];
+  let fault = false;
   for (const format of formats.slice(0, MAX_FORMAT_TRY)) {
     const params = {
       contentId: candidate.id,
@@ -383,6 +432,7 @@ const fetchMiguUrl = async (
             continue;
           }
           notes.push(`${format.formatType}:HTTP${response.status}`);
+          fault = true;
           break;
         }
         if (response.status !== 200) {
@@ -394,27 +444,38 @@ const fetchMiguUrl = async (
           payload = JSON.parse(decodeMiguResponse(Buffer.from(response.data)).toString("utf8"));
         } catch {
           notes.push(`${format.formatType}:非JSON`);
+          fault = true;
           break;
         }
         const code = String(payload?.code ?? "");
         const url = String(payload?.data?.url ?? "");
-        if (code !== "000000" || !url.startsWith("http")) {
-          // 440000 表示免登录态无播放权限（站内非免费曲），属干净拒绝，不重试
-          notes.push(`${format.formatType}:${code || "无url"}`);
-          break;
+        if (code === SUCCESS_CODE) {
+          if (!url.startsWith("http")) {
+            // 成功码但没有直链：该曲在这个档位没有资源，属逐曲拒绝
+            notes.push(`${format.formatType}:无直链`);
+            break;
+          }
+          const duration = Math.round(Number(payload?.data?.song?.duration ?? 0));
+          return {
+            source: {
+              url,
+              duration: duration > 0 ? duration : undefined,
+              bitrate: MIGU_TONE_KBPS[format.formatType] ?? 128,
+            },
+            fault,
+          };
         }
-        const duration = Math.round(Number(payload?.data?.song?.duration ?? 0));
-        return {
-          url,
-          duration: duration > 0 ? duration : undefined,
-          bitrate: MIGU_TONE_KBPS[format.formatType] ?? 128,
-        };
+        // 440000 表示免登录态无播放权限（站内非免费曲），属干净拒绝，不重试
+        notes.push(`${format.formatType}:${code || "无业务码"}`);
+        if (isMiguBusinessFault(code)) fault = true;
+        break;
       } catch (error) {
         if (attempt < FETCH_RETRY_LIMIT) {
           await sleep(FETCH_BACKOFF_MS[attempt]);
           continue;
         }
         notes.push(`${format.formatType}:${String(error)}`);
+        fault = true;
         break;
       }
     }
@@ -422,29 +483,52 @@ const fetchMiguUrl = async (
   serverLog.warn(
     `⚠️ Migu 未取到播放地址（${candidate.title} / ${candidate.artist}）：${notes.join(" / ")}`,
   );
-  return null;
+  return { source: null, fault };
 };
 
 /**
  * 获取咪咕歌曲直链
  * @param target 目标歌曲信息（歌名 / 歌手 / 可选时长），由路由层按请求参数构造
+ * @param breaker 熔断器；缺省使用模块级实例（测试可注入短熔断窗口的实例）
  * @returns 歌曲直链结果
  */
-const getMiguSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
+const getMiguSongUrl = async (
+  target: MatchTarget,
+  breaker: CircuitBreaker = sourceBreaker,
+): Promise<SongUrlResult> => {
   try {
     if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
     if (!target.artist.trim()) return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
-    const { candidates, upstreamFailed } = await searchCandidates(target.title, target.artist);
-    if (upstreamFailed) {
+    if (!breaker.canRequest()) {
+      serverLog.warn(
+        `🔌 咪咕处于熔断状态，跳过本次换源（剩余 ${Math.ceil(
+          breaker.remainingOpenMs() / 1000,
+        )} 秒）`,
+      );
       return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
     }
-    if (!candidates.length) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
-    const ranked = rankCandidates(candidates, target).filter((detail) => detail.passed);
-    if (!ranked.length) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    const search = await searchCandidates(target.title, target.artist);
+    if (search.upstreamFailed) {
+      if (search.upstreamFault) breaker.recordFailure();
+      else breaker.recordSuccess();
+      return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+    }
+    if (!search.candidates.length) {
+      breaker.recordSuccess();
+      return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
+    }
+    const ranked = rankCandidates(search.candidates, target).filter((detail) => detail.passed);
+    if (!ranked.length) {
+      breaker.recordSuccess();
+      return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    }
+    let upstreamFault = false;
     for (const detail of ranked.slice(0, MAX_CANDIDATE_TRY)) {
       const candidate = detail.candidate as MiguCandidate;
-      const source = await fetchMiguUrl(candidate);
-      if (!source) continue;
+      const outcome = await fetchMiguUrl(candidate);
+      upstreamFault = upstreamFault || outcome.fault;
+      if (!outcome.source) continue;
+      const source = outcome.source;
       // 上游给出的整曲时长优先；与请求时长偏差超容差即判为错版，拒绝交付
       const realDuration = source.duration ?? candidate.duration;
       if (realDuration && target.duration) {
@@ -466,11 +550,16 @@ const getMiguSongUrl = async (target: MatchTarget): Promise<SongUrlResult> => {
         serverLog.warn(`⚠️ Migu 直链体积未验证 (${candidate.title}): ${check.reason}`);
       }
       serverLog.log("🔗 MiguSong URL:", sanitizeUrl(source.url));
+      breaker.recordSuccess();
       return { code: 200, url: source.url, lengthVerified: check.verified };
     }
+    if (upstreamFault) breaker.recordFailure();
+    else breaker.recordSuccess();
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get MiguSong URL Error:", error);
+    if (isUpstreamFault(error)) breaker.recordFailure();
+    else breaker.recordSuccess();
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };
