@@ -49,6 +49,26 @@ const modules: NativeModule[] = [
   // },
 ];
 
+/**
+ * 检查原生模块是否属于 pnpm workspace
+ *
+ * pnpm 对未匹配的过滤器只打印提示并以成功状态退出，
+ * 构建流程会在模块缺失时静默跳过，必须显式拦截。
+ * @param name 原生模块包名
+ * @returns 是否为 workspace 成员
+ */
+const isWorkspaceMember = (name: string): boolean => {
+  try {
+    const output = execSync(
+      `pnpm --filter ${name} exec node -e "process.stdout.write('WORKSPACE_MEMBER')"`,
+      { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return output.includes("WORKSPACE_MEMBER");
+  } catch {
+    return false;
+  }
+};
+
 try {
   const args = process.argv.slice(2);
   const isDev = args.includes("--dev");
@@ -57,6 +77,12 @@ try {
   for (const mod of modules) {
     if (mod.enabled === false) {
       continue;
+    }
+    if (!isWorkspaceMember(mod.name)) {
+      console.error(
+        `[BuildNative] 模块 ${mod.name} 不在 pnpm workspace 中，无法通过过滤器构建`,
+      );
+      process.exit(1);
     }
     execSync(`pnpm --filter ${mod.name} ${buildCommand}`, {
       stdio: "inherit",
