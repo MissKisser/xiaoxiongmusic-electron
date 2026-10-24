@@ -86,6 +86,29 @@ export const isRouteSupported = (platform: ApiPlatform, routeName: string): bool
 };
 
 /**
+ * 第三方平台首页区块的数据源支持
+ *
+ * 区块键的并集在 `src/stores/setting.ts` 的 `PLATFORM_HOME_SECTION_KEYS`，
+ * 这里声明各平台实际有数据源的区块子集：
+ * 没有数据源的区块在该平台下既不渲染，也不进配置面板。
+ */
+export const HOME_SECTION_SUPPORT: Record<Exclude<ApiPlatform, "netease">, readonly string[]> = {
+  qqmusic: ["square", "recommend", "singer", "album"],
+  kugou: ["square"],
+};
+
+/**
+ * 判断首页区块在指定平台下是否有数据源
+ * @param platform 音源平台
+ * @param key 首页区块键
+ * @returns 是否有数据源
+ */
+export const isHomeSectionSupported = (platform: ApiPlatform, key: string): boolean => {
+  if (platform === "netease") return true;
+  return (HOME_SECTION_SUPPORT[platform] ?? []).includes(key);
+};
+
+/**
  * 平台标签页
  */
 export interface PlatformTab {

@@ -38,6 +38,12 @@ import { song_info } from "./modules/song_info";
 import { song_list } from "./modules/song_list";
 import { songfm } from "./modules/songfm";
 import { dailyRecommend } from "./modules/daily_recommend";
+import {
+  homeAlbum,
+  homeRecommend,
+  homeSinger,
+  homeSquare,
+} from "./modules/home_recommend";
 import { album } from "./modules/album";
 import { artist } from "./modules/artist";
 import type { QMParams } from "./core/types";
@@ -79,6 +85,10 @@ const NON_CACHEABLE: ReadonlySet<string> = new Set([
   "leaderboard_list",
   "leaderboard_detail",
   "songfm",
+  "home/recommend",
+  "home/square",
+  "home/singer",
+  "home/album",
 ]);
 
 const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
@@ -111,6 +121,10 @@ const modules: Record<string, (params: QMParams) => Promise<unknown>> = {
   album,
   artist,
   "daily/recommend": dailyRecommend,
+  "home/recommend": homeRecommend,
+  "home/square": homeSquare,
+  "home/singer": homeSinger,
+  "home/album": homeAlbum,
 };
 
 export const clearQQMusicCache = (): void => {

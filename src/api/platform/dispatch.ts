@@ -54,10 +54,15 @@ import {
   toKgPlaylistEntry,
 } from "./kugou";
 import {
+  QQ_HOME_SQUARE_CATEGORIES,
   QQ_SEARCH_PAGE_LIMIT,
   qqAlbumDetail,
   qqArtistDetail,
   qqComment,
+  qqHomeAlbums,
+  qqHomeRecommend,
+  qqHomeSingers,
+  qqHomeSquare,
   qqHotSearch,
   qqLeaderboard,
   qqLeaderboardDetail,
@@ -1613,6 +1618,94 @@ export const dispatchSquarePlaylists = async (
     total: res.total,
     hasMore: res.hasMore && page * limit < res.total,
   };
+};
+
+/** 分派层首页区块条目结果 */
+export interface DispatchHomeResult {
+  /** 区块条目 */
+  items: CoverType[];
+  /** 条目总数 */
+  total: number;
+}
+
+/** 分派层首页区块歌手结果 */
+export interface DispatchHomeArtistsResult {
+  /** 歌手条目 */
+  artists: ArtistType[];
+  /** 歌手总数 */
+  total: number;
+}
+
+/**
+ * 读取当前平台首页「为你推荐」歌单
+ *
+ * 目前只有 QQ 音乐有该数据源（上游编辑推荐歌单），
+ * 其它平台没有对应端点时返回空列表，由页面层按能力表决定是否渲染该区块。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 歌单条目与总数
+ */
+export const dispatchHomeRecommend = async (
+  platform: ApiPlatform,
+  options: { limit?: number } = {},
+): Promise<DispatchHomeResult> => {
+  if (platform !== "qqmusic") return { items: [], total: 0 };
+  const list = await qqHomeRecommend(options.limit);
+  return { items: list.map(toCoverEntry), total: list.length };
+};
+
+/**
+ * 读取当前平台首页「精选歌单」的分类歌单
+ *
+ * 目前只有 QQ 音乐有分类歌单数据源（上游歌单广场），
+ * 其它平台没有对应端点时返回空列表。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 歌单条目与总数
+ */
+export const dispatchHomeSquare = async (
+  platform: ApiPlatform,
+  options: { category?: number; limit?: number } = {},
+): Promise<DispatchHomeResult> => {
+  if (platform !== "qqmusic") return { items: [], total: 0 };
+  const res = await qqHomeSquare(options.category ?? QQ_HOME_SQUARE_CATEGORIES[0].id, options.limit);
+  return { items: res.list.map(toCoverEntry), total: res.total };
+};
+
+/**
+ * 读取当前平台首页「歌手推荐」
+ *
+ * 目前只有 QQ 音乐有该数据源（上游歌手列表），
+ * 其它平台没有对应端点时返回空列表。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 歌手条目与总数
+ */
+export const dispatchHomeSingers = async (
+  platform: ApiPlatform,
+  options: { limit?: number } = {},
+): Promise<DispatchHomeArtistsResult> => {
+  if (platform !== "qqmusic") return { artists: [], total: 0 };
+  const list = await qqHomeSingers(options.limit);
+  return { artists: list.map(toArtistType), total: list.length };
+};
+
+/**
+ * 读取当前平台首页「新碟上架」
+ *
+ * 目前只有 QQ 音乐有该数据源（上游新碟列表），
+ * 其它平台没有对应端点时返回空列表。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 专辑条目与总数
+ */
+export const dispatchHomeAlbums = async (
+  platform: ApiPlatform,
+  options: { limit?: number } = {},
+): Promise<DispatchHomeResult> => {
+  if (platform !== "qqmusic") return { items: [], total: 0 };
+  const list = await qqHomeAlbums(options.limit);
+  return { items: list.map(toCoverEntry), total: list.length };
 };
 
 /**

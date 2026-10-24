@@ -1189,6 +1189,174 @@ export const qqPlaylistSquare = async (
   return { list, total: Number(res?.total ?? list.length) };
 };
 
+/** 主进程首页推荐模块的原生返回（歌单 / 专辑条目） */
+interface QqHomeCoverResponse {
+  code?: number;
+  total?: number;
+  list?: Array<{
+    id?: string;
+    name?: string;
+    cover?: string;
+    playCount?: number;
+    creatorName?: string;
+    createTime?: number;
+  }>;
+}
+
+/** 主进程首页推荐模块的原生返回（歌手条目） */
+interface QqHomeSingerResponse {
+  code?: number;
+  total?: number;
+  list?: Array<{
+    id?: string;
+    mid?: string;
+    name?: string;
+    cover?: string;
+  }>;
+}
+
+/** 主进程首页推荐模块的原生返回（专辑条目） */
+interface QqHomeAlbumResponse {
+  code?: number;
+  total?: number;
+  list?: Array<{
+    id?: string;
+    mid?: string;
+    name?: string;
+    artist?: string;
+    releaseTime?: string;
+    trackCount?: number;
+  }>;
+}
+
+/**
+ * QQ 音乐首页「精选歌单」的分类清单
+ *
+ * 分类 id 是上游歌单广场的分类号（`titleid`），
+ * 五组分类对应广场的五类官方标签。
+ */
+export const QQ_HOME_SQUARE_CATEGORIES = [
+  { id: 3317, name: "官方歌单" },
+  { id: 59, name: "经典歌单" },
+  { id: 71, name: "情感歌单" },
+  { id: 3056, name: "网络歌单" },
+  { id: 64, name: "KTV歌单" },
+] as const;
+
+/**
+ * 拼接歌手头像直链
+ *
+ * 上游给的是 150 像素的小图，卡片里按 300 像素的模板重拼，
+ * 歌手主键取不到时回落到上游直链。
+ * @param mid 歌手主键
+ * @param rawCover 上游头像直链
+ * @returns 头像直链
+ */
+const buildHomeSingerCover = (mid: string, rawCover: unknown): string =>
+  mid ? `${ARTIST_COVER_TEMPLATE}${mid}.jpg` : secureUrl(rawCover ?? "");
+
+/**
+ * 读取 QQ 音乐首页「为你推荐」歌单
+ *
+ * 走主进程 `home/recommend` 模块（上游编辑推荐歌单）。
+ * @param limit 取回的条数
+ * @returns 归一化后的封面条目
+ */
+export const qqHomeRecommend = async (limit?: number): Promise<PlatformCoverEntry[]> => {
+  const res = await platformRequest<QqHomeCoverResponse>(QQ_MUSIC, "home/recommend", { limit });
+  return (res?.list ?? []).map((item) => ({
+    id: item.id ?? "",
+    platformId: item.id ?? "",
+    name: item.name ?? "",
+    cover: secureUrl(item.cover ?? ""),
+    playCount: Number(item.playCount ?? 0),
+    creatorName: item.creatorName ?? "",
+    publishTime: toMillisTimestamp(item.createTime),
+    platform: QQ_MUSIC,
+  }));
+};
+
+/**
+ * 读取 QQ 音乐首页「精选歌单」的分类歌单
+ *
+ * 走主进程 `home/square` 模块（上游歌单广场）。
+ * @param category 分类号
+ * @param limit 取回的条数
+ * @returns 归一化后的封面条目与总数
+ */
+export const qqHomeSquare = async (
+  category: number,
+  limit?: number,
+): Promise<{ list: PlatformCoverEntry[]; total: number }> => {
+  const res = await platformRequest<QqHomeCoverResponse>(QQ_MUSIC, "home/square", {
+    category,
+    limit,
+  });
+  const list: PlatformCoverEntry[] = (res?.list ?? []).map((item) => ({
+    id: item.id ?? "",
+    platformId: item.id ?? "",
+    name: item.name ?? "",
+    cover: secureUrl(item.cover ?? ""),
+    playCount: Number(item.playCount ?? 0),
+    creatorName: item.creatorName ?? "",
+    publishTime: toMillisTimestamp(item.createTime),
+    platform: QQ_MUSIC,
+  }));
+  return { list, total: Number(res?.total ?? list.length) };
+};
+
+/**
+ * 读取 QQ 音乐首页「歌手推荐」
+ *
+ * 走主进程 `home/singer` 模块（上游歌手列表）。
+ * @param limit 取回的条数
+ * @returns 归一化后的歌手
+ */
+export const qqHomeSingers = async (limit?: number): Promise<PlatformArtistDetail[]> => {
+  const res = await platformRequest<QqHomeSingerResponse>(QQ_MUSIC, "home/singer", { limit });
+  return (res?.list ?? []).map((item) => {
+    const mid = item.mid ?? "";
+    const cover = buildHomeSingerCover(mid, item.cover);
+    return {
+      id: toNumericId(item.id, mid),
+      platformId: mid,
+      platform: QQ_MUSIC,
+      name: item.name ?? "",
+      cover,
+      coverSize: buildCoverSize(cover),
+      musicSize: 0,
+      albumSize: 0,
+      mvSize: 0,
+      fansSize: 0,
+      description: "",
+    };
+  });
+};
+
+/**
+ * 读取 QQ 音乐首页「新碟上架」
+ *
+ * 走主进程 `home/album` 模块（上游新碟列表），曲目数由主进程回查补齐。
+ * @param limit 取回的条数
+ * @returns 归一化后的封面条目
+ */
+export const qqHomeAlbums = async (limit?: number): Promise<PlatformCoverEntry[]> => {
+  const res = await platformRequest<QqHomeAlbumResponse>(QQ_MUSIC, "home/album", { limit });
+  return (res?.list ?? []).map((item) => {
+    const mid = item.mid ?? "";
+    return {
+      id: mid,
+      platformId: mid,
+      name: item.name ?? "",
+      cover: mid ? `${ALBUM_COVER_TEMPLATE}${mid}.jpg` : "",
+      count: Number(item.trackCount ?? 0),
+      creatorName: item.artist ?? "",
+      publishTime: toMillisDateTime(item.releaseTime),
+      platform: QQ_MUSIC,
+    };
+  });
+};
+
 /**
  * 归一化 QQ 搜索到的歌手条目（补齐平台维度）
  * @param artist QQ 原生歌手条目

@@ -18,11 +18,73 @@ import type { LyricPriority } from "@/types/lyric";
 /**
  * 第三方平台首页栏目键
  *
- * 唯一真源：第三方平台首页当前只有「精选歌单」一个栏目。
+ * 唯一真源：第三方平台首页的栏目清单。
  * 读取持久化配置时按本表过滤未知键 —— 旧版本残留的已下线栏目键
- * （如「热搜词」）既不参与渲染，也不进配置面板。
+ * （如「热搜词」）既不参与渲染，也不进配置面板；
+ * 同时按本表补齐缺失的栏目 —— 旧配置里只有「精选歌单」时，
+ * 新增栏目按默认项补进来，不影响旧用户升级后的首页。
  */
-export const PLATFORM_HOME_SECTION_KEYS = ["square"] as const;
+export const PLATFORM_HOME_SECTION_KEYS = ["square", "recommend", "singer", "album"] as const;
+
+/**
+ * 第三方平台首页栏目的默认项
+ *
+ * 缺失栏目按这里的默认值补齐；顺序即默认展示顺序。
+ */
+export const PLATFORM_HOME_SECTION_DEFAULTS: ReadonlyArray<{
+  key: (typeof PLATFORM_HOME_SECTION_KEYS)[number];
+  name: string;
+  order: number;
+}> = [
+  { key: "square", name: "精选歌单", order: 0 },
+  { key: "recommend", name: "为你推荐", order: 1 },
+  { key: "singer", name: "歌手推荐", order: 2 },
+  { key: "album", name: "新碟上架", order: 3 },
+];
+
+/** 第三方平台首页栏目条目 */
+export type PlatformHomeSection = {
+  key: (typeof PLATFORM_HOME_SECTION_KEYS)[number];
+  name: string;
+  visible: boolean;
+  order: number;
+};
+
+/**
+ * 规整第三方平台首页栏目列表
+ *
+ * 过滤已下线的未知键，并按默认项补齐缺失的栏目（默认可见、顺序接在末尾）。
+ * 已存在的条目保持原对象引用，配置面板的排序与显隐改动能直接落回状态。
+ * @param sections 持久化或内存中的栏目列表
+ * @returns 规整后的栏目列表（按顺序排列）
+ */
+export const normalizePlatformHomeSections = (
+  sections: ReadonlyArray<{ key: string; name?: string; visible?: boolean; order?: number }> | undefined,
+): PlatformHomeSection[] => {
+  const known = PLATFORM_HOME_SECTION_KEYS as readonly string[];
+  const kept: PlatformHomeSection[] = [];
+  for (const item of Array.isArray(sections) ? sections : []) {
+    if (!known.includes(item?.key)) continue;
+    const section = item as PlatformHomeSection;
+    if (!section.name) {
+      section.name = PLATFORM_HOME_SECTION_DEFAULTS.find((it) => it.key === section.key)?.name ?? "";
+    }
+    if (typeof section.visible !== "boolean") section.visible = true;
+    if (!Number.isFinite(Number(section.order))) section.order = 0;
+    kept.push(section);
+  }
+  const present = new Set(kept.map((item) => item.key));
+  const maxOrder = kept.reduce((max, item) => Math.max(max, Number(item.order) || 0), -1);
+  const missing = PLATFORM_HOME_SECTION_DEFAULTS.filter((item) => !present.has(item.key)).map(
+    (item, index) => ({
+      key: item.key,
+      name: item.name,
+      visible: true,
+      order: maxOrder + 1 + index,
+    }),
+  );
+  return [...kept, ...missing].sort((a, b) => a.order - b.order);
+};
 
 export interface SettingState {
   /** Schema 版本号 */
@@ -461,11 +523,13 @@ export interface SettingState {
     visible: boolean;
     order: number;
   }>;
+
   /**
    * 第三方平台首页栏目顺序和显示配置
    *
-   * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单），
-   * 故分开配置：网易云读 `homePageSections`，第三方平台读本项。
+   * 网易云与第三方平台的首页栏目不是同一批（平台侧是精选歌单、
+   * 为你推荐、歌手推荐、新碟上架），故分开配置：
+   * 网易云读 `homePageSections`，第三方平台读本项。
    */
   platformHomePageSections: Array<{
     key: (typeof PLATFORM_HOME_SECTION_KEYS)[number];
@@ -781,7 +845,12 @@ export const useSettingStore = defineStore("setting", {
       { key: "radio", name: "推荐播客", visible: true, order: 4 },
       { key: "album", name: "新碟上架", visible: true, order: 5 },
     ],
-    platformHomePageSections: [{ key: "square", name: "精选歌单", visible: true, order: 0 }],
+    platformHomePageSections: [
+      { key: "square", name: "精选歌单", visible: true, order: 0 },
+      { key: "recommend", name: "为你推荐", visible: true, order: 1 },
+      { key: "singer", name: "歌手推荐", visible: true, order: 2 },
+      { key: "album", name: "新碟上架", visible: true, order: 3 },
+    ],
     userAgreementVersion: "",
     registryProtocol: {
       orpheus: false,
@@ -835,17 +904,16 @@ export const useSettingStore = defineStore("setting", {
       return Boolean(lastfm.apiKey && lastfm.apiSecret);
     },
     /**
-     * 第三方平台首页栏目（按真源过滤未知键）
+     * 第三方平台首页栏目（按真源过滤未知键并补齐缺失栏目）
      *
      * 旧版本持久化的栏目配置里可能残留已下线的键（如「热搜词」），
-     * 读取时过滤掉，避免残留项进入渲染与配置面板。
+     * 读取时过滤掉；旧配置里缺少新增栏目时按默认项补齐，
+     * 避免残留项进入渲染与配置面板，也避免新增区块在旧用户处缺席。
      * @param state 设置状态
      * @returns 可用的第三方平台首页栏目
      */
     platformHomeSections(state): SettingState["platformHomePageSections"] {
-      return state.platformHomePageSections.filter((item) =>
-        (PLATFORM_HOME_SECTION_KEYS as readonly string[]).includes(item?.key),
-      );
+      return normalizePlatformHomeSections(state.platformHomePageSections);
     },
   },
   actions: {
@@ -876,6 +944,13 @@ export const useSettingStore = defineStore("setting", {
         // 统一设置版本号
         this.schemaVersion = targetVersion;
         console.log(`[Setting Migration] 迁移完成，已更新到版本 ${targetVersion}`);
+      }
+
+      // 第三方平台首页栏目：剔除已下线的键并补齐新增栏目。
+      // 放在启动迁移里做，才能真正落盘（持久化插件的写入订阅在注入配置之后才注册）。
+      const sections = normalizePlatformHomeSections(this.platformHomePageSections);
+      if (JSON.stringify(sections) !== JSON.stringify(this.platformHomePageSections)) {
+        this.platformHomePageSections = sections;
       }
     },
     // 更换明暗模式
@@ -912,7 +987,9 @@ export const useSettingStore = defineStore("setting", {
     key: "setting-store",
     storage: localStorage,
     // 恢复旧配置后剔除已下线的第三方平台首页栏目键（如「热搜词」），
-    // 避免残留项长期留在持久化数据里；读取侧的 getter 另有兜底过滤
+    // 避免残留项进入渲染与配置面板；读取侧的 getter 另有兜底过滤。
+    // 这里只做内存裁剪：持久化插件在注入配置之后才注册写入订阅，
+    // 此处的赋值不会落盘，落盘由启动迁移统一处理。
     afterHydrate: (context) => {
       const sections = context.store?.platformHomePageSections;
       if (!Array.isArray(sections)) return;
