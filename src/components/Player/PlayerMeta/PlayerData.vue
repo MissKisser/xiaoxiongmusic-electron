@@ -159,7 +159,6 @@ import { useMobile } from "@/composables/useMobile";
 import { removeBrackets } from "@/utils/format";
 import { openArtistJump } from "@/utils/modal";
 import { canJumpAlbum, jumpToAlbum } from "@/utils/album";
-import { resolveSongPlatform } from "@/utils/songPlatform";
 
 defineProps<{
   center?: boolean;
@@ -179,13 +178,12 @@ const { isTablet } = useMobile();
  *
  * 全屏播放器的收藏按钮位于底部控制条的悬停分组内，鼠标不落在控制条上时不可见；
  * 而底部常驻播放条又被全屏浮层遮住，于是刷歌（全屏播放器）里没有可发现的收藏入口。
- * 这里为 QQ 音乐 / 酷狗音乐的刷歌补一个常驻收藏入口，网易云路径保持原样。
+ * 这里为三个平台（网易云 / QQ 音乐 / 酷狗音乐）的刷歌补一个常驻收藏入口。
  */
 const showFmLike = computed<boolean>(() => {
   if (isTablet.value) return false;
   if (!statusStore.personalFmMode) return false;
-  if (musicStore.playSong.type === "radio") return false;
-  return resolveSongPlatform(musicStore.playSong) !== "netease";
+  return musicStore.playSong.type !== "radio";
 });
 
 // 音质选择菜单状态
