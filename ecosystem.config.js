@@ -6,7 +6,7 @@
 module.exports = {
   apps: [
     {
-      name: "splayer-server",
+      name: "xiaoxiongmusic-server",
       script: "./out/server/start.js",
       cwd: "/www/wwwroot/music.viaxv.top",
       instances: 1,

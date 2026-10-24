@@ -164,7 +164,7 @@ pub struct PlayModePayload {
 #[napi(string_enum)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiscordDisplayMode {
-    /// Listening to SPlayer
+    /// Listening to XiaoxiongMusic
     Name,
     /// Listening to Rick Astley
     State,

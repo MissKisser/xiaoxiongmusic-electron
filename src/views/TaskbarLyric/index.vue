@@ -230,7 +230,7 @@ const createMetadataItems = (title: string, artist: string): DisplayItem[] => {
   const items: DisplayItem[] = [
     {
       key: `meta-title-${title}`,
-      text: title || "SPlayer",
+      text: title || "小熊音乐",
       isPrimary: true,
       isActive: true,
       itemType: "main",

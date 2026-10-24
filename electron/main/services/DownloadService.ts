@@ -86,7 +86,7 @@ export class DownloadService {
         }
       }
       // 使用隐藏的临时文件夹来避免扫描
-      const tempDir = join(downloadPath, ".splayer_temp");
+      const tempDir = join(downloadPath, ".xxmusic_temp");
       try {
         await access(tempDir);
       } catch {

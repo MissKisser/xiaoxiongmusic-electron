@@ -271,7 +271,7 @@ impl RpcWorker {
             .large_image(&data.cached_cover_url)
             .large_text(&data.metadata.album_name)
             .small_image(SP_ICON_ASSET_KEY)
-            .small_text("SPlayer");
+            .small_text("XiaoxiongMusic");
 
         let buttons = vec![Button::new("🎧 Listen", &data.cached_song_url)];
 

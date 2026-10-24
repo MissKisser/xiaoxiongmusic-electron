@@ -24,7 +24,7 @@ export const appVersion = app.getVersion();
  * 程序名称
  * @returns string
  */
-export const appName = app.getName() || "SPlayer";
+export const appName = app.getName() || "小熊音乐";
 
 /**
  * 服务器端口

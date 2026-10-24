@@ -157,7 +157,7 @@ export const createPlatformRoute =
       reply.send({
         name: `${title} Platform API`,
         description,
-        author: "@imsyy",
+        author: "@xiaoxiongmusic",
         modules: listModules(),
       });
     });

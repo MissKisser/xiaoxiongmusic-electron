@@ -42,7 +42,7 @@ const getAuthParams = (config: StreamingServerConfig): URLSearchParams => {
     t: token,
     s: salt,
     v: "1.16.1",
-    c: "SPlayer",
+    c: "XiaoxiongMusic",
     f: "json",
   });
 };

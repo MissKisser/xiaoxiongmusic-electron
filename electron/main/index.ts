@@ -107,7 +107,7 @@ class MainProcess {
     app.whenReady().then(async () => {
       processLog.info("🚀 Application Process Startup");
       // 设置应用程序名称
-      electronApp.setAppUserModelId("com.imsyy.splayer");
+      electronApp.setAppUserModelId("com.xiaoxiongmusic.app");
       // 启动主服务进程
       await initAppServer();
       // 开发模式下等待 Vite 开发服务器就绪

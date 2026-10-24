@@ -1220,7 +1220,7 @@ class PlayerController {
   }
 }
 
-const PLAYER_CONTROLLER_KEY = "__SPLAYER_PLAYER_CONTROLLER__";
+const PLAYER_CONTROLLER_KEY = "__XXMUSIC_PLAYER_CONTROLLER__";
 
 /**
  * 获取 PlayerController 实例

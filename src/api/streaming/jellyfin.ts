@@ -19,10 +19,10 @@ import type {
 const getHeaders = (config: StreamingServerConfig): HeadersInit => {
   // Jellyfin 需要 X-Emby-Authorization 头
   const authParts = [
-    `MediaBrowser Client="SPlayer"`,
+    `MediaBrowser Client="XiaoxiongMusic"`,
     `Version="1.0.0"`,
-    `Device="SPlayer Web"`,
-    `DeviceId="splayer-web-client"`,
+    `Device="XiaoxiongMusic Web"`,
+    `DeviceId="xiaoxiongmusic-client"`,
   ];
 
   if (config.accessToken) {
@@ -100,7 +100,7 @@ export const getAudioStreamUrl = (config: StreamingServerConfig, itemId: string)
   const baseUrl = config.url.endsWith("/") ? config.url.slice(0, -1) : config.url;
   const params = new URLSearchParams({
     UserId: config.userId || "",
-    DeviceId: "splayer-web-client",
+    DeviceId: "xiaoxiongmusic-client",
     MaxStreamingBitrate: "140000000", // High bitrate to prefer direct play/high quality
     Container: "opus,webm|opus,ts|mp3,aac,m4a|aac,m4b|aac,flac,webma,webm|webma,wav,ogg",
     TranscodingContainer: "ts",

@@ -39,7 +39,7 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDECi0Np2UR87scwrvTr72L6oO01rBbbBPriSDFPxr3
 const KG_AES_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /** 设备 MID 的固定种子 */
-const KG_MID_SEED = "splayer-next-kugou-device-mid";
+const KG_MID_SEED = "xiaoxiongmusic-kugou-device-mid";
 
 /** 协议请求上下文 */
 export interface KgRequestContext {

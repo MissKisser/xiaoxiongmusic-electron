@@ -238,7 +238,7 @@ export class MpvService {
       // mpv: --af=@label:lavfi=[equalizer=...,equalizer=...]
       return `equalizer=f=${f}:t=q:w=1:g=${g}`;
     });
-    return `@splayer-eq:lavfi=[${filters.join(",")}]`;
+    return `@xxmusic-eq:lavfi=[${filters.join(",")}]`;
   }
 
   /**

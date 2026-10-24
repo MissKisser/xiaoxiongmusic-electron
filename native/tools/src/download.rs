@@ -250,7 +250,7 @@ impl DownloadTask {
 
 fn build_client(enable_http2: bool) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
-        .user_agent("SPlayer/1.0")
+        .user_agent("XiaoxiongMusic/1.0")
         .tcp_nodelay(true)
         .http2_keep_alive_interval(std::time::Duration::from_secs(15));
 

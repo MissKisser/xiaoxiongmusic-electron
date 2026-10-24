@@ -281,7 +281,7 @@ class AudioManager extends EventTarget implements IPlaybackEngine {
   }
 }
 
-const AUDIO_MANAGER_KEY = "__SPLAYER_AUDIO_MANAGER__";
+const AUDIO_MANAGER_KEY = "__XXMUSIC_AUDIO_MANAGER__";
 
 /**
  * 获取 AudioManager 实例

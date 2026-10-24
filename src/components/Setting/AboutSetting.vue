@@ -253,11 +253,6 @@ const contributors = [
 // 社区数据
 const communityData = [
   {
-    name: "加入交流群",
-    url: "https://qm.qq.com/cgi-bin/qm/qr?k=2-cVSf1bE0AvAehCib00qFEFdUvPaJ_k&jump_from=webapi&authKey=1NEhib9+GsmsXVo2rCc0IbRaVHeeRXJJ0gbsyKDcIwDdAzYySOubkFCvkV32+7Cw",
-    icon: "QQ",
-  },
-  {
     name: "GitHub 主页",
     url: brand.homepage,
     icon: "Github",

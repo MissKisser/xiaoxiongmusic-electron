@@ -1,9 +1,9 @@
 services:
-  SPlayer:
+  xiaoxiongmusic:
     build:
       context: .
-    image: splayer
-    container_name: SPlayer
+    image: xiaoxiongmusic
+    container_name: xiaoxiongmusic
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

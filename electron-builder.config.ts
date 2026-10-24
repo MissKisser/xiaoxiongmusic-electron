@@ -2,7 +2,7 @@ import type { Configuration } from "electron-builder";
 
 const config: Configuration = {
   // 应用程序的唯一标识符
-  appId: "com.imsyy.splayer",
+  appId: "com.xiaoxiongmusic.app",
   // 应用程序的产品名称
   productName: "小熊音乐",
   copyright: "Copyright © Hackerdallas 2023",
@@ -145,7 +145,7 @@ const config: Configuration = {
   // Linux 平台配置
   linux: {
     // 可执行文件名
-    executableName: "SPlayer",
+    executableName: "XiaoxiongMusic",
     // 应用程序的图标文件路径
     icon: "public/icons/favicon-512x512.png",
     // Linux 所有格式的统一文件名模板

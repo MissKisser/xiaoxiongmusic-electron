@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPlayer 部署脚本
+# 小熊音乐 部署脚本
 # 用于在 Linux 服务器上快速部署
 
 set -e
@@ -9,7 +9,7 @@ PROJECT_DIR="/www/wwwroot/music.viaxv.top"
 cd "$PROJECT_DIR"
 
 echo "=========================================="
-echo "  SPlayer 部署脚本"
+echo "  小熊音乐 部署脚本"
 echo "=========================================="
 echo ""
 
@@ -58,12 +58,12 @@ if command -v pm2 &> /dev/null; then
     echo "🔄 管理 PM2 进程..."
     
     # 检查是否已运行
-    if pm2 list | grep -q "splayer-server"; then
+    if pm2 list | grep -q "xiaoxiongmusic-server"; then
         echo "  重启现有进程..."
-        pm2 restart splayer-server
+        pm2 restart xiaoxiongmusic-server
     else
         echo "  启动新进程..."
-        pm2 start out/server/start.js --name splayer-server --env production
+        pm2 start out/server/start.js --name xiaoxiongmusic-server --env production
         pm2 save
     fi
     
@@ -72,7 +72,7 @@ if command -v pm2 &> /dev/null; then
     echo "📊 进程状态："
     pm2 status
     echo ""
-    echo "📝 查看日志: pm2 logs splayer-server"
+    echo "📝 查看日志: pm2 logs xiaoxiongmusic-server"
 else
     echo "⚠️  未找到 PM2，请手动启动服务器"
     echo "   运行: node out/server/start.js"

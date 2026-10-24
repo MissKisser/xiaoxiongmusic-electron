@@ -481,7 +481,7 @@ export class SocketService {
     const welcomeMessage = {
       type: "welcome",
       data: {
-        message: "欢迎连接到 SPlayer WebSocket 服务",
+        message: "欢迎连接到 小熊音乐 WebSocket 服务",
         timestamp: Date.now(),
       },
     };

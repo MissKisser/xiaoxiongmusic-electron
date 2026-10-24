@@ -298,7 +298,7 @@ const renderLyricLines = computed<RenderLine[]>(() => {
     lyricConfig.showYrc && lyricData?.yrcData?.length ? lyricData.yrcData : lyricData.lrcData;
   // 无歌曲名且无歌词
   if (!lyricData.playName && !lyrics?.length) {
-    return placeholder("SPlayer Desktop Lyric");
+    return placeholder("小熊音乐 桌面歌词");
   }
   // 加载中
   if (lyricData.lyricLoading && !lyrics?.length) return placeholder("歌词加载中...");
