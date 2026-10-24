@@ -1,0 +1,110 @@
+/**
+ * 酷狗音乐首页「场景电台」主题卡
+ *
+ * 端点：`POST http://gateway.kugou.com/everydayrec.service/v1/mul_theme_category_recommend`
+ * body `{"show_theme_category_ids":""}`
+ * （与刷歌推荐流的补池同一条链路，匿名可用，实测返回 3 个带曲目的主题）：
+ * - `data.theme_list[]` 带曲目的主题，每个主题的卡片信息在 `theme_detail`：
+ *   主题号 `id`、标题 `title`、标签 `tag`、副标题 `sub_title`、主题图 `pic`；
+ * - `data.all_theme_detail_list[]` 是主题目录（实测 6 个主题），卡片字段同上；
+ * - `data.all_theme_id` 是主题号清单（形如 `1002,1997,2002,...`）。
+ *
+ * 主题卡只作「场景入口」用：点击后按主题关键词取该主题的歌单列表，
+ * 不在本模块内播放曲目。主题目录与刷歌补池同源、随推荐实时变动，
+ * 与刷歌推荐流同列不缓存。
+ */
+
+import { kgGatewayRequest } from "../core/request";
+import { decodeName, fillCover } from "../core/config";
+import { coreLog } from "../../../logger";
+import type { KGModule, KGParams } from "../core/types";
+
+/** 多主题推荐端点（网关相对路径） */
+const KG_MUL_THEME_PATH = "/everydayrec.service/v1/mul_theme_category_recommend";
+
+/** 网关地址 */
+const KG_GATEWAY_BASE_URL = "http://gateway.kugou.com";
+
+/** 场景电台默认条数 */
+const DEFAULT_LIMIT = 6;
+
+/** 场景电台条数上限 */
+const MAX_LIMIT = 12;
+
+/** 上游原始条目 */
+type RawEntry = Record<string, any>;
+
+/**
+ * 归一化主题卡
+ *
+ * 封面取 `pic`（主题主图），缺省时回落到 `card_pic`；
+ * 标题与标签都做实体反转义，与本平台其他模块保持一致。
+ * @param detail 上游 `theme_detail`
+ * @returns 归一化后的主题卡
+ */
+const normalizeTheme = (detail: RawEntry) => {
+  const source = detail || {};
+  return {
+    id: String(source.id ?? source.theme_category_id ?? ""),
+    title: decodeName(source.title ?? ""),
+    tag: decodeName(source.tag ?? ""),
+    subTitle: decodeName(source.sub_title ?? ""),
+    cover: fillCover(source.pic ?? source.card_pic ?? "", 300) ?? "",
+  };
+};
+
+/**
+ * 读取酷狗音乐场景电台主题卡
+ *
+ * @param params.limit 取回的条数
+ */
+export const homeTheme: KGModule = async (params: KGParams) => {
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(1, Number(params.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT),
+  );
+
+  try {
+    const body = await kgGatewayRequest<{
+      data?: {
+        theme_list?: RawEntry[];
+        all_theme_detail_list?: RawEntry[];
+      };
+    }>(KG_MUL_THEME_PATH, {
+      method: "POST",
+      baseURL: KG_GATEWAY_BASE_URL,
+      data: { show_theme_category_ids: "" },
+    });
+
+    const data = body?.data || {};
+    /** 主题目录在前，带曲目的主题在后补充，同一主题号只保留一条 */
+    const details: RawEntry[] = [];
+    const seen = new Set<string>();
+    const catalog = Array.isArray(data.all_theme_detail_list) ? data.all_theme_detail_list : [];
+    const themed = Array.isArray(data.theme_list) ? data.theme_list : [];
+    for (const detail of [...catalog, ...themed]) {
+      const raw = detail?.theme_detail ?? detail;
+      const id = String(raw?.id ?? "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      details.push(raw);
+    }
+
+    const list = details
+      .slice(0, limit)
+      .map(normalizeTheme)
+      .filter((item: { id: string }) => !!item.id);
+
+    return {
+      code: 200,
+      total: details.length,
+      list,
+    };
+  } catch (err) {
+    coreLog.error("[kg-home-theme] 酷狗场景电台获取异常:", err);
+    return {
+      code: 502,
+      message: `酷狗场景电台获取失败: ${(err as Error)?.message ?? String(err)}`,
+    };
+  }
+};

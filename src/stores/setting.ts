@@ -24,7 +24,13 @@ import type { LyricPriority } from "@/types/lyric";
  * 同时按本表补齐缺失的栏目 —— 旧配置里只有「精选歌单」时，
  * 新增栏目按默认项补进来，不影响旧用户升级后的首页。
  */
-export const PLATFORM_HOME_SECTION_KEYS = ["square", "recommend", "singer", "album"] as const;
+export const PLATFORM_HOME_SECTION_KEYS = [
+  "square",
+  "recommend",
+  "singer",
+  "album",
+  "radioTheme",
+] as const;
 
 /**
  * 第三方平台首页栏目的默认项
@@ -40,6 +46,7 @@ export const PLATFORM_HOME_SECTION_DEFAULTS: ReadonlyArray<{
   { key: "recommend", name: "为你推荐", order: 1 },
   { key: "singer", name: "歌手推荐", order: 2 },
   { key: "album", name: "新碟上架", order: 3 },
+  { key: "radioTheme", name: "场景电台", order: 4 },
 ];
 
 /** 第三方平台首页栏目条目 */

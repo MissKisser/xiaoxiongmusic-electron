@@ -11,6 +11,9 @@
  * 每个分类连续占用若干页，页内取上游 `/v1/search/special` 的一页。
  * 相邻两页来自同一分类的不同上游页，上游分页窗口本身互不重合，
  * 因此翻页真实推进且不会重复。
+ *
+ * 显式传关键词时不做轮换：页码直接对应上游页，关键词固定，
+ * 用于「按场景关键词查看歌单」的入口（首页场景电台主题卡）。
  */
 
 import { kgErrorCode, kgGatewayRequest } from "../core/request";
@@ -112,17 +115,20 @@ const fetchShard = async (shard: SquareShard, limit: number) => {
  *
  * @param params.page - 页码，从 1 开始
  * @param params.limit - 每页条数
+ * @param params.keyword - 固定关键词，缺省时按分类关键词轮换取材
  */
 export const playlist_square: KGModule = async (params: KGParams) => {
   const page = Math.max(1, Number(params.page ?? 1) || 1);
   const limit = Math.max(1, Number(params.limit ?? 30) || 30);
+  /** 显式关键词：按该关键词翻页，不参与分类轮换 */
+  const fixedKeyword = String(params.keyword ?? "").trim();
   const total = TOTAL_PAGES * limit;
 
   const empty = {
     code: 200,
     page,
     limit,
-    keyword: "",
+    keyword: fixedKeyword,
     keywordIndex: -1,
     total,
     hasMore: false,
@@ -131,9 +137,43 @@ export const playlist_square: KGModule = async (params: KGParams) => {
     raw: null,
   };
 
-  if (page > TOTAL_PAGES) return empty;
+  if (!fixedKeyword && page > TOTAL_PAGES) return empty;
 
   try {
+    // 固定关键词：页码直接对应上游页
+    if (fixedKeyword) {
+      const { res, list } = await fetchShard(
+        { keywordIndex: -1, keyword: fixedKeyword, upstreamPage: page },
+        limit,
+      );
+
+      const errCode = kgErrorCode(res);
+      if (errCode !== 0) {
+        return {
+          code: 502,
+          message: `酷狗歌单广场取材失败：error_code=${errCode}`,
+          page,
+          limit,
+          raw: res,
+        };
+      }
+
+      const playlists = list.slice(0, limit).map(normalizePlaylist);
+      const keywordTotal = Number(res?.data?.total ?? playlists.length);
+      return {
+        code: 200,
+        page,
+        limit,
+        keyword: fixedKeyword,
+        keywordIndex: -1,
+        total: keywordTotal,
+        hasMore: page * limit < keywordTotal,
+        playlists,
+        items: playlists,
+        raw: res,
+      };
+    }
+
     let shardIndex = page - 1;
 
     // 分类被取尽时分片会返回空列表，向后顺延到下一个有数据的分片

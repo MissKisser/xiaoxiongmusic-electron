@@ -122,6 +122,27 @@ export interface PlatformCoverEntry {
   platform: ApiPlatform;
 }
 
+/**
+ * 归一化后的场景电台主题卡
+ *
+ * 主题卡是「场景入口」而非内容条目：标题与标签用于识别场景，
+ * 关键词用于按场景取对应的歌单列表，点击主题卡即以该关键词进入歌单广场。
+ */
+export interface PlatformThemeCard {
+  /** 主题标识（平台内主键） */
+  id: string;
+  /** 主题标题 */
+  title: string;
+  /** 主题标签 */
+  tag: string;
+  /** 主题副标题 */
+  subTitle: string;
+  /** 主题封面直链 */
+  cover: string;
+  /** 来源平台 */
+  platform: ApiPlatform;
+}
+
 /** 归一化后的榜单 */
 export interface PlatformLeaderboard {
   /** 榜单名 */

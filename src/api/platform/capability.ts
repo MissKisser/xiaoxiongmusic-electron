@@ -94,7 +94,8 @@ export const isRouteSupported = (platform: ApiPlatform, routeName: string): bool
  */
 export const HOME_SECTION_SUPPORT: Record<Exclude<ApiPlatform, "netease">, readonly string[]> = {
   qqmusic: ["square", "recommend", "singer", "album"],
-  kugou: ["square"],
+  // 酷狗没有「为你推荐」的数据源，但多一个独有能力「场景电台」（主题卡入口）
+  kugou: ["square", "singer", "album", "radioTheme"],
 };
 
 /**

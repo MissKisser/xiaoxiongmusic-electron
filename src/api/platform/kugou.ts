@@ -39,6 +39,7 @@ import {
   type PlatformPlaylistDetail,
   type PlatformSong,
   type PlatformSongUrl,
+  type PlatformThemeCard,
 } from "./types";
 
 /** 酷狗平台标识 */
@@ -1040,17 +1041,23 @@ interface KgPlaylistSquareResponse {
  *
  * 酷狗侧没有公开的广场列表端点，广场按「分类关键词 + 上游真实分页」轮换取材，
  * 页码与条数由主进程模块统一换算，渲染端只负责按页码递进取数。
+ *
+ * 传 `keyword` 时按该关键词固定翻页（不参与分类轮换），
+ * 用于「按场景关键词查看歌单」的入口。
  * @param page 页码（从 1 开始）
  * @param limit 每页条数
+ * @param keyword 固定关键词，缺省时按分类关键词轮换
  * @returns 归一化后的广场歌单、总数与是否还有更多
  */
 export const kgPlaylistSquare = async (
   page = 1,
   limit = 30,
+  keyword?: string,
 ): Promise<{ list: PlatformCoverEntry[]; total: number; hasMore: boolean }> => {
   const res = await platformRequest<KgPlaylistSquareResponse>(KUGOU, "playlist_square", {
     page,
     limit,
+    ...(keyword ? { keyword } : {}),
   });
   const list: PlatformCoverEntry[] = (res?.playlists ?? []).map((item) => ({
     id: String(item?.id ?? ""),
@@ -1357,4 +1364,75 @@ export const kgHotArtists = async (
     artists: (res?.artists ?? []).map(toKgHotArtistEntry),
     total: Number(res?.total ?? 0),
   };
+};
+
+/** 主进程酷狗首页新碟模块的原生返回 */
+interface KgHomeAlbumResponse {
+  code?: number;
+  total?: number;
+  list?: Array<{
+    id?: string;
+    name?: string;
+    artist?: string;
+    publishTime?: string;
+    cover?: string;
+    trackCount?: number;
+  }>;
+  message?: string;
+}
+
+/** 主进程酷狗首页场景电台模块的原生返回 */
+interface KgHomeThemeResponse {
+  code?: number;
+  total?: number;
+  list?: Array<{
+    id?: string;
+    title?: string;
+    tag?: string;
+    subTitle?: string;
+    cover?: string;
+  }>;
+  message?: string;
+}
+
+/**
+ * 读取酷狗首页「新碟上架」
+ *
+ * 走主进程 `home/album` 模块（上游新碟列表），
+ * 专辑号即专辑详情的主键，曲目数由主进程回查补齐。
+ * @param limit 取回的条数
+ * @returns 归一化后的封面条目
+ */
+export const kgHomeAlbums = async (limit?: number): Promise<PlatformCoverEntry[]> => {
+  const res = await platformRequest<KgHomeAlbumResponse>(KUGOU, "home/album", { limit });
+  return (res?.list ?? []).map((item) => ({
+    id: item.id ?? "",
+    platformId: item.id ?? "",
+    name: item.name ?? "",
+    cover: fillCover(item.cover ?? ""),
+    count: Number(item.trackCount ?? 0),
+    creatorName: item.artist ?? "",
+    publishTime: toMillisDateTime(item.publishTime),
+    platform: KUGOU,
+  }));
+};
+
+/**
+ * 读取酷狗首页「场景电台」主题卡
+ *
+ * 走主进程 `home/theme` 模块（上游主题目录）。
+ * 主题卡是场景入口，点击后按标题关键词进入歌单广场看该场景的歌单。
+ * @param limit 取回的条数
+ * @returns 归一化后的主题卡
+ */
+export const kgHomeThemes = async (limit?: number): Promise<PlatformThemeCard[]> => {
+  const res = await platformRequest<KgHomeThemeResponse>(KUGOU, "home/theme", { limit });
+  return (res?.list ?? []).map((item) => ({
+    id: item.id ?? "",
+    title: item.title ?? "",
+    tag: item.tag ?? "",
+    subTitle: item.subTitle ?? "",
+    cover: fillCover(item.cover ?? ""),
+    platform: KUGOU,
+  }));
 };

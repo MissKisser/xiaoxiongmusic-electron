@@ -37,6 +37,8 @@ import {
   kgArtistDetail,
   kgComment,
   kgFindLikedPlaylist,
+  kgHomeAlbums,
+  kgHomeThemes,
   kgHotArtists,
   kgLeaderboardDetail,
   kgLeaderboardList,
@@ -88,6 +90,7 @@ import {
   type PlatformLeaderboardGroup,
   type PlatformPlaylist,
   type PlatformPlaylistDetail,
+  type PlatformThemeCard,
 } from "./types";
 
 /** 网易云歌单详情单页曲目数 */
@@ -1592,13 +1595,15 @@ export const dispatchHotArtists = async (
  *
  * QQ 音乐走广场模块（可翻页）；酷狗按分类关键词轮换取材，
  * 每页对应上游歌单搜索的一页，翻页真实推进。
+ * 酷狗传 `keyword` 时按该关键词固定翻页（不参与分类轮换），
+ * 用于「按场景关键词查看歌单」的入口。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 广场歌单与总数
  */
 export const dispatchSquarePlaylists = async (
   platform: ApiPlatform,
-  options: { page?: number; limit?: number } = {},
+  options: { page?: number; limit?: number; keyword?: string } = {},
 ): Promise<DispatchSquareResult> => {
   if (platform === "qqmusic") {
     const page = options.page ?? 1;
@@ -1612,7 +1617,7 @@ export const dispatchSquarePlaylists = async (
   }
   const page = options.page ?? 1;
   const limit = options.limit ?? 30;
-  const res = await kgPlaylistSquare(page, limit);
+  const res = await kgPlaylistSquare(page, limit, options.keyword);
   return {
     playlists: res.list.map(toCoverEntry),
     total: res.total,
@@ -1633,6 +1638,14 @@ export interface DispatchHomeArtistsResult {
   /** 歌手条目 */
   artists: ArtistType[];
   /** 歌手总数 */
+  total: number;
+}
+
+/** 分派层首页场景电台结果 */
+export interface DispatchHomeThemesResult {
+  /** 主题卡条目 */
+  themes: PlatformThemeCard[];
+  /** 主题总数 */
   total: number;
 }
 
@@ -1675,8 +1688,8 @@ export const dispatchHomeSquare = async (
 /**
  * 读取当前平台首页「歌手推荐」
  *
- * 目前只有 QQ 音乐有该数据源（上游歌手列表），
- * 其它平台没有对应端点时返回空列表。
+ * QQ 音乐走上游歌手列表，酷狗走热门歌手列表，
+ * 两边的歌手条目都带平台主键，可直接定位歌手详情。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 歌手条目与总数
@@ -1685,16 +1698,23 @@ export const dispatchHomeSingers = async (
   platform: ApiPlatform,
   options: { limit?: number } = {},
 ): Promise<DispatchHomeArtistsResult> => {
-  if (platform !== "qqmusic") return { artists: [], total: 0 };
-  const list = await qqHomeSingers(options.limit);
-  return { artists: list.map(toArtistType), total: list.length };
+  const limit = options.limit ?? 12;
+  if (platform === "qqmusic") {
+    const list = await qqHomeSingers(limit);
+    return { artists: list.map(toArtistType), total: list.length };
+  }
+  if (platform === "kugou") {
+    const res = await kgHotArtists(undefined, 1, limit);
+    return { artists: res.artists.map(toArtistType), total: res.total };
+  }
+  return { artists: [], total: 0 };
 };
 
 /**
  * 读取当前平台首页「新碟上架」
  *
- * 目前只有 QQ 音乐有该数据源（上游新碟列表），
- * 其它平台没有对应端点时返回空列表。
+ * QQ 音乐走上游新碟列表，酷狗走 mobilecdn 新碟列表，
+ * 两边的专辑条目都带专辑主键，可直接定位专辑详情。
  * @param platform 音源平台
  * @param options 读取参数
  * @returns 专辑条目与总数
@@ -1703,9 +1723,34 @@ export const dispatchHomeAlbums = async (
   platform: ApiPlatform,
   options: { limit?: number } = {},
 ): Promise<DispatchHomeResult> => {
-  if (platform !== "qqmusic") return { items: [], total: 0 };
-  const list = await qqHomeAlbums(options.limit);
-  return { items: list.map(toCoverEntry), total: list.length };
+  const limit = options.limit ?? 12;
+  if (platform === "qqmusic") {
+    const list = await qqHomeAlbums(limit);
+    return { items: list.map(toCoverEntry), total: list.length };
+  }
+  if (platform === "kugou") {
+    const list = await kgHomeAlbums(limit);
+    return { items: list.map(toCoverEntry), total: list.length };
+  }
+  return { items: [], total: 0 };
+};
+
+/**
+ * 读取当前平台首页「场景电台」主题卡
+ *
+ * 场景电台是酷狗独有能力：主题目录只在该平台有数据源，
+ * 其它平台返回空列表，由页面层按能力表决定是否渲染该区块。
+ * @param platform 音源平台
+ * @param options 读取参数
+ * @returns 主题卡条目与总数
+ */
+export const dispatchHomeThemes = async (
+  platform: ApiPlatform,
+  options: { limit?: number } = {},
+): Promise<DispatchHomeThemesResult> => {
+  if (platform !== "kugou") return { themes: [], total: 0 };
+  const list = await kgHomeThemes(options.limit ?? 6);
+  return { themes: list, total: list.length };
 };
 
 /**
