@@ -3,9 +3,12 @@
     <div class="set-list">
       <n-h3 prefix="bar"> 关于软件 </n-h3>
       <n-card class="set-item">
-        <n-flex align="center" class="about">
-          <SvgIcon name="SPlayer" size="26" />
-          <n-text class="logo-name">SPlayer</n-text>
+        <n-flex align="center" :gap="10" class="about">
+          <n-avatar round :size="40" :src="brand.avatar" :fallback-src="brand.avatar" />
+          <n-flex vertical :gap="2">
+            <n-text class="logo-name">{{ brand.name }}</n-text>
+            <n-text class="logo-desc" :depth="3">简约的多平台音乐播放器</n-text>
+          </n-flex>
           <n-tag v-if="statusStore.isDeveloperMode" size="small" type="warning" round> DEV </n-tag>
           <n-tag :bordered="false" size="small" type="primary" round @click="openDeveloperMode">
             {{ packageJson.version }}
@@ -52,7 +55,7 @@
           @click="openLink(item.url)"
         >
           <n-flex align="center">
-            <n-avatar round :size="40" :src="item.avatar" fallback-src="/images/avatar.jpg?asset" />
+            <n-avatar round :size="40" :src="item.avatar" :fallback-src="item.fallback ?? defaultAvatar" />
             <n-flex vertical :gap="4">
               <n-text class="name" strong> {{ item.name }} </n-text>
               <n-text class="tip" :depth="3" style="font-size: 12px">
@@ -80,7 +83,7 @@
                     round
                     :size="40"
                     :src="item.avatar"
-                    fallback-src="/images/avatar.jpg?asset"
+                    :fallback-src="item.fallback ?? defaultAvatar"
                   />
                   <n-flex vertical :gap="4">
                     <n-text class="name" strong> {{ item.name }} </n-text>
@@ -150,6 +153,18 @@ import packageJson from "@/../package.json";
 
 const statusStore = useStatusStore();
 
+// 品牌信息（自建版本，不使用上游仓库与作者主页链接）
+const brand = {
+  name: "小熊音乐",
+  homepage: "https://github.com/misskisser",
+  repo: "https://github.com/MissKisser/xiaoxiongmusic-electron",
+  releases: "https://github.com/MissKisser/xiaoxiongmusic-electron/releases",
+  avatar: "/images/about-avatar.png?asset",
+};
+
+// 贡献者头像加载失败时的占位图
+const defaultAvatar = "/images/avatar.jpg?asset";
+
 // 开发者模式点击次数
 const developerModeClickCount = ref(0);
 
@@ -159,10 +174,20 @@ type DeveloperType = {
   role: string;
   url: string;
   avatar: string;
+  fallback?: string;
 };
 
 const developers = ref<DeveloperType[]>([]);
 const allContributors = ref<DeveloperType[]>([]);
+
+// 本项目作者（置于开发人员列表末位）
+const maintainer: DeveloperType = {
+  name: "misskisser",
+  role: "小熊音乐作者 / 全栈开发",
+  url: brand.homepage,
+  avatar: "https://github.com/misskisser.png",
+  fallback: brand.avatar,
+};
 
 // 获取贡献者
 const getContributors = async () => {
@@ -178,18 +203,26 @@ const getContributors = async () => {
           name: item.login || item.name,
           role: item.login === "imsyy" ? "Owner / Full Stack" : "Contributor",
           url: item.html_url || "",
-          avatar: item.avatar_url || "/images/avatar.jpg?asset",
+          avatar: item.avatar_url || defaultAvatar,
         }));
-      developers.value = list.slice(0, 6);
+      developers.value = [...list.slice(0, 6), maintainer];
       allContributors.value = list.slice(6);
+    } else {
+      developers.value = [maintainer];
     }
   } catch (error) {
     console.error("Failed to fetch contributors:", error);
+    developers.value = [maintainer];
   }
 };
 
 // 特别鸣谢
 const contributors = [
+  {
+    name: "基于 SPlayer",
+    url: "https://github.com/imsyy/SPlayer",
+    description: "上游开源项目（AGPL-3.0）",
+  },
   {
     name: "NeteaseCloudMusicApi",
     url: "https://github.com/neteasecloudmusicapienhanced/api-enhanced",
@@ -225,14 +258,14 @@ const communityData = [
     icon: "QQ",
   },
   {
-    name: "GitHub",
-    url: packageJson.github,
+    name: "GitHub 主页",
+    url: brand.homepage,
     icon: "Github",
   },
   {
-    name: "官方博客",
-    url: packageJson.blog,
-    icon: "RssFeed",
+    name: "项目源码",
+    url: brand.repo,
+    icon: "Code",
   },
 ];
 
@@ -240,7 +273,7 @@ const communityData = [
 const checkUpdate = debounce(
   () => {
     if (!isElectron) {
-      window.open(packageJson.github + "/releases", "_blank");
+      window.open(brand.releases, "_blank");
       return;
     }
     statusStore.updateCheck = true;
@@ -330,6 +363,10 @@ onMounted(() => {
 .about {
   .logo-name {
     font-size: 16px;
+    font-weight: 600;
+  }
+  .logo-desc {
+    font-size: 12px;
   }
   .n-tag {
     border-radius: 6px;
