@@ -81,6 +81,7 @@ export { SongUnlockServer } from "./shared/apis";
 export type {
   ApiCallResponse,
   ApiPlatform,
+  PlatformErrorCode,
   PlatformMusicApi,
   PlatformProfile,
 } from "./shared/apis";

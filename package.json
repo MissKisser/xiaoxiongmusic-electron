@@ -20,6 +20,7 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "npx eslint . --fix",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

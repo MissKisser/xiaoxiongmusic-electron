@@ -10,7 +10,8 @@
 
 import { QM_API_URL, QM_HEADERS, SESSION_TTL, getCommonParams } from "./config";
 import { coreLog } from "../../../logger";
-import { sessionToCookieHeader } from "./credential";
+import { resolveCredentialTTL, sessionToCookieHeader, shouldRefreshCredential } from "./credential";
+import { QQMusicApiError, isAuthExpiredCode } from "./auth";
 import { clearCache, resolveAccountId } from "./cache";
 import {
   getQQMusicSession,
@@ -62,6 +63,8 @@ export const replaceQQMusicCookies = (cookies: Record<string, string>): void => 
   setQQMusicSession(cookies);
   invalidateSession();
   clearCache();
+  // 换号后旧凭据的续期失败记录不再适用
+  lastRefreshFailureAt = 0;
   coreLog.info(`[qm-cookie] 已切换为新账号会话 (${Object.keys(cookies).length} 个字段)`);
 };
 
@@ -141,6 +144,48 @@ const postRaw = async (
   return (await res.json()) as FcgResponse;
 };
 
+/**
+ * 发送请求并按需重试
+ *
+ * 只重试网络故障与超时；业务码错误说明上游已给出明确结论，
+ * 重试只是白打（凭据已死时尤其如此），因此直接抛出结构化错误。
+ * @param body 请求体
+ * @param extraHeaders 追加的请求头
+ * @param module 业务 module
+ * @param method 业务 method
+ * @returns request.data 的业务数据段
+ */
+const postWithRetry = async <T>(
+  body: unknown,
+  extraHeaders: Record<string, string> | undefined,
+  module: string,
+  method: string,
+): Promise<T> => {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+    try {
+      const data = await postRaw(body, extraHeaders);
+      const outerCode = data.code ?? 0;
+      const innerCode = data.request?.code ?? 0;
+      if (outerCode !== 0 || innerCode !== 0) {
+        throw new QQMusicApiError({
+          outer: outerCode,
+          inner: innerCode,
+          module,
+          method,
+          authExpired: isAuthExpiredCode(module, innerCode),
+        });
+      }
+      return data.request?.data as T;
+    } catch (err) {
+      if (err instanceof QQMusicApiError) throw err;
+      lastErr = err;
+      if (attempt < MAX_RETRY) await delay(RETRY_BACKOFF);
+    }
+  }
+  throw lastErr;
+};
+
 /** 初始化 / 刷新 session（1h 过期）；并发安全：同一时刻只发一次 */
 const ensureSession = (): Promise<void> => {
   if (session.uid && session.expireAt > Date.now()) return Promise.resolve();
@@ -199,48 +244,43 @@ export const qmRequest = async <T = unknown>(
   const useSession = options.session !== false;
   if (useSession) await ensureSession();
 
-  const uin = getQQMusicUin();
-  const cookies = getQQMusicCookies();
-  const musickey = cookies.qm_keyst || cookies.qqmusic_key;
-  const loginType =
-    cookies.tmeLoginType !== undefined
-      ? Number(cookies.tmeLoginType)
-      : musickey?.startsWith("W_X")
-        ? 1
-        : 2;
-
-  const comm = {
-    ...(options.webComm ? WEB_COMM : getCommonParams()),
-    ...(uin && uin !== "0" ? { uin, qq: uin } : {}),
-    ...(musickey ? { authst: musickey, tmeLoginType: loginType } : {}),
-    ...(useSession && session.uid ? { uid: session.uid } : {}),
-    ...(useSession && session.sid ? { sid: session.sid } : {}),
-    ...(useSession && session.userip ? { userip: session.userip } : {}),
-    ...(options.comm ?? {}),
-  };
-
-  const body = { comm, request: { module, method, param } };
-
   const extraHeaders: Record<string, string> | undefined =
     options.referer || options.webComm ? { Referer: options.referer ?? WEB_REFERER } : undefined;
 
-  // QM 后端偶发瞬时错误
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
-    try {
-      const data = await postRaw(body, extraHeaders);
-      const outerCode = data.code ?? 0;
-      const innerCode = data.request?.code ?? 0;
-      if (outerCode !== 0 || innerCode !== 0) {
-        throw new Error(`QM API 错误: outer=${outerCode} inner=${innerCode}`);
-      }
-      return data.request?.data as T;
-    } catch (err) {
-      lastErr = err;
-      if (attempt < MAX_RETRY) await delay(RETRY_BACKOFF);
-    }
+  /** 按当前凭据构造请求体（续期后需重建，以带上新的 musickey） */
+  const buildBody = (): Record<string, unknown> => {
+    const uin = getQQMusicUin();
+    const cookies = getQQMusicCookies();
+    const musickey = cookies.qm_keyst || cookies.qqmusic_key;
+    const loginType =
+      cookies.tmeLoginType !== undefined
+        ? Number(cookies.tmeLoginType)
+        : musickey?.startsWith("W_X")
+          ? 1
+          : 2;
+
+    const comm = {
+      ...(options.webComm ? WEB_COMM : getCommonParams()),
+      ...(uin && uin !== "0" ? { uin, qq: uin } : {}),
+      ...(musickey ? { authst: musickey, tmeLoginType: loginType } : {}),
+      ...(useSession && session.uid ? { uid: session.uid } : {}),
+      ...(useSession && session.sid ? { sid: session.sid } : {}),
+      ...(useSession && session.userip ? { userip: session.userip } : {}),
+      ...(options.comm ?? {}),
+    };
+
+    return { comm, request: { module, method, param } };
+  };
+
+  try {
+    return await postWithRetry<T>(buildBody(), extraHeaders, module, method);
+  } catch (err) {
+    // 鉴权失效：先续期再重放一次；续期失败则把结构化错误上抛给调用方
+    if (!(err instanceof QQMusicApiError) || !err.authExpired) throw err;
+    const refreshed = await refreshQQMusicCredential();
+    if (!refreshed) throw err;
+    return await postWithRetry<T>(buildBody(), extraHeaders, module, method);
   }
-  throw lastErr;
 };
 
 /** 调试用：取当前 session 快照 */
@@ -258,15 +298,25 @@ interface RefreshCredentialData {
   str_musicid?: string;
   refresh_key?: string;
   musickeyCreateTime?: number;
+  keyExpiresIn?: number;
   encryptUin?: string;
   loginType?: number;
 }
 
+/** 续期失败后的冷却时长（毫秒）：避免每个请求都去打一次续期 */
+const REFRESH_COOLDOWN = 30_000;
+
+/** 正在进行的续期请求（并发调用共享同一次，避免重复消耗一次性 refresh_key） */
+let refreshPromise: Promise<boolean> | null = null;
+
+/** 上次续期失败的时刻 */
+let lastRefreshFailureAt = 0;
+
 /**
- * 用存储的凭据调 LoginServer.Login（loginMode=2）刷新 musickey
- * @returns 刷新成功（新 key 已写回 cookie）返回 true；失败返回 false
+ * 执行一次凭据续期
+ * @returns 续期是否成功
  */
-export const refreshQQMusicCredential = async (): Promise<boolean> => {
+const doRefreshCredential = async (): Promise<boolean> => {
   const cookies = getQQMusicCookies();
   const uin = getQQMusicUin();
   const musickey = cookies.qm_keyst || cookies.qqmusic_key;
@@ -346,6 +396,8 @@ export const refreshQQMusicCredential = async (): Promise<boolean> => {
       refreshed.psrf_musickey_createtime = String(data.musickeyCreateTime);
     // 网页 cookie 无此字段，首次刷新后落库供后续刷新复用
     if (data.refresh_key) refreshed.qm_refresh_key = data.refresh_key;
+    // 有效期随新凭据一起下发：不落库则续期后无法再算下一次续期时机
+    if (data.keyExpiresIn) refreshed.qm_key_expires_in = String(data.keyExpiresIn);
 
     mergeQQMusicCookies(refreshed);
     coreLog.info("[qm-refresh] musickey 刷新成功", { uin });
@@ -354,4 +406,70 @@ export const refreshQQMusicCredential = async (): Promise<boolean> => {
     coreLog.warn("[qm-refresh] musickey 刷新失败:", err);
     return false;
   }
+};
+
+/**
+ * 用存储的凭据调 LoginServer.Login（loginMode=2）刷新 musickey
+ *
+ * refresh_key 是一次性的：同一时刻只发一次续期请求，
+ * 失败后进入短冷却，避免每个业务请求都去打一次续期。
+ * @returns 刷新成功（新 key 已写回 cookie）返回 true；失败返回 false
+ */
+export const refreshQQMusicCredential = async (): Promise<boolean> => {
+  if (refreshPromise) return refreshPromise;
+  if (lastRefreshFailureAt && Date.now() - lastRefreshFailureAt < REFRESH_COOLDOWN) return false;
+
+  refreshPromise = doRefreshCredential()
+    .then((ok) => {
+      if (ok) lastRefreshFailureAt = 0;
+      else lastRefreshFailureAt = Date.now();
+      return ok;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+  return refreshPromise;
+};
+
+/** 续期检查间隔（毫秒） */
+const REFRESH_CHECK_INTERVAL = 30 * 60 * 1000;
+
+/** 续期调度定时器 */
+let refreshTimer: NodeJS.Timeout | null = null;
+
+/**
+ * 按凭据有效期判断是否需要续期，并在需要时立即续期
+ *
+ * 判据：剩余有效期不足四分之一即续期，
+ * 保证续期请求在凭据真正过期前发出（续期请求本身要携带 musickey）。
+ * @returns 是否执行了续期
+ */
+export const refreshQQMusicCredentialIfNeeded = async (): Promise<boolean> => {
+  const cookies = getQQMusicCookies();
+  if (!shouldRefreshCredential(resolveCredentialTTL(cookies))) return false;
+  return refreshQQMusicCredential();
+};
+
+/**
+ * 启动凭据续期调度
+ *
+ * 启动时先检查一次，随后按固定间隔复查；续期成功后由 mergeQQMusicCookies
+ * 使客户端会话失效，下次请求会重新建立会话。
+ */
+export const startQQMusicCredentialScheduler = (): void => {
+  if (refreshTimer) return;
+  void refreshQQMusicCredentialIfNeeded();
+  refreshTimer = setInterval(() => {
+    void refreshQQMusicCredentialIfNeeded();
+  }, REFRESH_CHECK_INTERVAL);
+  refreshTimer.unref?.();
+};
+
+/**
+ * 停止凭据续期调度
+ */
+export const stopQQMusicCredentialScheduler = (): void => {
+  if (!refreshTimer) return;
+  clearInterval(refreshTimer);
+  refreshTimer = null;
 };

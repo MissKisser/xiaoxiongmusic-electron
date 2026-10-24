@@ -13,6 +13,7 @@
 import { ipcMain } from "electron";
 import { callQQMusic, clearQQMusicCookies, listQQMusicModules } from "../apis/qqmusic";
 import { callKugou, clearKugouSession, listKugouModules } from "../apis/kugou";
+import { toPlatformErrorResponse } from "./platform-error";
 import { coreLog } from "../logger";
 import type { ApiPlatform } from "@shared";
 
@@ -35,10 +36,10 @@ export const initPlatformMusicIpc = (): void => {
           const data = await callKugou(name, params ?? {});
           return { ok: true, data };
         }
-        return { ok: false, error: `本通道暂不支持平台: ${platform}` };
+        return { ok: false, error: `本通道暂不支持平台: ${platform}`, errorCode: "UNKNOWN" };
       } catch (err) {
         coreLog.warn(`[platformMusic] ${platform}.${name} failed:`, err);
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return toPlatformErrorResponse(err);
       }
     },
   );

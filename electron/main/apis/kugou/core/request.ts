@@ -8,6 +8,7 @@
 
 import { KG_GATEWAY_URL, getKgAppid, getKgClientver } from "./config";
 import { cleanKgResponse, getDeviceMid, signatureAndroidParams } from "./crypto";
+import { KugouApiError } from "./auth";
 import { getSessionCookies } from "../../../database/PlatformSessionDB";
 
 interface FetchOptions {
@@ -56,7 +57,7 @@ export const kgRequest = async <T = unknown>(
 
   const code = body.error_code ?? body.errcode ?? body.err_code ?? 0;
   if (!options.allowBusinessError && code !== 0 && code !== 200) {
-    throw new Error(`KG API error_code=${code}`);
+    throw new KugouApiError(code, String(body.msg ?? body.error ?? ""));
   }
 
   return body as T;
@@ -182,9 +183,7 @@ export const kgGatewayRequest = async <T = KGRawBody>(
 
   const code = body.error_code ?? body.errcode ?? body.err_code ?? 0;
   if (!allowBusinessError && code !== 0 && code !== 200) {
-    throw new Error(
-      `KG Gateway API error: code=${code}, msg=${body.msg || body.error || "unknown"}`,
-    );
+    throw new KugouApiError(code, String(body.msg ?? body.error ?? ""));
   }
 
   return body as T;

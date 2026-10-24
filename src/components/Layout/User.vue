@@ -351,20 +351,51 @@ const isLogout = () => {
 onBeforeMount(() => {
   checkLoginStatus();
   // 刷新第三方平台的账号资料
-  platformStore.refreshAllProfiles();
+  void platformStore.refreshAllProfiles().then((expired) => {
+    for (const platform of expired) notifyAuthExpired(platform);
+  });
 });
+
+/** 已提示过凭据失效的平台（重新登录后解除，避免重复弹窗） */
+const authExpiredNotified = new Set<ApiPlatform>();
+
+/**
+ * 提示凭据失效并拉起该平台的登录弹窗
+ *
+ * 与网易云的登录过期处理对齐：明确告知并直接给出重新登录入口。
+ * @param platform 音源平台
+ */
+const notifyAuthExpired = (platform: ApiPlatform) => {
+  if (authExpiredNotified.has(platform)) return;
+  authExpiredNotified.add(platform);
+  window.$message.warning(`${PLATFORM_META[platform].name}登录已过期，请重新登录`, {
+    duration: 3000,
+  });
+  openPlatformLogin(platform);
+};
 
 /**
  * 刷新指定平台的账号资料
  *
  * 平台 store 的 refreshProfile 在读取失败时会把资料清空，
- * 这里保留旧资料，避免一次网络抖动就把界面显示成「未登录」。
+ * 这里保留旧资料，避免一次网络抖动就把界面显示成「未登录」；
+ * 但凭据确实失效时不得回填——那会让界面继续显示已登录，
+ * 也就看不到「登录已过期」的提示。
  * @param platform 音源平台
  */
 const refreshPlatformProfile = async (platform: ApiPlatform) => {
   const previous = platformStore.platformProfiles[platform];
   const profile = await platformStore.refreshProfile(platform);
-  if (!profile && previous) {
+  if (platformStore.authExpired[platform]) {
+    // 凭据已失效：清掉本地资料并提示重新登录
+    notifyAuthExpired(platform);
+    return;
+  }
+  if (profile) {
+    authExpiredNotified.delete(platform);
+    return;
+  }
+  if (previous) {
     platformStore.platformProfiles[platform] = previous;
   }
 };

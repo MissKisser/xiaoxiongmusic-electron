@@ -8,6 +8,36 @@
 import type { ApiCallResponse, ApiPlatform, PlatformProfile } from "@/types/shared";
 
 /**
+ * 平台登录凭据失效异常
+ *
+ * 主进程已把「凭据失效」与「业务拒绝 / 网络故障」区分开，
+ * 渲染端据此决定是否提示重新登录，避免把网络抖动误判为登出。
+ */
+export class PlatformAuthExpiredError extends Error {
+  /** 失效的平台 */
+  readonly platform: ApiPlatform;
+  /** 上游外层业务码 */
+  readonly outer?: number;
+  /** 上游内层业务码 */
+  readonly inner?: number;
+
+  /**
+   * 构造登录凭据失效异常
+   * @param platform 音源平台
+   * @param message 失败说明
+   * @param outer 上游外层业务码
+   * @param inner 上游内层业务码
+   */
+  constructor(platform: ApiPlatform, message: string, outer?: number, inner?: number) {
+    super(message);
+    this.name = "PlatformAuthExpiredError";
+    this.platform = platform;
+    this.outer = outer;
+    this.inner = inner;
+  }
+}
+
+/**
  * 调用平台接口
  * @param platform 音源平台
  * @param name 接口名
@@ -20,8 +50,11 @@ export const platformCall = async <T = unknown>(
   params?: Record<string, unknown>,
 ): Promise<T> => {
   const res: ApiCallResponse = await window.api.platformMusic.call(platform, name, params);
-  if (!res.ok) throw new Error(res.error);
-  return res.data as T;
+  if (res.ok) return res.data as T;
+  if (res.errorCode === "AUTH_EXPIRED") {
+    throw new PlatformAuthExpiredError(platform, res.error, res.outer, res.inner);
+  }
+  throw new Error(res.error);
 };
 
 /** QQ 音乐平台标识 */

@@ -26,8 +26,32 @@ export enum SongUnlockServer {
   CHANGQING = "changqing",
 }
 
-/** 通用响应包装 */
-export type ApiCallResponse = { ok: true; data?: unknown } | { ok: false; error: string };
+/**
+ * 平台接口失败原因分类
+ *
+ * - AUTH_EXPIRED：登录凭据已失效，需要重新登录
+ * - BUSINESS_ERROR：上游给出明确业务结论（非登录态问题）
+ * - UNKNOWN：未归类的失败（网络故障等）
+ */
+export type PlatformErrorCode = "AUTH_EXPIRED" | "BUSINESS_ERROR" | "UNKNOWN";
+
+/**
+ * 通用响应包装
+ *
+ * 失败时除文案外还带上失败原因分类与上游业务码，
+ * 渲染端据此区分「凭据失效」与「网络抖动」，避免误登出。
+ */
+export type ApiCallResponse =
+  | { ok: true; data?: unknown }
+  | {
+      ok: false;
+      error: string;
+      errorCode?: PlatformErrorCode;
+      /** 上游外层业务码 */
+      outer?: number;
+      /** 上游内层业务码 */
+      inner?: number;
+    };
 
 /** 平台账号资料 */
 export interface PlatformProfile {

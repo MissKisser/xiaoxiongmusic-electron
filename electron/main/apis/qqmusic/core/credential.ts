@@ -24,7 +24,7 @@ export interface QQMusicCredential {
  * @returns Cookie 请求头；没有可发送字段时返回 undefined
  */
 export const sessionToCookieHeader = (session: Record<string, string>): string | undefined => {
-  const entries = Object.entries(session).filter(([_, value]) => !!value);
+  const entries = Object.entries(session).filter(([, value]) => !!value);
   return entries.length > 0
     ? entries.map(([key, value]) => `${key}=${value}`).join("; ")
     : undefined;
@@ -76,4 +76,97 @@ export const credentialToSession = (
   if (credential.keyExpiresIn) session.qm_key_expires_in = String(credential.keyExpiresIn);
 
   return session;
+};
+
+/** 凭据有效期信息 */
+export interface QQMusicCredentialTTL {
+  /** 签发时刻（毫秒时间戳） */
+  issuedAt: number;
+  /** 有效期长度（毫秒） */
+  expiresInMs: number;
+  /** 到期时刻（毫秒时间戳） */
+  expiresAt: number;
+  /** 剩余有效期（毫秒） */
+  remainingMs: number;
+}
+
+/**
+ * 秒级时间戳的判定上限
+ *
+ * 1e11 毫秒约为 1973 年，1e11 秒约为公元 5138 年，
+ * 因此小于该值的正数按秒处理，超过则按毫秒处理。
+ */
+const SECONDS_TIMESTAMP_LIMIT = 1e11;
+
+/**
+ * 秒级时长的判定上限
+ *
+ * 1e6 毫秒约 16 分钟，短于此值按秒处理，超过则按毫秒处理。
+ */
+const SECONDS_DURATION_LIMIT = 1e6;
+
+/**
+ * 续期触发阈值：剩余有效期低于总有效期的该比例即触发续期
+ */
+export const REFRESH_THRESHOLD_RATIO = 0.25;
+
+/**
+ * 把时间戳归一化为毫秒
+ *
+ * QM 下发的 `psrf_musickey_createtime` 是秒级时间戳，
+ * 但历史数据里存在毫秒级写法，这里按量级自动区分。
+ * @param value 原始时间戳
+ * @returns 毫秒时间戳
+ */
+export const toTimestampMs = (value: number): number =>
+  value > 0 && value < SECONDS_TIMESTAMP_LIMIT ? value * 1000 : value;
+
+/**
+ * 把时长归一化为毫秒
+ *
+ * QM 下发的 `qm_key_expires_in` 是秒级时长，
+ * 但历史数据里存在毫秒级写法，这里按量级自动区分。
+ * @param value 原始时长
+ * @returns 毫秒时长
+ */
+export const toDurationMs = (value: number): number =>
+  value > 0 && value < SECONDS_DURATION_LIMIT ? value * 1000 : value;
+
+/**
+ * 读取凭据的有效期信息
+ *
+ * 数据来源是登录/续期时落库的 `psrf_musickey_createtime` 与 `qm_key_expires_in`，
+ * 此前只写不读，导致凭据过期后没有任何主动续期的机会。
+ * @param cookies 会话字段
+ * @param now 当前时刻（毫秒时间戳）
+ * @returns 有效期信息；缺少签发时刻或有效期时为 null
+ */
+export const resolveCredentialTTL = (
+  cookies: Record<string, string>,
+  now: number = Date.now(),
+): QQMusicCredentialTTL | null => {
+  const issuedAt = toTimestampMs(Number(cookies.psrf_musickey_createtime ?? 0));
+  const expiresInMs = toDurationMs(Number(cookies.qm_key_expires_in ?? 0));
+  if (!issuedAt || !expiresInMs) return null;
+  const expiresAt = issuedAt + expiresInMs;
+  return { issuedAt, expiresInMs, expiresAt, remainingMs: expiresAt - now };
+};
+
+/**
+ * 判断凭据是否到了续期时机
+ *
+ * 判据：`now >= 签发时刻 + 有效期 * 0.75`，即剩余有效期不足四分之一。
+ * 提前续期是必须的：续期请求本身要携带 musickey，凭据彻底过期后再补救大概率被拒。
+ * @param ttl 凭据有效期信息
+ * @param now 当前时刻（毫秒时间戳）
+ * @param thresholdRatio 触发阈值比例
+ * @returns 是否需要续期
+ */
+export const shouldRefreshCredential = (
+  ttl: QQMusicCredentialTTL | null,
+  now: number = Date.now(),
+  thresholdRatio: number = REFRESH_THRESHOLD_RATIO,
+): boolean => {
+  if (!ttl) return false;
+  return now >= ttl.issuedAt + ttl.expiresInMs * thresholdRatio;
 };

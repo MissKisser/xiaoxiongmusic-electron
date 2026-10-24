@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import initAppServer from "../server";
 import initIpc from "./ipc";
+import { startQQMusicCredentialScheduler } from "./apis/qqmusic/core/request";
 import { shutdownMedia } from "./ipc/ipc-media";
 import { processLog } from "./logger";
 import { MpvService } from "./services/MpvService";
@@ -121,6 +122,8 @@ class MainProcess {
       this.mainTray = initTray(this.mainWindow!);
       // 注册 IPC 通信
       initIpc();
+      // 启动第三方平台凭据续期调度（QQ 音乐凭据有有效期，需在过期前主动续期）
+      startQQMusicCredentialScheduler();
       // 自动启动 WebSocket
       SocketService.tryAutoStart();
     });

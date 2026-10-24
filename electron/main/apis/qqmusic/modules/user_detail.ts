@@ -5,6 +5,7 @@
  */
 
 import { getQQMusicCookies, getQQMusicUin, qmRequest } from "../core/request";
+import { isQQMusicAuthExpired } from "../core/auth";
 import { normalizeQQMusicVip, type QQMusicVipData } from "../core/vip";
 import { coreLog } from "../../../logger";
 import type { QMModule } from "../core/types";
@@ -14,7 +15,12 @@ interface ProfileCreator {
   headpic?: string;
 }
 
-/** 获取用户信息 */
+/**
+ * 获取用户信息
+ *
+ * 鉴权失效必须上抛：只有它代表凭据已死；
+ * 网络异常不代表登录态变化，仍按「无资料」处理，避免误登出。
+ */
 const fetchCgiProfile = async (): Promise<ProfileCreator | null> => {
   try {
     const data = await qmRequest<{
@@ -33,6 +39,7 @@ const fetchCgiProfile = async (): Promise<ProfileCreator | null> => {
       };
     }
   } catch (err) {
+    if (isQQMusicAuthExpired(err)) throw err;
     coreLog.warn("[qm-user-detail] GetLoginUserInfo 接口请求失败:", err);
   }
   return null;
@@ -48,7 +55,7 @@ const fetchVipStatus = async (): Promise<QQMusicVipData | null> => {
   }
 };
 
-const userDetail: QMModule = async (_params) => {
+const userDetail: QMModule = async () => {
   const uin = getQQMusicUin();
   const cookies = getQQMusicCookies();
 
@@ -68,7 +75,23 @@ const userDetail: QMModule = async (_params) => {
     };
   }
 
-  const [creator, vipData] = await Promise.all([fetchCgiProfile(), fetchVipStatus()]);
+  let creator: ProfileCreator | null = null;
+  let vipData: QQMusicVipData | null = null;
+  try {
+    [creator, vipData] = await Promise.all([fetchCgiProfile(), fetchVipStatus()]);
+  } catch (err) {
+    // 鉴权失效：凭据已死且续期失败，明确回报未登录，由界面提示重新登录
+    if (isQQMusicAuthExpired(err)) {
+      coreLog.warn("[qm-user-detail] 凭据已失效:", err);
+      return {
+        code: 401,
+        loggedIn: false,
+        message: "QQ 音乐登录已过期，请重新登录",
+      };
+    }
+    throw err;
+  }
+
   const avatarUrl = creator?.headpic?.replace(/^http:\/\//, "https://");
   const vip = normalizeQQMusicVip(vipData);
   return {

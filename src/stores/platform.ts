@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import type { ApiPlatform, PlatformProfile } from "@/types/shared";
 import type { SongType } from "@/types/main";
-import { platformCall } from "@/api/platform/music";
+import { PlatformAuthExpiredError, platformCall } from "@/api/platform/music";
 import {
   dispatchLikedSongIds,
   dispatchUserPlaylists,
@@ -142,6 +142,9 @@ interface PlatformUserDetail {
   message?: string;
 }
 
+/** 主进程回报「凭据已失效」的业务码 */
+const AUTH_EXPIRED_CODE = 401;
+
 interface PlatformState {
   /** 当前平台 */
   currentPlatform: ApiPlatform;
@@ -173,6 +176,13 @@ interface PlatformState {
    * 平台可用时即装载，任意页面都能判定红心状态。
    */
   likedSongIds: Record<string, Set<number>>;
+  /**
+   * 各平台最近一次账号资料读取是否因凭据失效而失败
+   *
+   * 凭据失效与网络抖动必须分开：前者要提示重新登录且不得回填旧快照，
+   * 后者只保留旧资料，避免界面误显示「未登录」。
+   */
+  authExpired: Record<string, boolean>;
 }
 
 /**
@@ -200,6 +210,8 @@ export const usePlatformStore = defineStore("platform", {
     },
     // 各第三方平台的「我喜欢的音乐」曲目 id 集合
     likedSongIds: {},
+    // 各平台的凭据失效标记
+    authExpired: {},
   }),
 
   getters: {
@@ -409,14 +421,24 @@ export const usePlatformStore = defineStore("platform", {
      * 走主进程平台模块 `user_detail`；未登录时把本地资料清空。
      * 账号标识与已记录的不一致即意味着账号已切换（换号登录），
      * 此时作废该平台的账号维度数据并广播账号变更事件。
+     *
+     * 凭据失效（主进程回报 401 或抛出鉴权失效异常）时按登出处理：
+     * 清空资料与持久化快照、作废账号维度数据并广播账号变更事件，
+     * 由界面提示重新登录——此时不得回填旧快照。
      * @param platform 音源平台
      * @returns 平台账号资料，未登录时为 null
      */
     async refreshProfile(platform: ApiPlatform): Promise<PlatformProfile | null> {
       // 网易云的登录态由既有 `/login/status` 链路维护，不经平台 IPC 通道
       if (platform === "netease") return null;
+      this.authExpired[platform] = false;
       try {
         const res = await platformCall<PlatformUserDetail>(platform, "user_detail");
+        // 主进程明确回报凭据失效：与「未登录」区分开，按登出处理
+        if (res?.code === AUTH_EXPIRED_CODE) {
+          this.handleAuthExpired(platform);
+          return null;
+        }
         const profile = res?.loggedIn && res.profile ? res.profile : null;
         this.platformProfiles[platform] = profile;
         // 账号标识变化 = 账号已切换：作废上一个账号的数据并广播事件
@@ -435,6 +457,11 @@ export const usePlatformStore = defineStore("platform", {
         if (profile) void this.ensureLikedSongs(platform);
         return profile;
       } catch (error) {
+        // 鉴权失效：凭据已死，与网络抖动分开处理
+        if (error instanceof PlatformAuthExpiredError) {
+          this.handleAuthExpired(platform);
+          return null;
+        }
         console.error(`获取 ${PLATFORM_META[platform].name}账号资料失败：`, error);
         this.platformProfiles[platform] = null;
         return null;
@@ -442,10 +469,36 @@ export const usePlatformStore = defineStore("platform", {
     },
 
     /**
-     * 刷新所有第三方平台的账号资料
+     * 处理某平台的凭据失效
+     *
+     * 清空账号资料（持久化快照随之清空）、作废账号维度数据并广播账号变更事件。
+     * @param platform 音源平台
      */
-    async refreshAllProfiles(): Promise<void> {
-      await Promise.all(THIRD_PARTY_PLATFORMS.map((platform) => this.refreshProfile(platform)));
+    handleAuthExpired(platform: ApiPlatform): void {
+      this.authExpired[platform] = true;
+      this.platformProfiles[platform] = null;
+      const previousAccountKey = this.accountKeys[platform] ?? "";
+      this.invalidateAccountData(platform, "");
+      emitAccountChange({
+        platform,
+        accountKey: "",
+        previousAccountKey,
+        loggedIn: false,
+      });
+    },
+
+    /**
+     * 刷新所有第三方平台的账号资料
+     * @returns 凭据失效的平台列表
+     */
+    async refreshAllProfiles(): Promise<ApiPlatform[]> {
+      const results = await Promise.all(
+        THIRD_PARTY_PLATFORMS.map(async (platform) => {
+          await this.refreshProfile(platform);
+          return this.authExpired[platform] ? platform : null;
+        }),
+      );
+      return results.filter((platform): platform is ApiPlatform => !!platform);
     },
 
     /**
