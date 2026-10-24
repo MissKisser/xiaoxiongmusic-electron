@@ -62,38 +62,6 @@
           <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
         </div>
       </div>
-      <!-- 热搜词 -->
-      <div v-else class="rec-public">
-        <n-flex class="title" align="center" justify="space-between">
-          <n-h3 prefix="bar">
-            <n-text>热搜词</n-text>
-          </n-h3>
-        </n-flex>
-        <n-flex v-if="hotWords.length" class="hot-words" align="center" :wrap="true">
-          <n-tag
-            v-for="(item, index) in hotWords"
-            :key="index"
-            :bordered="false"
-            round
-            size="large"
-            @click="searchWord(item.searchWord)"
-          >
-            {{ item.searchWord }}
-          </n-tag>
-        </n-flex>
-        <n-empty
-          v-else
-          :description="hotError ? '热搜词加载失败，点击重试' : '暂无热搜词'"
-          size="large"
-        >
-          <template #icon>
-            <SvgIcon name="SearchOff" />
-          </template>
-        </n-empty>
-        <div v-if="hotError" class="retry">
-          <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
-        </div>
-      </div>
     </template>
   </div>
 </template>
@@ -102,12 +70,8 @@
 import type { CoverType, SongType } from "@/types/main";
 import { NText } from "naive-ui";
 import { onPlatformChange, useMusicStore, usePlatformStore, useSettingStore } from "@/stores";
-import {
-  dispatchHotSearch,
-  dispatchLikedSongs,
-  dispatchSquarePlaylists,
-  type DispatchHotSearchItem,
-} from "@/api/platform/dispatch";
+import { dispatchLikedSongs, dispatchSquarePlaylists } from "@/api/platform/dispatch";
+import { isRouteSupported } from "@/api/platform/capability";
 import { kgDailyRecommend, qqDailyRecommend } from "@/api/platform/daily";
 import { useSongManager } from "@/core/player/SongManager";
 import SvgIcon from "@/components/Global/SvgIcon.vue";
@@ -121,19 +85,27 @@ const settingStore = useSettingStore();
 const musicStore = useMusicStore();
 const songManager = useSongManager();
 
+/** 平台每日推荐页的路由名（能力表按路由名判定是否可用） */
+const PLATFORM_DAILY_ROUTE = "platform-daily-songs";
+
+/**
+ * 首页精选歌单取数条数
+ *
+ * 对齐网易云的首页精选歌单规模：两平台上游都足够出这个量
+ * （QQ 音乐广场端点单页可出 30 条，酷狗按分类关键词轮换取材）。
+ */
+const HOME_SQUARE_LIMIT = 24;
+
 /** 各区块取数失败时的统一提示文案 */
 const ERROR_TEXT: Record<string, string> = {
   daily: "获取每日推荐失败，请重试",
   liked: "获取我喜欢的音乐失败，请重试",
   fm: "获取刷歌推荐失败，请重试",
   square: "获取精选歌单失败，请重试",
-  hot: "获取热搜词失败，请重试",
 };
 
 // 精选歌单
 const squarePlaylists = ref<CoverType[]>([]);
-// 热搜词
-const hotWords = ref<DispatchHotSearchItem[]>([]);
 // 每日推荐曲目与封面
 const dailySongs = ref<SongType[]>([]);
 const dailyCover = ref<string>("");
@@ -147,7 +119,6 @@ const loading = ref<boolean>(true);
 const cardError = ref<string>("");
 // 公共区块失败标记
 const squareError = ref<boolean>(false);
-const hotError = ref<boolean>(false);
 
 /** 已取数的卡片区标识（平台 + 登录态），避免同一次切台重复取数 */
 let cardsKey = "";
@@ -189,10 +160,10 @@ const likedDescription = computed<string>(() => {
  * 首页栏目列表（按「首页栏目配置」的显隐与顺序）
  *
  * 网易云与第三方平台各用各的栏目表：网易云读 `homePageSections`，
- * 第三方平台读 `platformHomePageSections`。
+ * 第三方平台读 `platformHomeSections`（读取时已过滤旧配置里的未知键）。
  */
 const sortedSections = computed(() =>
-  settingStore.platformHomePageSections
+  settingStore.platformHomeSections
     .filter((section) => section.visible)
     .sort((a, b) => a.order - b.order),
 );
@@ -202,11 +173,20 @@ const sortedSections = computed(() =>
  *
  * 平台侧没有每日推荐歌单号，界面统一显示网易云的名称「每日推荐」，
  * 平台原名（「今日推荐歌曲」/「每日歌曲推荐」）只留在数据层。
+ *
+ * 三个平台显式分支：网易云的每日推荐在既有的「每日推荐」页，
+ * 平台每日推荐没有对应数据源，故网易云下不发起请求。
  * @returns 失败提示文案，成功时为空串
  */
 const loadDaily = async (): Promise<string> => {
   try {
     const platform = platformStore.currentPlatform;
+    // 网易云：本卡在网易云下不适用，不发起请求
+    if (platform === "netease") {
+      dailySongs.value = [];
+      dailyCover.value = "";
+      return "";
+    }
     const result = platform === "qqmusic" ? await qqDailyRecommend() : await kgDailyRecommend();
     if (result.code !== 200 || !result.data) {
       dailySongs.value = [];
@@ -314,7 +294,7 @@ const ensureCards = async () => {
 };
 
 /**
- * 读取公共区块数据（精选歌单 / 热搜词）
+ * 读取公共区块数据（精选歌单）
  *
  * 区块标题常驻：无数据时显示空态，取数失败时给出提示与重试入口。
  */
@@ -322,26 +302,16 @@ const loadPublicSections = async () => {
   const platform = platformStore.currentPlatform;
   loading.value = true;
   squareError.value = false;
-  hotError.value = false;
   try {
     // 精选歌单
     try {
-      const square = await dispatchSquarePlaylists(platform, { limit: 12 });
+      const square = await dispatchSquarePlaylists(platform, { limit: HOME_SQUARE_LIMIT });
       squarePlaylists.value = square.playlists;
     } catch (error) {
       console.error("获取平台精选歌单失败：", error);
       squarePlaylists.value = [];
       squareError.value = true;
       window.$message.error(ERROR_TEXT.square);
-    }
-    try {
-      // 热搜词
-      hotWords.value = await dispatchHotSearch(platform);
-    } catch (error) {
-      console.error("获取平台热搜失败：", error);
-      hotWords.value = [];
-      hotError.value = true;
-      window.$message.error(ERROR_TEXT.hot);
     }
   } finally {
     loading.value = false;
@@ -362,21 +332,20 @@ const loadData = async () => {
  * 进入平台每日推荐页
  *
  * 平台侧没有每日推荐歌单号，但每日推荐本身是一组当日曲目，
- * 按网易云每日推荐卡的形态进入列表页浏览。
+ * 按网易云每日推荐卡的形态进入列表页浏览；
+ * 网易云走既有的「每日推荐」页（平台每日推荐页在网易云下不可用）。
  */
 const openDailyRecommend = () => {
-  router.push({ name: "platform-daily-songs" });
+  if (!isRouteSupported(platformStore.currentPlatform, PLATFORM_DAILY_ROUTE)) {
+    router.push({ name: "daily-songs" });
+    return;
+  }
+  router.push({ name: PLATFORM_DAILY_ROUTE });
 };
 
 /** 进入「我喜欢的音乐」页 */
 const openLikedSongs = () => {
   router.push({ name: "like-songs" });
-};
-
-// 按热搜词搜索
-const searchWord = (word: string) => {
-  if (!word) return;
-  router.push({ name: "search-songs", query: { keyword: word } });
 };
 
 // 平台切换：重新拉取首页数据
@@ -478,15 +447,6 @@ onUnmounted(() => {
           transform: translateX(0);
         }
       }
-    }
-  }
-  .hot-words {
-    padding: 12px 4px;
-    gap: 10px;
-    .n-tag {
-      cursor: pointer;
-      font-size: 14px;
-      padding: 0 16px;
     }
   }
   .retry {

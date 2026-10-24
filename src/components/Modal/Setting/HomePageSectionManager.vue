@@ -45,13 +45,13 @@ const sortableRef = ref<HTMLElement | null>(null);
 /**
  * 当前平台的首页栏目列表
  *
- * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单与热搜词），
+ * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单），
  * 两批配置分开存放，按当前平台取用。
  */
 const sections = computed(() =>
   platformStore.currentPlatform === "netease"
     ? settingStore.homePageSections
-    : settingStore.platformHomePageSections,
+    : settingStore.platformHomeSections,
 );
 
 /** 排序实例的停止函数（切换平台后需按新列表重建） */
@@ -77,11 +77,7 @@ const updateSortOrder = () => {
  */
 const setupSortable = () => {
   stopSortable?.();
-  const list = (
-    platformStore.currentPlatform === "netease"
-      ? settingStore.homePageSections
-      : settingStore.platformHomePageSections
-  ) as HomeSectionItem[];
+  const list = sections.value as HomeSectionItem[];
   stopSortable = useSortable(sortableRef, list, {
     animation: 150,
     handle: ".n-icon",

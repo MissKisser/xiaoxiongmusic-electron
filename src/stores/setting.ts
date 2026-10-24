@@ -15,6 +15,15 @@ import { CURRENT_SETTING_SCHEMA_VERSION, settingMigrations } from "./migrations/
 import { ThemeColorType } from "@/types/color";
 import type { LyricPriority } from "@/types/lyric";
 
+/**
+ * 第三方平台首页栏目键
+ *
+ * 唯一真源：第三方平台首页当前只有「精选歌单」一个栏目。
+ * 读取持久化配置时按本表过滤未知键 —— 旧版本残留的已下线栏目键
+ * （如「热搜词」）既不参与渲染，也不进配置面板。
+ */
+export const PLATFORM_HOME_SECTION_KEYS = ["square"] as const;
+
 export interface SettingState {
   /** Schema 版本号 */
   schemaVersion?: number;
@@ -455,11 +464,11 @@ export interface SettingState {
   /**
    * 第三方平台首页栏目顺序和显示配置
    *
-   * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单与热搜词），
+   * 网易云与第三方平台的首页栏目不是同一批（平台侧只有精选歌单），
    * 故分开配置：网易云读 `homePageSections`，第三方平台读本项。
    */
   platformHomePageSections: Array<{
-    key: "square" | "hot";
+    key: (typeof PLATFORM_HOME_SECTION_KEYS)[number];
     name: string;
     visible: boolean;
     order: number;
@@ -772,10 +781,7 @@ export const useSettingStore = defineStore("setting", {
       { key: "radio", name: "推荐播客", visible: true, order: 4 },
       { key: "album", name: "新碟上架", visible: true, order: 5 },
     ],
-    platformHomePageSections: [
-      { key: "square", name: "精选歌单", visible: true, order: 0 },
-      { key: "hot", name: "热搜词", visible: true, order: 1 },
-    ],
+    platformHomePageSections: [{ key: "square", name: "精选歌单", visible: true, order: 0 }],
     userAgreementVersion: "",
     registryProtocol: {
       orpheus: false,
@@ -827,6 +833,19 @@ export const useSettingStore = defineStore("setting", {
     isLastfmConfigured(state): boolean {
       const { lastfm } = state;
       return Boolean(lastfm.apiKey && lastfm.apiSecret);
+    },
+    /**
+     * 第三方平台首页栏目（按真源过滤未知键）
+     *
+     * 旧版本持久化的栏目配置里可能残留已下线的键（如「热搜词」），
+     * 读取时过滤掉，避免残留项进入渲染与配置面板。
+     * @param state 设置状态
+     * @returns 可用的第三方平台首页栏目
+     */
+    platformHomeSections(state): SettingState["platformHomePageSections"] {
+      return state.platformHomePageSections.filter((item) =>
+        (PLATFORM_HOME_SECTION_KEYS as readonly string[]).includes(item?.key),
+      );
     },
   },
   actions: {
@@ -892,5 +911,15 @@ export const useSettingStore = defineStore("setting", {
   persist: {
     key: "setting-store",
     storage: localStorage,
+    // 恢复旧配置后剔除已下线的第三方平台首页栏目键（如「热搜词」），
+    // 避免残留项长期留在持久化数据里；读取侧的 getter 另有兜底过滤
+    afterHydrate: (context) => {
+      const sections = context.store?.platformHomePageSections;
+      if (!Array.isArray(sections)) return;
+      const kept = sections.filter((item) =>
+        (PLATFORM_HOME_SECTION_KEYS as readonly string[]).includes(item?.key),
+      );
+      if (kept.length !== sections.length) context.store.platformHomePageSections = kept;
+    },
   },
 });
