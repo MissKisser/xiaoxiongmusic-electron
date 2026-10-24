@@ -1,12 +1,20 @@
 <template>
   <div :class="['player-data', settingStore.playerType, { center, light }]">
     <!-- 名称 -->
-    <div class="name">
+    <div :class="['name', { 'has-like': showFmLike }]">
       <span class="name-text text-hidden">{{
         settingStore.hideLyricBrackets
           ? removeBrackets(musicStore.playSong.name)
           : musicStore.playSong.name || "未知曲目"
       }}</span>
+      <!-- 收藏（刷歌常驻入口） -->
+      <SvgIcon
+        v-if="showFmLike"
+        :name="isSongLikedNow(musicStore.playSong) ? 'Favorite' : 'FavoriteBorder'"
+        :size="22"
+        class="fm-like"
+        @click.stop="toggleSongLiked(musicStore.playSong)"
+      />
       <!-- 额外信息 -->
       <n-flex
         v-if="statusStore.playUblock || musicStore.playSong.pc"
@@ -146,9 +154,12 @@ import { songQuality } from "@/api/song";
 import { songLevelData, getSongLevelsData, AI_AUDIO_LEVELS } from "@/utils/meta";
 import { formatFileSize, handleSongQuality } from "@/utils/helper";
 import { usePlayerController } from "@/core/player/PlayerController";
+import { useSongLiked } from "@/composables/useSongLiked";
+import { useMobile } from "@/composables/useMobile";
 import { removeBrackets } from "@/utils/format";
 import { openArtistJump } from "@/utils/modal";
 import { canJumpAlbum, jumpToAlbum } from "@/utils/album";
+import { resolveSongPlatform } from "@/utils/songPlatform";
 
 defineProps<{
   center?: boolean;
@@ -160,6 +171,22 @@ const router = useRouter();
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
+const { isSongLikedNow, toggleSongLiked } = useSongLiked();
+const { isTablet } = useMobile();
+
+/**
+ * 是否展示刷歌的常驻收藏入口
+ *
+ * 全屏播放器的收藏按钮位于底部控制条的悬停分组内，鼠标不落在控制条上时不可见；
+ * 而底部常驻播放条又被全屏浮层遮住，于是刷歌（全屏播放器）里没有可发现的收藏入口。
+ * 这里为 QQ 音乐 / 酷狗音乐的刷歌补一个常驻收藏入口，网易云路径保持原样。
+ */
+const showFmLike = computed<boolean>(() => {
+  if (isTablet.value) return false;
+  if (!statusStore.personalFmMode) return false;
+  if (musicStore.playSong.type === "radio") return false;
+  return resolveSongPlatform(musicStore.playSong) !== "netease";
+});
 
 // 音质选择菜单状态
 const qualityLoading = ref(false);
@@ -404,6 +431,22 @@ const jumpAlbum = debounce(
       margin-left: 12px;
       transform: translateY(1px);
       cursor: pointer;
+    }
+    // 刷歌常驻收藏入口
+    .fm-like {
+      margin-left: 12px;
+      flex-shrink: 0;
+      opacity: 0.85;
+      transition: opacity 0.2s;
+      &:hover {
+        opacity: 1;
+      }
+    }
+    // 带收藏入口时歌名允许收缩，保证收藏入口始终可见
+    &.has-like {
+      .name-text {
+        min-width: 0;
+      }
     }
   }
   .alia {
