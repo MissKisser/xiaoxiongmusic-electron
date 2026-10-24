@@ -45,7 +45,7 @@ import { type DispatchPlaylist } from "./dispatch";
 import { describeFailure } from "./errorText";
 import { platformRequest, platformRequestBody, platformWriteRequest } from "./http";
 import { normalizeQqPlaylist } from "./qqmusic";
-import { kgFindLikedPlaylist, normalizeKgPlaylist } from "./kugou";
+import { kgFindLikedPlaylist, normalizeKgHash, normalizeKgPlaylist } from "./kugou";
 import type { PlatformPlaylist } from "./types";
 
 /** 写操作统一返回 */
@@ -262,7 +262,7 @@ const toKgSongEntry = (song: SongType) => {
     .filter(Boolean)
     .join(" / ");
   return {
-    hash: String(song.platformId ?? "").toUpperCase(),
+    hash: normalizeKgHash(song.platformId ?? ""),
     name: String(song.name ?? ""),
     singer,
     album_id: Number(album?.id ?? 0),

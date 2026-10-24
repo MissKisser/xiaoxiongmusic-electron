@@ -70,14 +70,19 @@ export const PLATFORM_UNSUPPORTED_ROUTES: Record<ApiPlatform, string[]> = {
 
 /**
  * 判断路由在指定平台下是否可用
+ *
+ * 判定顺序：平台级不支持表 → 网易云专属早退 → 网易云独有能力表。
+ * 平台级不支持表必须先判，否则网易云的早退会把
+ * `PLATFORM_UNSUPPORTED_ROUTES.netease` 里的条目放行（该表本就是网易云专属的排除项）。
  * @param platform 音源平台
  * @param routeName 路由名
  * @returns 是否可用
  */
 export const isRouteSupported = (platform: ApiPlatform, routeName: string): boolean => {
+  if ((PLATFORM_UNSUPPORTED_ROUTES[platform] ?? []).includes(routeName)) return false;
   if (platform === "netease") return true;
   if (NETEASE_ONLY_ROUTES.includes(routeName)) return false;
-  return !(PLATFORM_UNSUPPORTED_ROUTES[platform] ?? []).includes(routeName);
+  return true;
 };
 
 /**

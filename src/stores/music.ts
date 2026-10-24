@@ -39,6 +39,7 @@ const defaultMusicData: SongType = {
   free: 0,
   mv: null,
   type: "song",
+  platform: "netease",
 };
 
 export const useMusicStore = defineStore("music", {

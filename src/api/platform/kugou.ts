@@ -44,6 +44,17 @@ import {
 /** 酷狗平台标识 */
 export const KUGOU = "kugou" as const;
 
+/**
+ * 规范化酷狗歌曲 hash
+ *
+ * 酷狗的内容哈希（`hash` / `FileHash`）在不同上游通道里大小写不一致，
+ * 而应用内多处把它当身份键用（写操作定位、播放取链、原唱判据查表）。
+ * 统一为大写后，同一首歌在各链路口径一致，不会因大小写不同而互相认不出。
+ * @param hash 原始 hash
+ * @returns 规范化后的 hash
+ */
+export const normalizeKgHash = (hash: unknown): string => String(hash ?? "").trim().toUpperCase();
+
 /** 主进程酷狗搜索模块的原生返回 */
 interface KgSearchResponse {
   code?: number;
@@ -266,7 +277,7 @@ const buildKgOriginalIndex = (raw: unknown): KgOriginalIndex => {
       return;
     }
     const record = node as Record<string, any>;
-    const hash = String(record.hash ?? record.FileHash ?? "");
+    const hash = normalizeKgHash(record.hash ?? record.FileHash ?? "");
     if (hash) {
       const flag = readKgOriginalFlag(record);
       if (flag !== undefined) index.set(hash, flag);
@@ -308,7 +319,7 @@ export const normalizeKgSong = (
     : splitArtistsByPlatform(song?.artist, KUGOU);
   // 付费判据：基档授权位（歌曲级 `pay.privilege`，或各音质档位取最低码率那一档）
   const fee = resolveKgFee(pickBasePrivilege(song));
-  const hash = String(song?.hash ?? "");
+  const hash = normalizeKgHash(song?.hash ?? "");
 
   return {
     id: Number(song?.mixSongId ?? song?.albumAudioId ?? song?.audioId ?? song?.audio_id ?? 0) || 0,
@@ -606,7 +617,7 @@ export const kgSongUrl = async (
   quality = "hq",
   options: { albumId?: number; albumAudioId?: number } = {},
 ): Promise<PlatformSongUrl> => {
-  const hash = typeof song === "string" ? song : (song.platformId ?? String(song.id));
+  const hash = normalizeKgHash(typeof song === "string" ? song : (song.platformId ?? song.id));
   // 播放状态（付费墙 / 无授权）与授权位放在响应体里，
   // 这里取回业务体而不直接抛异常，交给播放层翻译成用户可读提示。
   const res = await platformRequestBody<KgSongUrlResponse>(KUGOU, "song_url", {
@@ -628,7 +639,7 @@ export const kgLyric = async (
 ): Promise<PlatformLyric> => {
   const isRaw = typeof song === "string";
   const res = await platformRequest<KgLyricResponse>(KUGOU, "lyric", {
-    hash: isRaw ? song : (song.platformId ?? String(song.id)),
+    hash: normalizeKgHash(isRaw ? song : (song.platformId ?? song.id)),
     name: isRaw ? "" : song.name,
     // 酷狗歌词接口的时长单位为秒
     duration: isRaw ? 0 : Math.round(song.duration / 1000),

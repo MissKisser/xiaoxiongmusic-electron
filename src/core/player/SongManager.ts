@@ -5,7 +5,7 @@ import {
   PLAYBACK_FAILED_TEXT,
   type PlatformFailure,
 } from "@/api/platform/errorText";
-import { kgSongUrl } from "@/api/platform/kugou";
+import { kgSongUrl, normalizeKgHash } from "@/api/platform/kugou";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { kgSongFM, qqSongFM } from "@/api/platform/songfm";
 import { getPlatformLevel, mapPlatformQuality, type PlatformSongUrl } from "@/api/platform/types";
@@ -33,7 +33,7 @@ import {
   type ProbeSource,
 } from "@/utils/probeSampling";
 import { sanitizeUrl } from "@/utils/sanitize";
-import { isAudiobookSong } from "@/utils/songPlatform";
+import { isAudiobookSong, resolveSongPlatform } from "@/utils/songPlatform";
 import { getPlatformLabel, getUnlockPriority } from "@/utils/unlockPriority";
 
 /**
@@ -55,13 +55,6 @@ export type AudioSource = {
   /** 播放失败的用户可读原因（无源可用时给出） */
   failureReason?: string;
 };
-
-/**
- * 取歌曲的来源平台
- * @param song 歌曲
- * @returns 来源平台，缺省为网易云
- */
-const resolvePlatform = (song: SongType): ApiPlatform => song.platform ?? "netease";
 
 /** 推荐流单批曲目数（QQ 音乐推荐流一批的取回数） */
 const SONG_FM_BATCH_SIZE = 20;
@@ -137,7 +130,7 @@ const describeUnlockError = (error: unknown): string => {
  * @returns 缓存键
  */
 const buildCacheKey = (song: SongType): string | number => {
-  const platform = resolvePlatform(song);
+  const platform = resolveSongPlatform(song);
   return platform === "netease" ? song.id : `${platform}-${song.id}`;
 };
 
@@ -148,7 +141,7 @@ const buildCacheKey = (song: SongType): string | number => {
  * @returns 播放标识
  */
 const buildPlayKey = (song: SongType, songId: number): string =>
-  `${resolvePlatform(song)}:${songId}`;
+  `${resolveSongPlatform(song)}:${songId}`;
 
 class SongManager {
   /** 预载下一首歌曲播放信息 */
@@ -329,7 +322,7 @@ class SongManager {
     songId: number,
     isPc: boolean = false,
   ): Promise<AudioSource> => {
-    const platform = resolvePlatform(song);
+    const platform = resolveSongPlatform(song);
     if (platform === "qqmusic") return this.getQqOnlineUrl(song);
     if (platform === "kugou") return this.getKgOnlineUrl(song);
     return this.getNeteaseOnlineUrl(songId, isPc);
@@ -441,7 +434,7 @@ class SongManager {
    */
   private getKgOnlineUrl = async (song: SongType): Promise<AudioSource> => {
     const settingStore = useSettingStore();
-    const hash = song.platformId ?? String(song.id);
+    const hash = normalizeKgHash(song.platformId ?? song.id);
     const level = getPlatformLevel("kugou", settingStore.songLevel);
     // 听书章节的音频要靠专辑号与章节号定位，取链时带上；
     // 普通酷狗歌曲按原口径只带 hash，避免影响既有取链行为
@@ -571,7 +564,7 @@ class SongManager {
     }
 
     // 第三方平台的歌曲不参与网易云按 id 寻址，改走关键词检索
-    const platform = resolvePlatform(song);
+    const platform = resolveSongPlatform(song);
     const isNeteaseSong = platform === "netease";
     const useKeywordLookup = !isNeteaseSong;
     if (useKeywordLookup && !artist) {

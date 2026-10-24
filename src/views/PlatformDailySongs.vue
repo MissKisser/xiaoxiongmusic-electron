@@ -60,8 +60,24 @@
         <n-button size="small" secondary @click="loadDaily">重试</n-button>
       </n-flex>
     </n-alert>
+    <!-- 网易云：本页是第三方平台专属页，引导到网易云既有的「每日推荐」页 -->
+    <n-empty
+      v-if="neteaseGuide"
+      class="guide"
+      description="网易云的每日推荐在「每日推荐」页，本页为 QQ 音乐与酷狗音乐专属"
+      size="large"
+    >
+      <template #icon>
+        <SvgIcon name="Calendar-Empty" />
+      </template>
+      <template #extra>
+        <n-button type="primary" secondary size="small" @click="goNeteaseDaily">
+          前往「每日推荐」页
+        </n-button>
+      </template>
+    </n-empty>
     <!-- 曲目列表 -->
-    <SongList :data="songs" :loading="loading" height="auto" disabledSort />
+    <SongList v-else :data="songs" :loading="loading" height="auto" disabledSort />
   </div>
 </template>
 
@@ -76,6 +92,7 @@ import SongList from "@/components/List/SongList.vue";
 
 const platformStore = usePlatformStore();
 const player = usePlayerController();
+const router = useRouter();
 
 // 加载状态
 const loading = ref<boolean>(true);
@@ -87,6 +104,8 @@ const cover = ref<string>("");
 const date = ref<string>("");
 // 失败提示
 const errorText = ref<string>("");
+// 网易云引导态：本页是第三方平台专属页，网易云走既有的「每日推荐」页
+const neteaseGuide = ref<boolean>(false);
 
 /** 头部日期文案 */
 const dateText = computed<string>(() => {
@@ -105,12 +124,24 @@ const tipText = computed<string>(
  *
  * 平台侧没有每日推荐歌单号，取数由平台每日推荐模块给出，
  * 失败时保留列表骨架并给出重试入口。
+ *
+ * 三个平台显式分支：网易云没有平台每日推荐（走既有的「每日推荐」页），
+ * 因此不发起请求；QQ 音乐与酷狗各走自己的每日推荐模块。
  */
 const loadDaily = async () => {
   loading.value = true;
   errorText.value = "";
+  neteaseGuide.value = false;
   try {
     const platform = platformStore.currentPlatform;
+    // 网易云：本页没有对应数据源，只给引导
+    if (platform === "netease") {
+      songs.value = [];
+      cover.value = "";
+      date.value = "";
+      neteaseGuide.value = true;
+      return;
+    }
     const result = platform === "qqmusic" ? await qqDailyRecommend() : await kgDailyRecommend();
     if (result.code !== 200 || !result.data) {
       songs.value = [];
@@ -140,6 +171,11 @@ const playAll = async () => {
     return;
   }
   await player.updatePlayList(songs.value);
+};
+
+/** 前往网易云既有的「每日推荐」页 */
+const goNeteaseDaily = () => {
+  router.push({ name: "daily-songs" });
 };
 
 // 平台切换：按新平台重取每日推荐
@@ -219,6 +255,9 @@ onActivated(() => {
   }
   .error {
     margin-bottom: 16px;
+  }
+  .guide {
+    margin-top: 40px;
   }
   .song-list {
     height: auto;

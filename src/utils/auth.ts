@@ -23,6 +23,7 @@ import { isElectron } from "./env";
 import { likePlaylist, playlistTracks } from "@/api/playlist";
 import { likeSong as manageLikeSong } from "@/api/platform/manage";
 import { notifyLikedSongsChanged } from "./likedEvents";
+import { resolveSongPlatform } from "./songPlatform";
 import { likeArtist } from "@/api/artist";
 import { likeAlbum } from "@/api/album";
 import { radioSub } from "@/api/radio";
@@ -227,8 +228,9 @@ export const toLikeSong: DebouncedFunc<(song: SongType, like: boolean) => Promis
   async (song: SongType, like: boolean): Promise<void> => {
     try {
       // 第三方平台歌曲：走平台「喜欢」机制（特殊歌单的曲目写操作）
-      if (song.platform && song.platform !== "netease") {
-        const result = await manageLikeSong(song.platform, song, like);
+      const platform = resolveSongPlatform(song);
+      if (platform !== "netease") {
+        const result = await manageLikeSong(platform, song, like);
         if (!result.ok) {
           window.$message.error(result.message || `${like ? "喜欢" : "取消"}音乐时发生错误`);
           return;

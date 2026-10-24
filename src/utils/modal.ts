@@ -5,6 +5,7 @@ import { CURRENT_AGREEMENT_VERSION } from "@/constants/agreement";
 import { NScrollbar } from "naive-ui";
 import { isLogin } from "./auth";
 import { isThirdPartyArtist, jumpToArtist } from "./artist";
+import { resolveSongPlatform } from "./songPlatform";
 import { isArray, isFunction } from "lodash-es";
 import { useDataStore, useSettingStore } from "@/stores";
 import Login from "@/components/Modal/Login/Login.vue";
@@ -302,7 +303,7 @@ export const openUpdatePlaylist = (
 export const openDownloadSong = (song: SongType) => {
   const dataStore = useDataStore();
   // 第三方平台歌曲：网易云的登录与会员校验不适用，音频直链由平台下载分派按平台取
-  if (song && (song.platform ?? "netease") !== "netease") {
+  if (song && resolveSongPlatform(song) !== "netease") {
     const platformModal = window.$modal.create({
       preset: "card",
       transformOrigin: "center",

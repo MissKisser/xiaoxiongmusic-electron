@@ -61,7 +61,11 @@ export const formatSongsList = (data: any[]): SongType[] => {
               id: (item.album || item.al)?.id,
               name: (item.album || item.al)?.name,
               cover: (item.album || item.al)?.picUrl,
+              platformId: (item.album || item.al)?.platformId,
             },
+      // 平台维度透传：第三方歌曲误入本格式化链路时不丢平台与平台内主键
+      platform: item.platform,
+      platformId: item.platformId,
       alia: isArray(item.alia || item.alias || item.transNames || item.tns)
         ? item.alia?.[0] || item.alias?.[0] || item.transNames?.[0] || item.tns?.[0]
         : item.alia,
