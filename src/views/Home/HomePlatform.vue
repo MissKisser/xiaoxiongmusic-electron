@@ -41,17 +41,30 @@
     <template v-for="section in sortedSections" :key="section.key">
       <!-- 精选歌单 -->
       <div v-if="section.key === 'square'" class="rec-public">
-        <n-flex
-          class="title"
-          align="center"
-          justify="space-between"
-          @click="router.push({ name: 'discover-playlists' })"
-        >
-          <n-h3 prefix="bar">
-            <n-text>精选歌单</n-text>
-            <SvgIcon :size="26" name="Right" />
-          </n-h3>
-        </n-flex>
+        <div class="section-head">
+          <n-flex
+            class="title"
+            align="center"
+            justify="space-between"
+            @click="router.push({ name: 'discover-playlists' })"
+          >
+            <n-h3 prefix="bar">
+              <n-text>精选歌单</n-text>
+              <SvgIcon :size="26" name="Right" />
+            </n-h3>
+          </n-flex>
+          <!-- 分类切换：QQ 音乐的歌单广场按分类取材 -->
+          <n-space v-if="squareCategories.length" :size="14" class="cats">
+            <n-text
+              v-for="cat in squareCategories"
+              :key="cat.id"
+              :class="['cat', { active: cat.id === squareCategory }]"
+              @click="switchSquareCategory(cat.id)"
+            >
+              {{ cat.name }}
+            </n-text>
+          </n-space>
+        </div>
         <CoverList
           :data="squarePlaylists"
           type="playlist"
@@ -59,6 +72,66 @@
           :empty-description="squareError ? '精选歌单加载失败，点击重试' : undefined"
         />
         <div v-if="squareError" class="retry">
+          <n-button size="small" secondary @click="loadSquareBlock">重试</n-button>
+        </div>
+      </div>
+      <!-- 为你推荐 -->
+      <div v-else-if="section.key === 'recommend'" class="rec-public">
+        <div class="section-head">
+          <n-flex
+            class="title"
+            align="center"
+            justify="space-between"
+            @click="openMore('recommend')"
+          >
+            <n-h3 prefix="bar">
+              <n-text>为你推荐</n-text>
+              <SvgIcon v-if="moreRoute('recommend')" :size="26" name="Right" />
+            </n-h3>
+          </n-flex>
+        </div>
+        <CoverList
+          :data="recommendPlaylists"
+          type="playlist"
+          :loading="loading"
+          :empty-description="recommendError ? '为你推荐加载失败，点击重试' : undefined"
+        />
+        <div v-if="recommendError" class="retry">
+          <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
+        </div>
+      </div>
+      <!-- 歌手推荐 -->
+      <div v-else-if="section.key === 'singer'" class="rec-public">
+        <div class="section-head">
+          <n-flex class="title" align="center" justify="space-between" @click="openMore('singer')">
+            <n-h3 prefix="bar">
+              <n-text>歌手推荐</n-text>
+              <SvgIcon v-if="moreRoute('singer')" :size="26" name="Right" />
+            </n-h3>
+          </n-flex>
+        </div>
+        <ArtistList :data="singerArtists" :loading="loading" />
+        <div v-if="singerError" class="retry">
+          <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
+        </div>
+      </div>
+      <!-- 新碟上架 -->
+      <div v-else-if="section.key === 'album'" class="rec-public">
+        <div class="section-head">
+          <n-flex class="title" align="center" justify="space-between">
+            <n-h3 prefix="bar">
+              <n-text>新碟上架</n-text>
+              <SvgIcon v-if="moreRoute('album')" :size="26" name="Right" />
+            </n-h3>
+          </n-flex>
+        </div>
+        <CoverList
+          :data="albumCovers"
+          type="album"
+          :loading="loading"
+          :empty-description="albumError ? '新碟上架加载失败，点击重试' : undefined"
+        />
+        <div v-if="albumError" class="retry">
           <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
         </div>
       </div>
@@ -67,15 +140,24 @@
 </template>
 
 <script setup lang="ts">
-import type { CoverType, SongType } from "@/types/main";
+import type { ArtistType, CoverType, SongType } from "@/types/main";
 import { NText } from "naive-ui";
 import { onPlatformChange, useMusicStore, usePlatformStore, useSettingStore } from "@/stores";
-import { dispatchLikedSongs, dispatchSquarePlaylists } from "@/api/platform/dispatch";
-import { isRouteSupported } from "@/api/platform/capability";
+import {
+  dispatchHomeAlbums,
+  dispatchHomeRecommend,
+  dispatchHomeSingers,
+  dispatchHomeSquare,
+  dispatchLikedSongs,
+  dispatchSquarePlaylists,
+} from "@/api/platform/dispatch";
+import { isHomeSectionSupported, isRouteSupported } from "@/api/platform/capability";
+import { QQ_HOME_SQUARE_CATEGORIES } from "@/api/platform/qqmusic";
 import { kgDailyRecommend, qqDailyRecommend } from "@/api/platform/daily";
 import { useSongManager } from "@/core/player/SongManager";
 import SvgIcon from "@/components/Global/SvgIcon.vue";
 import CoverList from "@/components/List/CoverList.vue";
+import ArtistList from "@/components/List/ArtistList.vue";
 import SongListCard from "@/components/Card/SongListCard.vue";
 import SongFM from "@/components/Player/PlayerComponents/SongFM.vue";
 
@@ -96,16 +178,45 @@ const PLATFORM_DAILY_ROUTE = "platform-daily-songs";
  */
 const HOME_SQUARE_LIMIT = 24;
 
+/** 首页「为你推荐」取数条数 */
+const HOME_RECOMMEND_LIMIT = 12;
+
+/** 首页「歌手推荐」取数条数 */
+const HOME_SINGER_LIMIT = 12;
+
+/** 首页「新碟上架」取数条数 */
+const HOME_ALBUM_LIMIT = 12;
+
+/**
+ * 首页各区块的「更多」入口路由
+ *
+ * 路由是否可用由能力表判定，没有对应子页的区块不给更多入口。
+ */
+const SECTION_MORE_ROUTE: Record<string, string> = {
+  square: "discover-playlists",
+  recommend: "discover-playlists",
+  singer: "discover-artists",
+};
+
 /** 各区块取数失败时的统一提示文案 */
 const ERROR_TEXT: Record<string, string> = {
   daily: "获取每日推荐失败，请重试",
   liked: "获取我喜欢的音乐失败，请重试",
   fm: "获取刷歌推荐失败，请重试",
   square: "获取精选歌单失败，请重试",
+  recommend: "获取为你推荐失败，请重试",
+  singer: "获取歌手推荐失败，请重试",
+  album: "获取新碟上架失败，请重试",
 };
 
 // 精选歌单
 const squarePlaylists = ref<CoverType[]>([]);
+// 为你推荐歌单
+const recommendPlaylists = ref<CoverType[]>([]);
+// 歌手推荐
+const singerArtists = ref<ArtistType[]>([]);
+// 新碟上架
+const albumCovers = ref<CoverType[]>([]);
 // 每日推荐曲目与封面
 const dailySongs = ref<SongType[]>([]);
 const dailyCover = ref<string>("");
@@ -119,6 +230,20 @@ const loading = ref<boolean>(true);
 const cardError = ref<string>("");
 // 公共区块失败标记
 const squareError = ref<boolean>(false);
+const recommendError = ref<boolean>(false);
+const singerError = ref<boolean>(false);
+const albumError = ref<boolean>(false);
+// 精选歌单当前分类
+const squareCategory = ref<number>(QQ_HOME_SQUARE_CATEGORIES[0].id);
+
+/**
+ * 精选歌单的分类清单
+ *
+ * 只有 QQ 音乐的歌单广场有分类维度，其它平台没有分类可切。
+ */
+const squareCategories = computed(() =>
+  platformStore.currentPlatform === "qqmusic" ? [...QQ_HOME_SQUARE_CATEGORIES] : [],
+);
 
 /** 已取数的卡片区标识（平台 + 登录态），避免同一次切台重复取数 */
 let cardsKey = "";
@@ -161,12 +286,35 @@ const likedDescription = computed<string>(() => {
  *
  * 网易云与第三方平台各用各的栏目表：网易云读 `homePageSections`，
  * 第三方平台读 `platformHomeSections`（读取时已过滤旧配置里的未知键）。
+ * 当前平台没有数据源的区块不渲染。
  */
 const sortedSections = computed(() =>
   settingStore.platformHomeSections
     .filter((section) => section.visible)
+    .filter((section) => isHomeSectionSupported(platformStore.currentPlatform, section.key))
     .sort((a, b) => a.order - b.order),
 );
+
+/**
+ * 取区块的「更多」入口路由
+ * @param key 区块键
+ * @returns 可用的路由名，没有时为空串
+ */
+const moreRoute = (key: string): string => {
+  const route = SECTION_MORE_ROUTE[key] ?? "";
+  if (!route) return "";
+  return isRouteSupported(platformStore.currentPlatform, route) ? route : "";
+};
+
+/**
+ * 进入区块的「更多」页
+ * @param key 区块键
+ */
+const openMore = (key: string) => {
+  const route = moreRoute(key);
+  if (!route) return;
+  router.push({ name: route });
+};
 
 /**
  * 读取当前平台的每日推荐
@@ -294,25 +442,107 @@ const ensureCards = async () => {
 };
 
 /**
- * 读取公共区块数据（精选歌单）
+ * 读取精选歌单区块
+ *
+ * QQ 音乐走歌单广场（可按分类切换），酷狗沿用既有的广场通道。
+ */
+const loadSquareBlock = async () => {
+  const platform = platformStore.currentPlatform;
+  squareError.value = false;
+  try {
+    if (platform === "qqmusic") {
+      const square = await dispatchHomeSquare(platform, {
+        category: squareCategory.value,
+        limit: HOME_SQUARE_LIMIT,
+      });
+      squarePlaylists.value = square.items;
+      return;
+    }
+    const square = await dispatchSquarePlaylists(platform, { limit: HOME_SQUARE_LIMIT });
+    squarePlaylists.value = square.playlists;
+  } catch (error) {
+    console.error("获取平台精选歌单失败：", error);
+    squarePlaylists.value = [];
+    squareError.value = true;
+    window.$message.error(ERROR_TEXT.square);
+  }
+};
+
+/**
+ * 读取首页公共区块数据
  *
  * 区块标题常驻：无数据时显示空态，取数失败时给出提示与重试入口。
+ * 「为你推荐 / 歌手推荐 / 新碟上架」目前只有 QQ 音乐有数据源，
+ * 其它平台不发起请求，区块也不渲染。
  */
 const loadPublicSections = async () => {
   const platform = platformStore.currentPlatform;
   loading.value = true;
   squareError.value = false;
+  recommendError.value = false;
+  singerError.value = false;
+  albumError.value = false;
   try {
     // 精选歌单
-    try {
-      const square = await dispatchSquarePlaylists(platform, { limit: HOME_SQUARE_LIMIT });
-      squarePlaylists.value = square.playlists;
-    } catch (error) {
-      console.error("获取平台精选歌单失败：", error);
-      squarePlaylists.value = [];
-      squareError.value = true;
-      window.$message.error(ERROR_TEXT.square);
+    await loadSquareBlock();
+
+    if (platform !== "qqmusic") {
+      recommendPlaylists.value = [];
+      singerArtists.value = [];
+      albumCovers.value = [];
+      return;
     }
+
+    // 为你推荐
+    try {
+      const recommend = await dispatchHomeRecommend(platform, { limit: HOME_RECOMMEND_LIMIT });
+      recommendPlaylists.value = recommend.items;
+    } catch (error) {
+      console.error("获取为你推荐失败：", error);
+      recommendPlaylists.value = [];
+      recommendError.value = true;
+      window.$message.error(ERROR_TEXT.recommend);
+    }
+
+    // 歌手推荐
+    try {
+      const singers = await dispatchHomeSingers(platform, { limit: HOME_SINGER_LIMIT });
+      singerArtists.value = singers.artists;
+    } catch (error) {
+      console.error("获取歌手推荐失败：", error);
+      singerArtists.value = [];
+      singerError.value = true;
+      window.$message.error(ERROR_TEXT.singer);
+    }
+
+    // 新碟上架
+    try {
+      const albums = await dispatchHomeAlbums(platform, { limit: HOME_ALBUM_LIMIT });
+      albumCovers.value = albums.items;
+    } catch (error) {
+      console.error("获取新碟上架失败：", error);
+      albumCovers.value = [];
+      albumError.value = true;
+      window.$message.error(ERROR_TEXT.album);
+    }
+  } finally {
+    loading.value = false;
+  }
+};
+
+/**
+ * 切换精选歌单的分类
+ *
+ * 分类切换只重取精选歌单区块，其余区块数据保持不动。
+ * @param category 分类号
+ */
+const switchSquareCategory = async (category: number) => {
+  if (category === squareCategory.value) return;
+  squareCategory.value = category;
+  squarePlaylists.value = [];
+  loading.value = true;
+  try {
+    await loadSquareBlock();
   } finally {
     loading.value = false;
   }
@@ -424,6 +654,29 @@ onUnmounted(() => {
   }
   .rec-public {
     margin-bottom: 12px;
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    .cats {
+      margin-top: 28px;
+      padding-right: 4px;
+      .cat {
+        font-size: 14px;
+        cursor: pointer;
+        transition: color 0.3s;
+        &:hover {
+          color: var(--primary-hex);
+        }
+        &.active {
+          color: var(--primary-hex);
+          font-weight: 600;
+        }
+      }
+    }
   }
   .title {
     margin-top: 28px;
