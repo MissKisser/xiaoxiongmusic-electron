@@ -1,15 +1,15 @@
 /**
- * 辅助窗口的渲染端地址解析
+ * 渲染端地址解析
  *
  * 渲染端可能由开发服务器、静态代理或内嵌服务托管，
- * 辅助窗口必须与主窗口同源：按固定端口拼接会在渲染端未托管在该端口时
+ * 所有窗口必须与渲染端同源：按固定端口拼接会在渲染端未托管在该端口时
  * 落到 API 服务上，而 API 服务对渲染端路径只回 404，
- * 辅助窗口显示的是错误页而不是自己的界面。
+ * 窗口显示的是错误页而不是自己的界面。
  */
 import { existsSync } from "fs";
 import { join } from "path";
 import { app } from "electron";
-import { isDev, mainWinUrl, port } from "../utils/config";
+import { defaultRendererUrl, isDev, port } from "../utils/config";
 import mainWindow from "./main-window";
 
 /** API 服务地址 */
@@ -53,7 +53,7 @@ const collectRendererOrigins = (): string[] => {
     // 主窗口渲染进程异常时忽略，沿用配置地址
   }
   collect(process.env["ELECTRON_RENDERER_URL"]);
-  collect(mainWinUrl);
+  collect(defaultRendererUrl);
   return origins;
 };
 

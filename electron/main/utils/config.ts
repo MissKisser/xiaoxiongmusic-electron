@@ -39,10 +39,13 @@ export const port = Number(import.meta.env["VITE_SERVER_PORT"] || 25884);
 export const defaultAMLLDbServer = "https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml";
 
 /**
- * 主窗口加载地址
+ * 默认渲染端地址
+ *
+ * 开发形态取开发服务器地址，生产形态取 API 服务地址（由其托管渲染端静态资源）。
+ * 仅作为渲染端地址解析的兜底候选，不用于直接加载窗口。
  * @returns string
  */
-export const mainWinUrl =
+export const defaultRendererUrl =
   isDev && process.env["ELECTRON_RENDERER_URL"]
     ? process.env["ELECTRON_RENDERER_URL"]
     : `http://localhost:${port}`;

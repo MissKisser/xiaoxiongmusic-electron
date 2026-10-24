@@ -1,9 +1,9 @@
 import { BrowserWindow, shell, app } from "electron";
 import { createWindow } from "./index";
-import { mainWinUrl } from "../utils/config";
+import { resolveRendererPageUrl } from "./renderer-url";
 import { useStore } from "../store";
 import { isLinux, isWin } from "../utils/config";
-import { processLog } from "../logger";
+import { processLog, windowsLog } from "../logger";
 import { loadNativeModule } from "../utils/native-loader";
 
 const tools = loadNativeModule("tools.node", "tools");
@@ -19,7 +19,6 @@ const STABLE_RESET_DELAY = 30 * 1000;
 
 class MainWindow {
   private win: BrowserWindow | null = null;
-  private winURL: string;
   private isQuitting: boolean = false;
   /** 本轮已执行的自动恢复次数 */
   private recoverAttempts = 0;
@@ -32,8 +31,6 @@ class MainWindow {
   /** 稳定存活判定定时器 */
   private stableTimer: NodeJS.Timeout | null = null;
   constructor() {
-    this.winURL = mainWinUrl;
-
     app.on("before-quit", () => {
       this.isQuitting = true;
     });
@@ -262,6 +259,9 @@ class MainWindow {
   create(): BrowserWindow | null {
     const store = useStore();
     const { width, height, useBorderless = true } = store.get("window");
+    // 加载地址：与辅助窗口同源，统一走渲染端地址解析
+    // 渲染端地址解析模块与主窗口互相依赖，地址须在模块初始化完成后解析
+    const pageUrl = resolveRendererPageUrl("/");
     this.win = createWindow({
       // 菜单栏
       titleBarStyle: useBorderless ? "customButtonsOnHover" : "default",
@@ -274,7 +274,8 @@ class MainWindow {
     });
     if (!this.win) return null;
     // 加载地址
-    this.win.loadURL(this.winURL);
+    windowsLog.info(`主窗口地址: ${pageUrl}`);
+    this.win.loadURL(pageUrl);
     // 移除 F12 快捷键处理
 
     // 窗口事件
@@ -292,7 +293,7 @@ class MainWindow {
             app.emit("explorer-restarted");
           });
         }
-      } catch (e) {
+      } catch {
         // 监听资源管理器重启时失败
       }
     }
