@@ -34,6 +34,18 @@
         </template>
         该平台暂不支持分类筛选
       </n-tooltip>
+      <!-- 场景关键词筛选：来自首页场景电台主题卡 -->
+      <n-tag
+        v-if="isPlatformSource && keyword"
+        closable
+        size="small"
+        round
+        :bordered="false"
+        type="primary"
+        @close="clearKeyword"
+      >
+        {{ keyword }}
+      </n-tag>
       <!-- 精品 -->
       <Transition name="fade" mode="out-in">
         <n-tabs
@@ -131,6 +143,15 @@ const catHqType = ref<string>(
   (router.currentRoute.value.query?.hq as string) === "true" ? "hq" : "normal",
 );
 
+/**
+ * 场景关键词
+ *
+ * 第三方平台按关键词向上游检索歌单：首页场景电台的主题卡点击后
+ * 带关键词进入本页，此时广场按该关键词取材而不是按分类轮换。
+ * 缺省为空串，表示按平台自身的广场口径取数。
+ */
+const keyword = ref<string>((router.currentRoute.value.query?.keyword as string) || "");
+
 // 歌单数据
 const hasMore = ref<boolean>(true);
 const loading = ref<boolean>(true);
@@ -163,6 +184,7 @@ const getAllCatlistPlaylist = async () => {
       const result = await dispatchSquarePlaylists(platformStore.currentPlatform, {
         page: playlistOffset.value / 50 + 1,
         limit: 50,
+        ...(keyword.value ? { keyword: keyword.value } : {}),
       });
       hasMore.value = result.hasMore;
       // 平台广场按分类轮换取材，跨分类可能出现同一歌单，追加前先去重
@@ -222,11 +244,29 @@ const changeCatName = (cat: string, hq: string = "false") => {
   });
 };
 
+/**
+ * 清除场景关键词
+ *
+ * 回到平台自身的广场取材口径（不按关键词检索）。
+ */
+const clearKeyword = () => {
+  router.push({
+    name: "discover-playlists",
+    query: { cat: catName.value, hq: catHqType.value === "hq" ? "true" : "false" },
+  });
+};
+
 // 参数变化
 onBeforeRouteUpdate((to) => {
   if (to.name !== "discover-playlists") return;
   catName.value = (to.query?.cat as string) || "全部歌单";
   catHqType.value = (to.query?.hq as string) === "true" ? "hq" : "normal";
+  const nextKeyword = (to.query?.keyword as string) || "";
+  // 关键词变了就是另一批歌单，分页从第一页重新开始
+  if (nextKeyword !== keyword.value) {
+    keyword.value = nextKeyword;
+    playlistOffset.value = 0;
+  }
   playlistData.value = [];
   // 获取歌单
   getAllCatlistPlaylist();

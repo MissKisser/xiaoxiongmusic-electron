@@ -135,12 +135,53 @@
           <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
         </div>
       </div>
+      <!-- 场景电台：主题卡入口，点击按主题关键词看该场景的歌单 -->
+      <div v-else-if="section.key === 'radioTheme'" class="rec-public">
+        <div class="section-head">
+          <n-flex class="title" align="center" justify="space-between">
+            <n-h3 prefix="bar">
+              <n-text>场景电台</n-text>
+            </n-h3>
+          </n-flex>
+        </div>
+        <div v-if="themeCards.length" class="theme-list">
+          <n-card
+            v-for="item in themeCards"
+            :key="item.id"
+            class="theme-item"
+            :content-style="{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px' }"
+            hoverable
+            @click="openTheme(item)"
+          >
+            <div class="cover">
+              <s-image
+                :src="item.cover"
+                default-src="/images/album.jpg?asset"
+                class="cover-img"
+              />
+            </div>
+            <div class="theme-data">
+              <n-text class="name text-hidden">{{ item.title }}</n-text>
+              <n-text v-if="item.tag" class="tag text-hidden" depth="3">{{ item.tag }}</n-text>
+            </div>
+          </n-card>
+        </div>
+        <n-empty
+          v-else-if="!loading"
+          :description="themeError ? '场景电台加载失败，点击重试' : '空空如也，怎么什么都没有啊'"
+          size="large"
+        />
+        <div v-if="themeError" class="retry">
+          <n-button size="small" secondary @click="loadPublicSections">重试</n-button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { ArtistType, CoverType, SongType } from "@/types/main";
+import type { PlatformThemeCard } from "@/api/platform/types";
 import { NText } from "naive-ui";
 import { onPlatformChange, useMusicStore, usePlatformStore, useSettingStore } from "@/stores";
 import {
@@ -148,6 +189,7 @@ import {
   dispatchHomeRecommend,
   dispatchHomeSingers,
   dispatchHomeSquare,
+  dispatchHomeThemes,
   dispatchLikedSongs,
   dispatchSquarePlaylists,
 } from "@/api/platform/dispatch";
@@ -188,6 +230,13 @@ const HOME_SINGER_LIMIT = 12;
 const HOME_ALBUM_LIMIT = 12;
 
 /**
+ * 首页「场景电台」取数条数
+ *
+ * 酷狗的主题目录实测 6 个主题，取 6 张卡正好铺满一行。
+ */
+const HOME_THEME_LIMIT = 6;
+
+/**
  * 首页各区块的「更多」入口路由
  *
  * 路由是否可用由能力表判定，没有对应子页的区块不给更多入口。
@@ -207,6 +256,7 @@ const ERROR_TEXT: Record<string, string> = {
   recommend: "获取为你推荐失败，请重试",
   singer: "获取歌手推荐失败，请重试",
   album: "获取新碟上架失败，请重试",
+  theme: "获取场景电台失败，请重试",
 };
 
 // 精选歌单
@@ -217,6 +267,8 @@ const recommendPlaylists = ref<CoverType[]>([]);
 const singerArtists = ref<ArtistType[]>([]);
 // 新碟上架
 const albumCovers = ref<CoverType[]>([]);
+// 场景电台主题卡
+const themeCards = ref<PlatformThemeCard[]>([]);
 // 每日推荐曲目与封面
 const dailySongs = ref<SongType[]>([]);
 const dailyCover = ref<string>("");
@@ -233,6 +285,7 @@ const squareError = ref<boolean>(false);
 const recommendError = ref<boolean>(false);
 const singerError = ref<boolean>(false);
 const albumError = ref<boolean>(false);
+const themeError = ref<boolean>(false);
 // 精选歌单当前分类
 const squareCategory = ref<number>(QQ_HOME_SQUARE_CATEGORIES[0].id);
 
@@ -314,6 +367,20 @@ const openMore = (key: string) => {
   const route = moreRoute(key);
   if (!route) return;
   router.push({ name: route });
+};
+
+/**
+ * 打开场景电台主题
+ *
+ * 主题卡是「场景入口」而非内容条目：点击后按主题关键词进入歌单广场，
+ * 看该场景下的歌单列表，不直接播放曲目。
+ * 关键词取主题标题（上游给的是「国语流行佳作」这类场景名）。
+ * @param theme 主题卡
+ */
+const openTheme = (theme: PlatformThemeCard) => {
+  const keyword = theme.title.trim();
+  if (!keyword) return;
+  router.push({ name: "discover-playlists", query: { keyword } });
 };
 
 /**
@@ -472,8 +539,8 @@ const loadSquareBlock = async () => {
  * 读取首页公共区块数据
  *
  * 区块标题常驻：无数据时显示空态，取数失败时给出提示与重试入口。
- * 「为你推荐 / 歌手推荐 / 新碟上架」目前只有 QQ 音乐有数据源，
- * 其它平台不发起请求，区块也不渲染。
+ * 各区块有没有数据源由能力表（`HOME_SECTION_SUPPORT`）决定，
+ * 没有数据源的区块既不请求也不渲染。
  */
 const loadPublicSections = async () => {
   const platform = platformStore.currentPlatform;
@@ -482,48 +549,69 @@ const loadPublicSections = async () => {
   recommendError.value = false;
   singerError.value = false;
   albumError.value = false;
+  themeError.value = false;
   try {
     // 精选歌单
     await loadSquareBlock();
 
-    if (platform !== "qqmusic") {
+    // 为你推荐（仅 QQ 音乐有数据源）
+    if (isHomeSectionSupported(platform, "recommend")) {
+      try {
+        const recommend = await dispatchHomeRecommend(platform, { limit: HOME_RECOMMEND_LIMIT });
+        recommendPlaylists.value = recommend.items;
+      } catch (error) {
+        console.error("获取为你推荐失败：", error);
+        recommendPlaylists.value = [];
+        recommendError.value = true;
+        window.$message.error(ERROR_TEXT.recommend);
+      }
+    } else {
       recommendPlaylists.value = [];
-      singerArtists.value = [];
-      albumCovers.value = [];
-      return;
-    }
-
-    // 为你推荐
-    try {
-      const recommend = await dispatchHomeRecommend(platform, { limit: HOME_RECOMMEND_LIMIT });
-      recommendPlaylists.value = recommend.items;
-    } catch (error) {
-      console.error("获取为你推荐失败：", error);
-      recommendPlaylists.value = [];
-      recommendError.value = true;
-      window.$message.error(ERROR_TEXT.recommend);
     }
 
     // 歌手推荐
-    try {
-      const singers = await dispatchHomeSingers(platform, { limit: HOME_SINGER_LIMIT });
-      singerArtists.value = singers.artists;
-    } catch (error) {
-      console.error("获取歌手推荐失败：", error);
+    if (isHomeSectionSupported(platform, "singer")) {
+      try {
+        const singers = await dispatchHomeSingers(platform, { limit: HOME_SINGER_LIMIT });
+        singerArtists.value = singers.artists;
+      } catch (error) {
+        console.error("获取歌手推荐失败：", error);
+        singerArtists.value = [];
+        singerError.value = true;
+        window.$message.error(ERROR_TEXT.singer);
+      }
+    } else {
       singerArtists.value = [];
-      singerError.value = true;
-      window.$message.error(ERROR_TEXT.singer);
     }
 
     // 新碟上架
-    try {
-      const albums = await dispatchHomeAlbums(platform, { limit: HOME_ALBUM_LIMIT });
-      albumCovers.value = albums.items;
-    } catch (error) {
-      console.error("获取新碟上架失败：", error);
+    if (isHomeSectionSupported(platform, "album")) {
+      try {
+        const albums = await dispatchHomeAlbums(platform, { limit: HOME_ALBUM_LIMIT });
+        albumCovers.value = albums.items;
+      } catch (error) {
+        console.error("获取新碟上架失败：", error);
+        albumCovers.value = [];
+        albumError.value = true;
+        window.$message.error(ERROR_TEXT.album);
+      }
+    } else {
       albumCovers.value = [];
-      albumError.value = true;
-      window.$message.error(ERROR_TEXT.album);
+    }
+
+    // 场景电台（酷狗独有能力）
+    if (isHomeSectionSupported(platform, "radioTheme")) {
+      try {
+        const themes = await dispatchHomeThemes(platform, { limit: HOME_THEME_LIMIT });
+        themeCards.value = themes.themes;
+      } catch (error) {
+        console.error("获取场景电台失败：", error);
+        themeCards.value = [];
+        themeError.value = true;
+        window.$message.error(ERROR_TEXT.theme);
+      }
+    } else {
+      themeCards.value = [];
     }
   } finally {
     loading.value = false;
@@ -706,6 +794,40 @@ onUnmounted(() => {
     display: flex;
     justify-content: center;
     padding: 0 4px 12px;
+  }
+  .theme-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+    gap: 16px;
+    padding: 20px 4px;
+    @media (max-width: 600px) {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .theme-item {
+      cursor: pointer;
+      border-radius: 8px;
+      .cover {
+        flex-shrink: 0;
+        width: 56px;
+        height: 56px;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .theme-data {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        .name {
+          font-size: 15px;
+          font-weight: 600;
+        }
+        .tag {
+          font-size: 13px;
+        }
+      }
+    }
   }
 }
 </style>
