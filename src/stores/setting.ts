@@ -7,9 +7,13 @@
  *         shared/types/settings.ts (ExternalApiSettings.allowLan) / shared/defaults/settings.ts
  */
 import { TimeFormat } from "@/composables/useTimeFormat";
-import { SongUnlockServer } from "@/types/shared";
+import type { SongUnlockServer } from "@/types/shared";
 import type { SongLevelType } from "@/types/main";
 import { defaultAMLLDbServer } from "@/utils/meta";
+import {
+  createDefaultSongUnlockSources,
+  normalizeSongUnlockSources,
+} from "@/utils/songUnlockSources";
 import { defineStore } from "pinia";
 import { CURRENT_SETTING_SCHEMA_VERSION, settingMigrations } from "./migrations/settingMigrations";
 import { ThemeColorType } from "@/types/color";
@@ -648,13 +652,7 @@ export const useSettingStore = defineStore("setting", {
     enableReplayGain: false,
     replayGainMode: "track",
     useSongUnlock: true,
-    songUnlockServer: [
-      { key: SongUnlockServer.BODIAN, enabled: true },
-      { key: SongUnlockServer.NETEASE, enabled: true },
-      { key: SongUnlockServer.KUWO, enabled: false },
-      { key: SongUnlockServer.MIGU, enabled: true },
-      { key: SongUnlockServer.CHANGQING, enabled: true },
-    ],
+    songUnlockServer: createDefaultSongUnlockSources(),
     anonymousProbeReport: true,
     countDownShow: true,
     barLyricShow: true,
@@ -958,6 +956,13 @@ export const useSettingStore = defineStore("setting", {
       const sections = normalizePlatformHomeSections(this.platformHomePageSections);
       if (JSON.stringify(sections) !== JSON.stringify(this.platformHomePageSections)) {
         this.platformHomePageSections = sections;
+      }
+
+      // 换源音源清单：剔除已下线的键并补齐新增音源（新增源按默认开关状态补进来，
+      // 其余源的开关状态保持原样）。同样放在启动迁移里做，才能真正落盘。
+      const sources = normalizeSongUnlockSources(this.songUnlockServer);
+      if (JSON.stringify(sources) !== JSON.stringify(this.songUnlockServer)) {
+        this.songUnlockServer = sources;
       }
     },
     // 更换明暗模式

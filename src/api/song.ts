@@ -83,6 +83,8 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   [SongUnlockServer.MIGU]: 30000,
   // 长青：可能先检索换 id 再取链，取链还要探测真实音频时长
   [SongUnlockServer.CHANGQING]: 40000,
+  // 落雪：直查或检索换 mid 后取链，取链还要探测真实音频时长
+  [SongUnlockServer.LXMUSIC]: 20000,
 };
 
 /**

@@ -24,6 +24,8 @@ export enum SongUnlockServer {
   MIGU = "migu",
   /** 长青聚合 */
   CHANGQING = "changqing",
+  /** 落雪音源（lx 协议自定义源） */
+  LXMUSIC = "lxmusic",
 }
 
 /**

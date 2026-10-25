@@ -22,8 +22,10 @@
  * 2. 时长闸门 —— 真实音频时长必须与目标曲目时长在容差内，拦截片段与另一版本；
  * 3. 体积校验 —— 按「时长 × 码率」核对文件体积，拦截占位与残缺文件。
  *
- * 健壮性：PoC 阶段不引入熔断器（公益上游无 SLA，连续失败熔断属于正式接入时的补充项，
- * 届时按 resilience.ts 的 CircuitBreaker 接在检索层与取链层上）。
+ * 健壮性：公益上游无 SLA，检索层与取链层共用一个熔断器 ——
+ * 上游 HTTP 5xx、连接失败、超时与非 4xx 语义的业务码计入故障，
+ * 无候选 / 匹配失败 / 取链失败不计（与既有几源口径一致）；
+ * 连续失败到阈值即熔断，熔断期内零请求。失败日志按「同源同曲」节流，避免刷屏。
  */
 import type { SongUrlResult } from "./unblock";
 import { serverLog } from "../../main/logger";
@@ -45,6 +47,12 @@ import {
 } from "./match";
 import { probeAudio } from "./audio-probe";
 import { sanitizeUrl } from "./sanitize";
+import {
+  CircuitBreaker,
+  isBusinessFault,
+  isUpstreamFault,
+  parseBusinessError,
+} from "./resilience";
 
 /** lx 后端使用的平台名（协议里的 tx 在后端叫 qq） */
 const LX_PLATFORM = "qq";
@@ -67,6 +75,18 @@ const PROBE_TIMEOUT_MS = 10000;
 /** 检索候选条数 */
 const SEARCH_LIMIT = 20;
 
+/** 连续失败多少次后熔断 */
+const FAILURE_THRESHOLD = 3;
+
+/** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
+const BREAK_DURATION_MS = 10 * 60 * 1000;
+
+/** 同源同曲的失败日志节流窗口（毫秒） */
+const FAIL_LOG_THROTTLE_MS = 10 * 1000;
+
+/** 失败日志节流表的最大条目数：超出后清理过期条目，避免长期运行内存无界增长 */
+const FAIL_LOG_THROTTLE_MAX_ENTRIES = 64;
+
 /** 请求 UA */
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
@@ -82,6 +102,39 @@ let cachedIpAt = 0;
 
 /** 访问者 IP 的缓存时长（毫秒） */
 const IP_CACHE_TTL = 10 * 60 * 1000;
+
+/** 落雪音源熔断器：检索层与取链层共用 */
+const breaker = new CircuitBreaker({
+  name: "落雪音源",
+  failureThreshold: FAILURE_THRESHOLD,
+  openDurationMs: BREAK_DURATION_MS,
+  onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
+});
+
+/** 同源同曲的失败日志节流表：记录上一次写日志的时刻 */
+const failureLogAt = new Map<string, number>();
+
+/**
+ * 记录一次换源失败
+ *
+ * 同源同曲在节流窗口内只写一条日志：换源链按优先级逐源尝试，
+ * 同一首歌被反复重试时不至于刷屏。
+ * @param target 目标歌曲信息
+ * @param reason 失败原因（用户可读文案）
+ */
+const logUnlockFailure = (target: MatchTarget, reason: string): void => {
+  const key = `lxmusic|${target.title}|${target.artist}`;
+  const now = Date.now();
+  const last = failureLogAt.get(key) ?? 0;
+  if (now - last < FAIL_LOG_THROTTLE_MS) return;
+  if (failureLogAt.size >= FAIL_LOG_THROTTLE_MAX_ENTRIES) {
+    for (const [itemKey, loggedAt] of failureLogAt) {
+      if (now - loggedAt >= FAIL_LOG_THROTTLE_MS) failureLogAt.delete(itemKey);
+    }
+  }
+  failureLogAt.set(key, now);
+  serverLog.warn(`⚠️ 落雪音源 换源失败（${target.title} / ${target.artist}）：${reason}`);
+};
 
 /** lx 协议里的歌曲信息（musicInfo） */
 type LxMusicInfo = {
@@ -218,20 +271,35 @@ const buildApiUrl = (base: string, info: LxMusicInfo, quality: string): string =
 };
 
 /**
+ * 单次取链的结论
+ */
+type LxFetchOutcome = {
+  /** 取到的直链；失败时为 null */
+  url: string | null;
+  /** 失败原因描述 */
+  reason: string;
+  /** 本次失败是否属于上游故障（计入熔断计数） */
+  fault: boolean;
+};
+
+/**
  * 向 lx 后端请求音频直链
  *
  * 主域失败时按备域重试；两域都失败时返回失败原因。
+ * 故障口径与 resilience.ts 一致：HTTP 5xx、连接失败、超时与非 4xx 语义的业务码
+ * 计入上游故障；4xx 属请求侧拒绝，不计入。
  * @param info lx 协议里的歌曲信息
  * @param quality 音质档位
- * @returns 直链；失败时返回 null 与原因
+ * @returns 取链结论
  */
 const requestLxMusicUrl = async (
   info: LxMusicInfo,
   quality: string,
-): Promise<{ url: string | null; reason: string }> => {
+): Promise<LxFetchOutcome> => {
   const ip = await fetchClientIp();
   const headers = { "User-Agent": UA, "X-Token": buildToken(ip), Accept: "application/json" };
   let lastReason = "上游未返回直链";
+  let fault = false;
   for (const base of LX_API_BASES) {
     const url = buildApiUrl(base, info, quality);
     try {
@@ -243,17 +311,25 @@ const requestLxMusicUrl = async (
       const body = (response.data || {}) as LxResponse;
       if (response.status >= 500) {
         lastReason = `上游 HTTP ${response.status}`;
+        fault = true;
+        continue;
+      }
+      if (response.status >= 400) {
+        lastReason = `上游 HTTP ${response.status}`;
         continue;
       }
       if (body.code === 200 && body.url) {
-        return { url: body.url, reason: "" };
+        return { url: body.url, reason: "", fault: false };
       }
       lastReason = body.msg || `上游业务码 ${body.code ?? response.status}`;
+      const business = parseBusinessError(body);
+      if (business && isBusinessFault(business)) fault = true;
     } catch (error) {
       lastReason = String(error);
+      fault = fault || isUpstreamFault(error);
     }
   }
-  return { url: null, reason: lastReason };
+  return { url: null, reason: lastReason, fault };
 };
 
 /**
@@ -391,9 +467,22 @@ const getLxmusicSongUrl = async (
     if (!target.title) return { code: 404, url: null, reason: MISSING_TITLE_REASON };
     if (!target.artist.trim()) return { code: 404, url: null, reason: MISSING_ARTIST_REASON };
 
+    if (!breaker.canRequest()) {
+      serverLog.warn(
+        `🔌 落雪音源处于熔断状态，跳过本次换源（剩余 ${Math.ceil(
+          breaker.remainingOpenMs() / 1000,
+        )} 秒）`,
+      );
+      return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
+    }
+
     const resolved = await resolveSongMid(target, options);
     if (!resolved.mid) {
-      return { code: 404, url: null, reason: resolved.reason || NO_CANDIDATE_REASON };
+      // 无候选 / 匹配失败是请求侧结论，不计入熔断
+      breaker.recordSuccess();
+      const reason = resolved.reason || NO_CANDIDATE_REASON;
+      logUnlockFailure(target, reason);
+      return { code: 404, url: null, reason };
     }
     const mid = resolved.mid;
 
@@ -407,11 +496,12 @@ const getLxmusicSongUrl = async (
       albumName: "",
     };
 
-    let upstreamReason = "";
+    let upstreamFault = false;
     for (const quality of LX_QUALITIES) {
       const outcome = await requestLxMusicUrl(info, quality);
       if (!outcome.url) {
-        upstreamReason = outcome.reason;
+        upstreamFault = upstreamFault || outcome.fault;
+        serverLog.log(`🔎 落雪音源取链失败（${quality}）：${outcome.reason}`);
         continue;
       }
       const url = normalizeUrl(outcome.url);
@@ -444,14 +534,18 @@ const getLxmusicSongUrl = async (
         continue;
       }
       serverLog.log("🔗 LxmusicSong URL:", sanitizeUrl(url));
+      breaker.recordSuccess();
       return { code: 200, url, lengthVerified: check.verified };
     }
-    if (upstreamReason) {
-      serverLog.warn(`⚠️ lxmusic 取链失败：${upstreamReason}`);
-    }
+    if (upstreamFault) breaker.recordFailure();
+    else breaker.recordSuccess();
+    logUnlockFailure(target, FETCH_FAILED_REASON);
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get LxmusicSong URL Error:", error);
+    if (isUpstreamFault(error)) breaker.recordFailure();
+    else breaker.recordSuccess();
+    logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };

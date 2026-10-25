@@ -1,7 +1,7 @@
 /**
  * 换源解锁链的可用性采样
  *
- * 采样规则（五个换源源各自独立计时）：
+ * 采样规则（各换源源分别独立计时）：
  * 1. 每源每 10 分钟最多记录 1 条样本，窗口内已有样本时后续样本被跳过；
  * 2. 失败优先：窗口内先记录成功、随后出现失败时，失败覆盖成功（失败才有诊断价值）；
  * 3. 样本只含「源 / 成败 / 耗时 / 失败类别」四个字段，不含歌名与任何身份信息。
@@ -10,7 +10,7 @@
  */
 
 /** 可上报的换源源（与服务端契约枚举一致） */
-export type ProbeSource = "kuwo" | "bodian" | "netease" | "migu" | "changqing";
+export type ProbeSource = "kuwo" | "bodian" | "netease" | "migu" | "changqing" | "lxmusic";
 
 /** 失败类别（与服务端契约枚举一致） */
 export type ProbeFailCategory =
@@ -53,7 +53,7 @@ type SourceWindow = {
 /**
  * 可用性采样器
  *
- * 五个源各自维护独立的窗口，互不影响；窗口到期后自动开新窗口。
+ * 各源各自维护独立的窗口，互不影响；窗口到期后自动开新窗口。
  */
 export class ProbeSampler {
   /** 窗口长度（毫秒） */

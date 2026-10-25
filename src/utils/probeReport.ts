@@ -11,7 +11,7 @@ import { ProbeSampler, type ProbeSample } from "./probeSampling";
 /** 上报接口地址 */
 const PROBE_REPORT_URL = "https://music.viaxv.top/api/probe/report";
 
-/** 全局采样器：五个换源源各自独立的采样窗口 */
+/** 全局采样器：各换源源各自独立的采样窗口 */
 const sampler = new ProbeSampler();
 
 /**

@@ -4,9 +4,12 @@
  * 同一批换源服务对三个平台的寻址能力并不相同，最优链位因此按「歌曲来自哪个平台」分派：
  * - 酷狗歌曲：长青的酷狗 hash 直查通道已下线，酷狗歌曲与 QQ 歌曲走同一套
  *   「按歌名 + 歌手检索换 id」的关键词路径，两平台链位因此同构：
- *   波点 → 长青 → 咪咕 → 酷我 → 网易云；
- * - QQ 歌曲：同上，波点 → 长青 → 咪咕 → 酷我 → 网易云；
+ *   波点 → 长青 → 咪咕 → 落雪 → 酷我 → 网易云；
+ * - QQ 歌曲：同上，波点 → 长青 → 咪咕 → 落雪 → 酷我 → 网易云；
  * - 网易云歌曲：网易云按自身歌曲 id 直查，排在首位；咪咕 / 波点 / 酷我按关键词检索；长青垫底。
+ *
+ * 落雪音源只提供 QQ 曲库，排在咪咕之后、酷我之前作第三兜底：
+ * 它与咪咕（咪咕库）、长青（聚合站）异源，插在现有源之后不打乱既有相对顺序。
  *
  * 链位固定，不随运行期可用性调整：熔断与单源失败只影响「本次是否命中」，不改变链位顺序。
  *
@@ -27,6 +30,7 @@ const UNLOCK_PRIORITY: Record<ApiPlatform, readonly SongUnlockServer[]> = {
     SongUnlockServer.BODIAN,
     SongUnlockServer.CHANGQING,
     SongUnlockServer.MIGU,
+    SongUnlockServer.LXMUSIC,
     SongUnlockServer.KUWO,
     SongUnlockServer.NETEASE,
   ],
@@ -34,6 +38,7 @@ const UNLOCK_PRIORITY: Record<ApiPlatform, readonly SongUnlockServer[]> = {
     SongUnlockServer.BODIAN,
     SongUnlockServer.CHANGQING,
     SongUnlockServer.MIGU,
+    SongUnlockServer.LXMUSIC,
     SongUnlockServer.KUWO,
     SongUnlockServer.NETEASE,
   ],

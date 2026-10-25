@@ -97,7 +97,7 @@ const NO_UNLOCK_SERVER_REASON = "未开启换源功能，无法获取播放链�
 /**
  * 换源服务 → 可用性上报的源标识
  *
- * 上报只覆盖换源解锁链上的五个站外源；官方直链（各平台自身的播放地址）
+ * 上报只覆盖换源解锁链上的站外源；官方直链（各平台自身的播放地址）
  * 不上报 —— 它的成败属于平台侧状态，不代表音源可用性。
  */
 const PROBE_SOURCE_BY_SERVER: Record<SongUnlockServer, ProbeSource> = {
@@ -106,6 +106,7 @@ const PROBE_SOURCE_BY_SERVER: Record<SongUnlockServer, ProbeSource> = {
   [SongUnlockServer.KUWO]: "kuwo",
   [SongUnlockServer.MIGU]: "migu",
   [SongUnlockServer.CHANGQING]: "changqing",
+  [SongUnlockServer.LXMUSIC]: "lxmusic",
 };
 
 /**
@@ -246,6 +247,7 @@ class SongManager {
       [SongUnlockServer.BODIAN]: "波点音乐",
       [SongUnlockServer.MIGU]: "咪咕音乐",
       [SongUnlockServer.CHANGQING]: "长青聚合",
+      [SongUnlockServer.LXMUSIC]: "落雪音源",
     };
     return nameMap[server] || server;
   }
