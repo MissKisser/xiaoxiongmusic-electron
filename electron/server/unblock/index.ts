@@ -6,6 +6,7 @@ import getMiguSongUrl from "./migu";
 import getChangqingSongUrl, { type ChangqingOptions } from "./changqing";
 import getNeteaseSongUrl from "./netease";
 import { getNeteaseSearchSongUrl } from "./netease-search";
+import getLxmusicSongUrl, { type LxmusicOptions } from "./lxmusic";
 import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
 
 /**
@@ -125,6 +126,23 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
         platformId: req.query.platformId,
       };
       const result = await getChangqingSongUrl(buildMatchInfo(req.query), options);
+      return reply.send(result);
+    },
+  );
+  // lxmusic
+  // 落雪音乐自定义源协议：QQ 歌曲自带 mid 时按 mid 零检索直查，
+  // 否则按「歌名 + 歌手」检索换 mid，取链后做身份 / 时长 / 体积三重校验。
+  fastify.get(
+    "/unblock/lxmusic",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const options: LxmusicOptions = {
+        platform: req.query.platform,
+        platformId: req.query.platformId,
+      };
+      const result = await getLxmusicSongUrl(buildMatchInfo(req.query), options);
       return reply.send(result);
     },
   );
