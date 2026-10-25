@@ -35,6 +35,7 @@ import {
 import { sanitizeUrl } from "@/utils/sanitize";
 import { isAudiobookSong, resolveSongPlatform } from "@/utils/songPlatform";
 import { getPlatformLabel, getUnlockPriority } from "@/utils/unlockPriority";
+import { UnlockUrlCache } from "@/utils/unlockUrlCache";
 
 /**
  * 歌曲播放地址信息
@@ -143,6 +144,15 @@ const buildCacheKey = (song: SongType): string | number => {
  */
 const buildPlayKey = (song: SongType, songId: number): string =>
   `${resolveSongPlatform(song)}:${songId}`;
+
+/**
+ * 换源成功直链的进程内缓存
+ *
+ * 上游抖动时同一首歌会被整条换源链重跑一遍（每源一次检索 + 一次取链）；
+ * 这里把换源成功的直链缓存一段时间，重播时直接复用。
+ * 与磁盘缓存（音频文件落盘）是两套东西，这里只缓存直链本身。
+ */
+const unlockedUrlCache = new UnlockUrlCache<QualityType>();
 
 class SongManager {
   /** 预载下一首歌曲播放信息 */
@@ -593,6 +603,20 @@ class SongManager {
     // 缓存键：平台歌曲与网易云歌曲分开存放
     const cacheKey = buildCacheKey(song);
 
+    // 进程内直链缓存：命中即复用，避免上游抖动期把整条换源链重跑一遍
+    const cachedUnlocked = unlockedUrlCache.get(String(cacheKey));
+    if (cachedUnlocked) {
+      const cachedUrl = this.processUrlForWeb(cachedUnlocked.url);
+      console.log(`♻️ [${songId}] 命中换源直链缓存（${cachedUnlocked.unlockSource}）`);
+      return {
+        id: songId,
+        url: cachedUrl || undefined,
+        isUnlocked: true,
+        quality: cachedUnlocked.quality,
+        unlockSource: cachedUnlocked.unlockSource,
+      };
+    }
+
     // 按顺序请求，一旦成功就返回
     console.log(`🔓 [${songId}] 开始按优先级尝试解锁服务`);
     console.log(
@@ -666,6 +690,13 @@ class SongManager {
 
           // 解锁成功后，触发下载（使用原始 URL，仅 Electron 端）
           this.triggerCacheDownload(cacheKey, originalUrl);
+
+          // 写入进程内直链缓存：上游抖动期重播不必再跑整条换源链
+          unlockedUrlCache.set(String(cacheKey), {
+            url: originalUrl,
+            quality,
+            unlockSource: server,
+          });
 
           return {
             id: songId,

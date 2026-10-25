@@ -69,6 +69,9 @@ export const MATCH_FAILED_REASON = "候选未通过歌名/歌手/时长校验";
 /** 候选通过校验但取不到直链时的失败原因（用户可读） */
 export const FETCH_FAILED_REASON = "候选未取到可用直链";
 
+/** 上游只提供试听片段 / 占位资源时的失败原因（用户可读） */
+export const TRIAL_ONLY_REASON = "该曲在此源仅提供试听片段，无完整版权资源";
+
 /** 综合得分权重 */
 const TITLE_WEIGHT = 0.45;
 const ARTIST_WEIGHT = 0.35;

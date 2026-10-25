@@ -42,15 +42,21 @@ const FAILURE_THRESHOLD = 3;
 /** 熔断持续时长（毫秒）：期间该源直接跳过，不发起任何请求 */
 const BREAK_DURATION_MS = 10 * 60 * 1000;
 
+/** 同源同曲的失败日志节流窗口（毫秒） */
+const FAIL_LOG_THROTTLE_MS = 10 * 1000;
+
+/** 失败日志节流表的最大条目数：超出后清理过期条目，避免长期运行内存无界增长 */
+const FAIL_LOG_THROTTLE_MAX_ENTRIES = 64;
+
 /** 波点取链的成功业务码 */
 const SUCCESS_CODE = 200;
 
 /**
  * 波点逐曲拒绝的业务码
  *
- * 该曲在波点侧已下线，属逐曲拒绝而非源故障，不计入熔断计数。
+ * 该曲在波点侧已下线（20012）或没有正版权质（20018），属逐曲拒绝而非源故障，不计入熔断计数。
  */
-const PER_SONG_REJECT_CODES = new Set([20012]);
+const PER_SONG_REJECT_CODES = new Set([20012, 20018]);
 
 /**
  * 波点请求侧的业务码
@@ -67,6 +73,31 @@ const sourceBreaker = new CircuitBreaker({
   openDurationMs: BREAK_DURATION_MS,
   onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
 });
+
+/** 同源同曲的失败日志节流表：记录上一次写日志的时刻 */
+const failureLogAt = new Map<string, number>();
+
+/**
+ * 记录一次换源失败
+ *
+ * 同源同曲在节流窗口内只写一条日志：换源链按优先级逐源尝试，
+ * 同一首歌被反复重试时不至于刷屏。
+ * @param target 目标歌曲信息
+ * @param reason 失败原因（用户可读文案）
+ */
+const logUnlockFailure = (target: MatchTarget, reason: string): void => {
+  const key = `bodian|${target.title}|${target.artist}`;
+  const now = Date.now();
+  const last = failureLogAt.get(key) ?? 0;
+  if (now - last < FAIL_LOG_THROTTLE_MS) return;
+  if (failureLogAt.size >= FAIL_LOG_THROTTLE_MAX_ENTRIES) {
+    for (const [itemKey, loggedAt] of failureLogAt) {
+      if (now - loggedAt >= FAIL_LOG_THROTTLE_MS) failureLogAt.delete(itemKey);
+    }
+  }
+  failureLogAt.set(key, now);
+  serverLog.warn(`⚠️ 波点 换源失败（${target.title} / ${target.artist}）：${reason}`);
+};
 
 /**
  * 生成随机设备 ID
@@ -222,15 +253,18 @@ const getBodianSongUrl = async (
     );
     if (search.upstreamFailed) {
       breaker.recordFailure();
+      logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
       return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
     }
     if (!search.candidates.length) {
       breaker.recordSuccess();
+      logUnlockFailure(target, NO_CANDIDATE_REASON);
       return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
     }
     const ranked = rankCandidates(search.candidates, target).filter((detail) => detail.passed);
     if (!ranked.length) {
       breaker.recordSuccess();
+      logUnlockFailure(target, MATCH_FAILED_REASON);
       return { code: 404, url: null, reason: MATCH_FAILED_REASON };
     }
     const headers = buildHeaders();
@@ -293,11 +327,13 @@ const getBodianSongUrl = async (
     }
     if (upstreamFault) breaker.recordFailure();
     else breaker.recordSuccess();
+    logUnlockFailure(target, FETCH_FAILED_REASON);
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get BodianSong URL Error:", error);
     if (isBodianTransportFault(error)) breaker.recordFailure();
     else breaker.recordSuccess();
+    logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };

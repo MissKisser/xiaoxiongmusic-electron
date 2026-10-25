@@ -136,6 +136,37 @@ const sourceBreaker = new CircuitBreaker({
   onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
 });
 
+/** 同源同曲的失败日志节流窗口（毫秒） */
+const FAIL_LOG_THROTTLE_MS = 10 * 1000;
+
+/** 失败日志节流表的最大条目数：超出后清理过期条目，避免长期运行内存无界增长 */
+const FAIL_LOG_THROTTLE_MAX_ENTRIES = 64;
+
+/** 同源同曲的失败日志节流表：记录上一次写日志的时刻 */
+const failureLogAt = new Map<string, number>();
+
+/**
+ * 记录一次换源失败
+ *
+ * 同源同曲在节流窗口内只写一条日志：换源链按优先级逐源尝试，
+ * 同一首歌被反复重试时不至于刷屏。
+ * @param target 目标歌曲信息
+ * @param reason 失败原因（用户可读文案）
+ */
+const logUnlockFailure = (target: MatchTarget, reason: string): void => {
+  const key = `migu|${target.title}|${target.artist}`;
+  const now = Date.now();
+  const last = failureLogAt.get(key) ?? 0;
+  if (now - last < FAIL_LOG_THROTTLE_MS) return;
+  if (failureLogAt.size >= FAIL_LOG_THROTTLE_MAX_ENTRIES) {
+    for (const [itemKey, loggedAt] of failureLogAt) {
+      if (now - loggedAt >= FAIL_LOG_THROTTLE_MS) failureLogAt.delete(itemKey);
+    }
+  }
+  failureLogAt.set(key, now);
+  serverLog.warn(`⚠️ 咪咕 换源失败（${target.title} / ${target.artist}）：${reason}`);
+};
+
 /** 关键词检索结果缓存 */
 const searchCache = new TTLCache<MiguCandidate[]>(SEARCH_CACHE_TTL_MS, SEARCH_CACHE_MAX_ENTRIES);
 
@@ -511,15 +542,18 @@ const getMiguSongUrl = async (
     if (search.upstreamFailed) {
       if (search.upstreamFault) breaker.recordFailure();
       else breaker.recordSuccess();
+      logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
       return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
     }
     if (!search.candidates.length) {
       breaker.recordSuccess();
+      logUnlockFailure(target, NO_CANDIDATE_REASON);
       return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
     }
     const ranked = rankCandidates(search.candidates, target).filter((detail) => detail.passed);
     if (!ranked.length) {
       breaker.recordSuccess();
+      logUnlockFailure(target, MATCH_FAILED_REASON);
       return { code: 404, url: null, reason: MATCH_FAILED_REASON };
     }
     let upstreamFault = false;
@@ -555,11 +589,13 @@ const getMiguSongUrl = async (
     }
     if (upstreamFault) breaker.recordFailure();
     else breaker.recordSuccess();
+    logUnlockFailure(target, FETCH_FAILED_REASON);
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get MiguSong URL Error:", error);
     if (isUpstreamFault(error)) breaker.recordFailure();
     else breaker.recordSuccess();
+    logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };

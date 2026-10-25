@@ -104,6 +104,37 @@ const searchBreaker = new CircuitBreaker({
   onStateChange: (message) => serverLog.warn(`🔌 ${message}`),
 });
 
+/** 同源同曲的失败日志节流窗口（毫秒） */
+const FAIL_LOG_THROTTLE_MS = 10 * 1000;
+
+/** 失败日志节流表的最大条目数：超出后清理过期条目，避免长期运行内存无界增长 */
+const FAIL_LOG_THROTTLE_MAX_ENTRIES = 64;
+
+/** 同源同曲的失败日志节流表：记录上一次写日志的时刻 */
+const failureLogAt = new Map<string, number>();
+
+/**
+ * 记录一次换源失败
+ *
+ * 同源同曲在节流窗口内只写一条日志：换源链按优先级逐源尝试，
+ * 同一首歌被反复重试时不至于刷屏。
+ * @param target 目标歌曲信息
+ * @param reason 失败原因（用户可读文案）
+ */
+const logUnlockFailure = (target: MatchTarget, reason: string): void => {
+  const key = `changqing|${target.title}|${target.artist}`;
+  const now = Date.now();
+  const last = failureLogAt.get(key) ?? 0;
+  if (now - last < FAIL_LOG_THROTTLE_MS) return;
+  if (failureLogAt.size >= FAIL_LOG_THROTTLE_MAX_ENTRIES) {
+    for (const [itemKey, loggedAt] of failureLogAt) {
+      if (now - loggedAt >= FAIL_LOG_THROTTLE_MS) failureLogAt.delete(itemKey);
+    }
+  }
+  failureLogAt.set(key, now);
+  serverLog.warn(`⚠️ 长青 换源失败（${target.title} / ${target.artist}）：${reason}`);
+};
+
 /** 长青取链请求的附加信息 */
 export type ChangqingOptions = {
   /** 歌曲所属平台；缺省视为非 QQ / 酷狗来源 */
@@ -384,11 +415,19 @@ const getChangqingSongUrl = async (
     }
     if (upstreamFault) searchBreaker.recordFailure();
     else searchBreaker.recordSuccess();
-    if (!hasCandidate) return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
-    if (!hasPassedCandidate) return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    if (!hasCandidate) {
+      logUnlockFailure(target, NO_CANDIDATE_REASON);
+      return { code: 404, url: null, reason: NO_CANDIDATE_REASON };
+    }
+    if (!hasPassedCandidate) {
+      logUnlockFailure(target, MATCH_FAILED_REASON);
+      return { code: 404, url: null, reason: MATCH_FAILED_REASON };
+    }
+    logUnlockFailure(target, FETCH_FAILED_REASON);
     return { code: 404, url: null, reason: FETCH_FAILED_REASON };
   } catch (error) {
     serverLog.error("❌ Get ChangqingSong URL Error:", error);
+    logUnlockFailure(target, UPSTREAM_UNAVAILABLE_REASON);
     return { code: 404, url: null, reason: UPSTREAM_UNAVAILABLE_REASON };
   }
 };
