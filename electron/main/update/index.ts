@@ -5,7 +5,7 @@ import http from "http";
 import { app } from "electron";
 
 // Server API 地址
-const SERVER_URL = "https://music.viaxv.top";
+const SERVER_URL = "https://music.viaxv.cn";
 
 // 获取当前平台
 const getPlatform = (): string => {
