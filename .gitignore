@@ -15,6 +15,7 @@ coverage
 *.local
 out
 .env
+# 分模式 env 文件（.env.development / .env.production）承载非敏感构建配置，需入库供 CI 使用
 target
 *.node
 
@@ -28,8 +29,6 @@ target
 *.njsproj
 *.sln
 *.sw?
-.env.development
-.env.production
 
 # ZCode agent state
 .omc

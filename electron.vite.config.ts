@@ -24,6 +24,12 @@ export default defineConfig(({ mode }) => {
   return {
     // 主进程
     main: {
+      // 主进程运行在 Node 环境（无 import.meta.env），把 env 中的服务端地址静态注入
+      define: {
+        "process.env.VITE_SERVER_URL": JSON.stringify(
+          getEnv("VITE_SERVER_URL") || "https://music.viaxv.cn"
+        ),
+      },
       resolve: {
         alias: {
           // 主进程文件（如 ipc-mac-statusbar）也引用了 @shared 类型，需与 renderer 保持一致

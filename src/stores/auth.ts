@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import axios from "axios";
 
 // Server API 地址
-const SERVER_URL = "https://music.viaxv.cn";
+const SERVER_URL = String(import.meta.env.VITE_SERVER_URL || "");
 
 // 获取当前平台
 const getPlatform = (): string => {

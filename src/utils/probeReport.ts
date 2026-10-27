@@ -8,8 +8,11 @@
  */
 import { ProbeSampler, type ProbeSample } from "./probeSampling";
 
+/** 远程后端服务基地址（构建期由 VITE_SERVER_URL 注入） */
+const SERVER_URL = String(import.meta.env.VITE_SERVER_URL || "");
+
 /** 上报接口地址 */
-const PROBE_REPORT_URL = "https://music.viaxv.cn/api/probe/report";
+const PROBE_REPORT_URL = `${SERVER_URL}/api/probe/report`;
 
 /** 全局采样器：各换源源各自独立的采样窗口 */
 const sampler = new ProbeSampler();
