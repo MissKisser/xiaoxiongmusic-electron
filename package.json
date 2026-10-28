@@ -2,7 +2,7 @@
   "name": "xiaoxiongmusic",
   "productName": "小熊音乐",
   "desktopName": "top.misskisser.XiaoxiongMusic",
-  "version": "4.4.3",
+  "version": "4.4.4",
   "description": "A minimalist music player",
   "packageManager": "pnpm@10.28.1",
   "main": "./out/main/index.js",
