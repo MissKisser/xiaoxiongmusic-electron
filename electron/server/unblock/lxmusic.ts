@@ -10,8 +10,8 @@
  * 响应体为 { code, url }，url 即音频直链。
  *
  * 上游：星海音源的 lx/api 后端（社区公益接口，无第三方密钥，token 为本地生成的设备标识）
- * - 主域：https://yy.zddyr.top/lx/api/
- * - 备域：https://zrcdy.dpdns.org/lx/api/
+ * - 主域：https://yy.zddyr.top/lx/api/（唯一可用入口，上游暂无其他在线备域；
+ *   主域故障时依赖熔断器跳过整源，不做域名故障转移）
  *
  * 能力：只接 QQ 音乐（lx 协议里的 tx 通道）。
  * - 歌曲自带 QQ mid 时零检索直查；
@@ -57,8 +57,8 @@ import {
 /** lx 后端使用的平台名（协议里的 tx 在后端叫 qq） */
 const LX_PLATFORM = "qq";
 
-/** lx 后端主机（按顺序故障转移） */
-const LX_API_BASES = ["https://yy.zddyr.top/lx/api/", "https://zrcdy.dpdns.org/lx/api/"];
+/** lx 后端主机（上游暂无可用备域，仅主域；主域故障由熔断器兜底） */
+const LX_API_BASES = ["https://yy.zddyr.top/lx/api/"];
 
 /** 访问者 IP 的探测地址：token 里需要带上调用方 IP */
 const LX_IP_ENDPOINT = "https://yy.zddyr.top/ip.php";
