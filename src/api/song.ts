@@ -89,6 +89,10 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   [SongUnlockServer.LXMUSIC]: 20000,
   // 星海：按网易云歌曲 id 直查取链，做时长与体积校验
   [SongUnlockServer.XINGHAI]: 20000,
+  // 小鱼：按 QQ mid 直查或检索换 mid 后取链，做身份、时长与体积校验
+  [SongUnlockServer.FISH]: 20000,
+  // 吉祥：按酷狗 hash 直查取链，做音质标识、时长与体积校验
+  [SongUnlockServer.JIEXIANG]: 20000,
 };
 
 /**

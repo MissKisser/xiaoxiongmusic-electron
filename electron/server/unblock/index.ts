@@ -9,6 +9,8 @@ import getNeteaseSongUrl from "./netease";
 import { getNeteaseSearchSongUrl } from "./netease-search";
 import getLxmusicSongUrl, { type LxmusicOptions } from "./lxmusic";
 import getXinghaiSongUrl, { type XinghaiOptions } from "./xinghai";
+import getFishSongUrl, { type FishOptions } from "./fish";
+import getJiexiangSongUrl, { type JiexiangOptions } from "./jiexiang";
 import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
 
 /**
@@ -173,6 +175,38 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
         platformId: req.query.platformId,
       };
       const result = await getXinghaiSongUrl(buildMatchInfo(req.query), options);
+      return reply.send(result);
+    },
+  );
+  // fish
+  // 小鱼音源：QQ 专供换源，单次 GET 全档直链，按 mid 直查或检索换 mid 后做身份、时长与体积校验。
+  fastify.get(
+    "/unblock/fish",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const options: FishOptions = {
+        platform: req.query.platform,
+        platformId: req.query.platformId,
+      };
+      const result = await getFishSongUrl(buildMatchInfo(req.query), options);
+      return reply.send(result);
+    },
+  );
+  // jiexiang
+  // 吉祥音源：酷狗专供换源，按酷狗 hash 直查，取链后做音质标识、时长与体积校验。
+  fastify.get(
+    "/unblock/jiexiang",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const options: JiexiangOptions = {
+        platform: req.query.platform,
+        platformId: req.query.platformId,
+      };
+      const result = await getJiexiangSongUrl(buildMatchInfo(req.query), options);
       return reply.send(result);
     },
   );

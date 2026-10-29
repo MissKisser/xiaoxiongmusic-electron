@@ -33,6 +33,12 @@ describe("换源音源清单规整", () => {
     const xinghai = normalized.find((item) => item.key === SongUnlockServer.XINGHAI);
     assert.ok(xinghai, "星海音源应被补齐");
     assert.equal(xinghai.enabled, true, "星海音源应默认启用");
+    const fish = normalized.find((item) => item.key === SongUnlockServer.FISH);
+    assert.ok(fish, "小鱼音源应被补齐");
+    assert.equal(fish.enabled, true, "小鱼音源应默认启用");
+    const jiexiang = normalized.find((item) => item.key === SongUnlockServer.JIEXIANG);
+    assert.ok(jiexiang, "吉祥音源应被补齐");
+    assert.equal(jiexiang.enabled, true, "吉祥音源应默认启用");
   });
 
   it("补齐落雪、星海与歌曲宝音源时其余源的开关状态保持原样", () => {
@@ -53,8 +59,10 @@ describe("换源音源清单规整", () => {
     assert.equal(stateOf(SongUnlockServer.CHANGQING), true, "长青应保持开启");
     assert.equal(stateOf(SongUnlockServer.LXMUSIC), true, "落雪应默认启用");
     assert.equal(stateOf(SongUnlockServer.XINGHAI), true, "星海应默认启用");
+    assert.equal(stateOf(SongUnlockServer.FISH), true, "小鱼应默认启用");
+    assert.equal(stateOf(SongUnlockServer.JIEXIANG), true, "吉祥应默认启用");
     assert.equal(stateOf(SongUnlockServer.GEQUBAO), true, "歌曲宝应默认启用");
-    assert.equal(normalized.length, 8, "补齐后应恰好八项");
+    assert.equal(normalized.length, 10, "补齐后应恰好十项");
   });
 
   it("已下线的音源键被剔除，其余条目不受影响", () => {
@@ -67,7 +75,7 @@ describe("换源音源清单规整", () => {
       false,
       "已下线的音源键不应残留",
     );
-    assert.equal(normalized.length, 8, "补齐后应恰好八项");
+    assert.equal(normalized.length, 10, "补齐后应恰好十项");
   });
 
   it("开关字段缺失时按默认清单补齐", () => {
@@ -75,13 +83,19 @@ describe("换源音源清单规整", () => {
       { key: SongUnlockServer.KUWO },
       { key: SongUnlockServer.LXMUSIC },
       { key: SongUnlockServer.XINGHAI },
+      { key: SongUnlockServer.FISH },
+      { key: SongUnlockServer.JIEXIANG },
     ]);
     const kuwo = normalized.find((item) => item.key === SongUnlockServer.KUWO);
     const lxmusic = normalized.find((item) => item.key === SongUnlockServer.LXMUSIC);
     const xinghai = normalized.find((item) => item.key === SongUnlockServer.XINGHAI);
+    const fish = normalized.find((item) => item.key === SongUnlockServer.FISH);
+    const jiexiang = normalized.find((item) => item.key === SongUnlockServer.JIEXIANG);
     assert.equal(kuwo?.enabled, false, "酷我默认关闭");
     assert.equal(lxmusic?.enabled, true, "落雪默认启用");
     assert.equal(xinghai?.enabled, true, "星海默认启用");
+    assert.equal(fish?.enabled, true, "小鱼默认启用");
+    assert.equal(jiexiang?.enabled, true, "吉祥默认启用");
   });
 
   it("重复键只保留首次出现的那一条", () => {
@@ -101,8 +115,10 @@ describe("换源音源清单规整", () => {
     ]);
     assert.equal(normalized[0].key, SongUnlockServer.CHANGQING);
     assert.equal(normalized[1].key, SongUnlockServer.BODIAN);
-    assert.equal(normalized[normalized.length - 3].key, SongUnlockServer.LXMUSIC);
-    assert.equal(normalized[normalized.length - 2].key, SongUnlockServer.XINGHAI);
+    assert.equal(normalized[normalized.length - 5].key, SongUnlockServer.LXMUSIC);
+    assert.equal(normalized[normalized.length - 4].key, SongUnlockServer.XINGHAI);
+    assert.equal(normalized[normalized.length - 3].key, SongUnlockServer.FISH);
+    assert.equal(normalized[normalized.length - 2].key, SongUnlockServer.JIEXIANG);
     assert.equal(normalized[normalized.length - 1].key, SongUnlockServer.GEQUBAO);
   });
 
@@ -115,6 +131,12 @@ describe("换源音源清单规整", () => {
     const xinghai = defaults.find((item) => item.key === SongUnlockServer.XINGHAI);
     assert.ok(xinghai, "默认清单应含星海音源");
     assert.equal(xinghai.enabled, true, "星海音源默认启用");
+    const fish = defaults.find((item) => item.key === SongUnlockServer.FISH);
+    assert.ok(fish, "默认清单应含小鱼音源");
+    assert.equal(fish.enabled, true, "小鱼音源默认启用");
+    const jiexiang = defaults.find((item) => item.key === SongUnlockServer.JIEXIANG);
+    assert.ok(jiexiang, "默认清单应含吉祥音源");
+    assert.equal(jiexiang.enabled, true, "吉祥音源默认启用");
     const gequbao = defaults.find((item) => item.key === SongUnlockServer.GEQUBAO);
     assert.ok(gequbao, "默认清单应含歌曲宝音源");
     assert.equal(gequbao.enabled, true, "歌曲宝音源默认启用");
@@ -124,13 +146,21 @@ describe("换源音源清单规整", () => {
   it("空配置与非法配置按默认清单补齐", () => {
     for (const input of [undefined, [], [null as unknown as { key: string }]]) {
       const normalized = normalizeSongUnlockSources(input);
-      assert.equal(normalized.length, 8);
+      assert.equal(normalized.length, 10);
       assert.equal(
         normalized.find((item) => item.key === SongUnlockServer.LXMUSIC)?.enabled,
         true,
       );
       assert.equal(
         normalized.find((item) => item.key === SongUnlockServer.XINGHAI)?.enabled,
+        true,
+      );
+      assert.equal(
+        normalized.find((item) => item.key === SongUnlockServer.FISH)?.enabled,
+        true,
+      );
+      assert.equal(
+        normalized.find((item) => item.key === SongUnlockServer.JIEXIANG)?.enabled,
         true,
       );
       assert.equal(
