@@ -108,6 +108,7 @@ const PROBE_SOURCE_BY_SERVER: Record<SongUnlockServer, ProbeSource> = {
   [SongUnlockServer.MIGU]: "migu",
   [SongUnlockServer.CHANGQING]: "changqing",
   [SongUnlockServer.LXMUSIC]: "lxmusic",
+  [SongUnlockServer.XINGHAI]: "xinghai",
 };
 
 /**
@@ -258,6 +259,7 @@ class SongManager {
       [SongUnlockServer.MIGU]: "咪咕音乐",
       [SongUnlockServer.CHANGQING]: "长青聚合",
       [SongUnlockServer.LXMUSIC]: "落雪音源",
+      [SongUnlockServer.XINGHAI]: "星海音源",
     };
     return nameMap[server] || server;
   }
@@ -642,6 +644,8 @@ class SongManager {
       const startedAt = Date.now();
       try {
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
+        const platformId =
+          song.platformId || (isNeteaseSong ? String(songId) : undefined);
         const result = await unlockSongUrl(
           songId,
           keyWord,
@@ -651,7 +655,7 @@ class SongManager {
           duration,
           useKeywordLookup,
           platform,
-          song.platformId,
+          platformId,
         );
         const durationMs = Date.now() - startedAt;
         console.log(`🔓 [${songId}] ${sourceName} 返回结果:`, {

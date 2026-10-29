@@ -7,6 +7,7 @@ import getChangqingSongUrl, { type ChangqingOptions } from "./changqing";
 import getNeteaseSongUrl from "./netease";
 import { getNeteaseSearchSongUrl } from "./netease-search";
 import getLxmusicSongUrl, { type LxmusicOptions } from "./lxmusic";
+import getXinghaiSongUrl, { type XinghaiOptions } from "./xinghai";
 import { buildTarget, parseDurationParam, parseKeyword, type MatchTarget } from "./match";
 
 /**
@@ -143,6 +144,22 @@ export const initUnblockAPI = async (fastify: FastifyInstance) => {
         platformId: req.query.platformId,
       };
       const result = await getLxmusicSongUrl(buildMatchInfo(req.query), options);
+      return reply.send(result);
+    },
+  );
+  // xinghai
+  // 星海音源：网易云专供换源，按网易云歌曲 id 直查，取链后做时长与体积双重校验。
+  fastify.get(
+    "/unblock/xinghai",
+    async (
+      req: FastifyRequest<{ Querystring: { [key: string]: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const options: XinghaiOptions = {
+        platform: req.query.platform,
+        platformId: req.query.platformId,
+      };
+      const result = await getXinghaiSongUrl(buildMatchInfo(req.query), options);
       return reply.send(result);
     },
   );

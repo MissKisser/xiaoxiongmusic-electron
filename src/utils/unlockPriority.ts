@@ -9,18 +9,20 @@
  *   （长青/咪咕/网易云为主力源前置；落雪上游为公益接口稳定性有限居中；
  *   波点与酷我对 VIP 曲目命中率近零，垫底兜底）；
  * - QQ 歌曲：同上，长青 → 咪咕 → 网易云 → 落雪 → 波点 → 酷我；
- * - 网易云歌曲：网易云按自身歌曲 id 直查，排在首位；咪咕 / 长青 / 酷我 / 波点依次兜底。
+ * - 网易云歌曲：星海后端 wy 通道实测可用性最高且为官方字节级原曲，排在首位；
+ *   原网易云网关作为兜底，后续由咪咕 / 长青 / 酷我 / 波点依次兜底。
  *
  * 链位固定，不随运行期可用性调整：熔断与单源失败只影响「本次是否命中」，不改变链位顺序。
  *
  * 本模块只放纯函数，不依赖任何 store，可被播放链与下载链共同引用；
  * 链位调整必须与 xiaoxiongmusic-capacitor 同步（音源修改双端对齐铁律）。
  */
-import { SongUnlockServer, type ApiPlatform } from "@/types/shared";
+import { SongUnlockServer, type ApiPlatform } from "../types/shared";
 
 /** 各平台的换源优先级（数组顺序即尝试顺序） */
 const UNLOCK_PRIORITY: Record<ApiPlatform, readonly SongUnlockServer[]> = {
   netease: [
+    SongUnlockServer.XINGHAI,
     SongUnlockServer.NETEASE,
     SongUnlockServer.MIGU,
     SongUnlockServer.CHANGQING,
