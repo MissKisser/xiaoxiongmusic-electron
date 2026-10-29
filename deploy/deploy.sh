@@ -5,7 +5,7 @@
 
 set -e
 
-PROJECT_DIR="/www/wwwroot/music.viaxv.top"
+PROJECT_DIR="/www/wwwroot/music.viaxv.cn"
 cd "$PROJECT_DIR"
 
 echo "=========================================="
@@ -84,11 +84,11 @@ echo "✅ 部署完成！"
 echo "=========================================="
 echo ""
 echo "🌐 访问地址:"
-echo "   前端: https://music.viaxv.top"
-echo "   API:  https://music.viaxv.top/api"
+echo "   前端: https://music.viaxv.cn"
+echo "   API:  https://music.viaxv.cn/api"
 echo ""
 echo "📋 下一步："
 echo "   1. 确保 Nginx 配置已更新"
 echo "   2. 配置 SSL 证书（如未配置）"
-echo "   3. 访问 https://music.viaxv.top 测试"
+echo "   3. 访问 https://music.viaxv.cn 测试"
 echo ""

@@ -25,10 +25,9 @@ export default defineConfig(({ mode }) => {
     // 主进程
     main: {
       // 主进程运行在 Node 环境（无 import.meta.env），把 env 中的服务端地址静态注入
+      // 服务端地址仅来自 .env 的 VITE_SERVER_URL，此处不做硬编码兜底
       define: {
-        "process.env.VITE_SERVER_URL": JSON.stringify(
-          getEnv("VITE_SERVER_URL") || "https://music.viaxv.cn"
-        ),
+        "process.env.VITE_SERVER_URL": JSON.stringify(getEnv("VITE_SERVER_URL") || ""),
       },
       resolve: {
         alias: {

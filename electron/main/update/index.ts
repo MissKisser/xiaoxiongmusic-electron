@@ -4,8 +4,8 @@ import https from "https";
 import http from "http";
 import { app } from "electron";
 
-// Server API 地址
-const SERVER_URL = String(process.env.VITE_SERVER_URL || "https://music.viaxv.cn");
+// Server API 地址（构建期由 .env 的 VITE_SERVER_URL 静态注入，不做硬编码兜底）
+const SERVER_URL = String(process.env.VITE_SERVER_URL || "");
 
 // 获取当前平台
 const getPlatform = (): string => {
