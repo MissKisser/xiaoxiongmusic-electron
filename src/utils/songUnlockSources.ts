@@ -28,6 +28,7 @@ export const SONG_UNLOCK_SOURCE_DEFAULTS: ReadonlyArray<SongUnlockSourceItem> = 
   { key: SongUnlockServer.CHANGQING, enabled: true },
   { key: SongUnlockServer.LXMUSIC, enabled: true },
   { key: SongUnlockServer.XINGHAI, enabled: true },
+  { key: SongUnlockServer.GEQUBAO, enabled: true },
 ];
 
 /**

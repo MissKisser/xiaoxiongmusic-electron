@@ -45,6 +45,7 @@ const SOURCE_LABEL: Record<SongUnlockServer, string> = {
   [SongUnlockServer.CHANGQING]: "长青聚合（社区公益源，稳定性无保障）",
   [SongUnlockServer.LXMUSIC]: "落雪音源（社区公益源，仅 QQ 曲库）",
   [SongUnlockServer.XINGHAI]: "星海音源（社区公益源，网易云曲库）",
+  [SongUnlockServer.GEQUBAO]: "歌曲宝（社区公益源，稳定性无保障）",
 };
 
 /**

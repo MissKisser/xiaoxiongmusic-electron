@@ -109,6 +109,7 @@ const PROBE_SOURCE_BY_SERVER: Record<SongUnlockServer, ProbeSource> = {
   [SongUnlockServer.CHANGQING]: "changqing",
   [SongUnlockServer.LXMUSIC]: "lxmusic",
   [SongUnlockServer.XINGHAI]: "xinghai",
+  [SongUnlockServer.GEQUBAO]: "gequbao",
 };
 
 /**
@@ -260,6 +261,7 @@ class SongManager {
       [SongUnlockServer.CHANGQING]: "长青聚合",
       [SongUnlockServer.LXMUSIC]: "落雪音源",
       [SongUnlockServer.XINGHAI]: "星海音源",
+      [SongUnlockServer.GEQUBAO]: "歌曲宝",
     };
     return nameMap[server] || server;
   }

@@ -163,6 +163,7 @@ class PlayerController {
           netease: "网易云",
           kuwo: "酷我音乐",
           bodian: "波点音乐",
+          gequbao: "歌曲宝",
           cache: "本地缓存",
           local: "本地文件",
           streaming: "流媒体",

@@ -35,7 +35,7 @@ describe("换源音源清单规整", () => {
     assert.equal(xinghai.enabled, true, "星海音源应默认启用");
   });
 
-  it("补齐落雪与星海音源时其余源的开关状态保持原样", () => {
+  it("补齐落雪、星海与歌曲宝音源时其余源的开关状态保持原样", () => {
     const oldConfig = [
       { key: SongUnlockServer.BODIAN, enabled: false },
       { key: SongUnlockServer.NETEASE, enabled: true },
@@ -53,7 +53,8 @@ describe("换源音源清单规整", () => {
     assert.equal(stateOf(SongUnlockServer.CHANGQING), true, "长青应保持开启");
     assert.equal(stateOf(SongUnlockServer.LXMUSIC), true, "落雪应默认启用");
     assert.equal(stateOf(SongUnlockServer.XINGHAI), true, "星海应默认启用");
-    assert.equal(normalized.length, 7, "补齐后应恰好七项");
+    assert.equal(stateOf(SongUnlockServer.GEQUBAO), true, "歌曲宝应默认启用");
+    assert.equal(normalized.length, 8, "补齐后应恰好八项");
   });
 
   it("已下线的音源键被剔除，其余条目不受影响", () => {
@@ -66,7 +67,7 @@ describe("换源音源清单规整", () => {
       false,
       "已下线的音源键不应残留",
     );
-    assert.equal(normalized.length, 7, "补齐后应恰好七项");
+    assert.equal(normalized.length, 8, "补齐后应恰好八项");
   });
 
   it("开关字段缺失时按默认清单补齐", () => {
@@ -100,11 +101,12 @@ describe("换源音源清单规整", () => {
     ]);
     assert.equal(normalized[0].key, SongUnlockServer.CHANGQING);
     assert.equal(normalized[1].key, SongUnlockServer.BODIAN);
-    assert.equal(normalized[normalized.length - 2].key, SongUnlockServer.LXMUSIC);
-    assert.equal(normalized[normalized.length - 1].key, SongUnlockServer.XINGHAI);
+    assert.equal(normalized[normalized.length - 3].key, SongUnlockServer.LXMUSIC);
+    assert.equal(normalized[normalized.length - 2].key, SongUnlockServer.XINGHAI);
+    assert.equal(normalized[normalized.length - 1].key, SongUnlockServer.GEQUBAO);
   });
 
-  it("默认清单含落雪与星海音源且默认启用", () => {
+  it("默认清单含落雪、星海与歌曲宝音源且默认启用", () => {
     const defaults = createDefaultSongUnlockSources();
     assert.equal(defaults.length, SONG_UNLOCK_SOURCE_DEFAULTS.length);
     const lxmusic = defaults.find((item) => item.key === SongUnlockServer.LXMUSIC);
@@ -113,19 +115,26 @@ describe("换源音源清单规整", () => {
     const xinghai = defaults.find((item) => item.key === SongUnlockServer.XINGHAI);
     assert.ok(xinghai, "默认清单应含星海音源");
     assert.equal(xinghai.enabled, true, "星海音源默认启用");
+    const gequbao = defaults.find((item) => item.key === SongUnlockServer.GEQUBAO);
+    assert.ok(gequbao, "默认清单应含歌曲宝音源");
+    assert.equal(gequbao.enabled, true, "歌曲宝音源默认启用");
     assert.notEqual(defaults, SONG_UNLOCK_SOURCE_DEFAULTS, "默认清单应返回独立副本");
   });
 
   it("空配置与非法配置按默认清单补齐", () => {
     for (const input of [undefined, [], [null as unknown as { key: string }]]) {
       const normalized = normalizeSongUnlockSources(input);
-      assert.equal(normalized.length, 7);
+      assert.equal(normalized.length, 8);
       assert.equal(
         normalized.find((item) => item.key === SongUnlockServer.LXMUSIC)?.enabled,
         true,
       );
       assert.equal(
         normalized.find((item) => item.key === SongUnlockServer.XINGHAI)?.enabled,
+        true,
+      );
+      assert.equal(
+        normalized.find((item) => item.key === SongUnlockServer.GEQUBAO)?.enabled,
         true,
       );
     }

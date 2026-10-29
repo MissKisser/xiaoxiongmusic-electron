@@ -79,6 +79,8 @@ const UNLOCK_TIMEOUT: Record<SongUnlockServer, number> = {
   [SongUnlockServer.NETEASE]: 60000,
   [SongUnlockServer.BODIAN]: 20000,
   [SongUnlockServer.KUWO]: 20000,
+  // 歌曲宝：检索 + 进详情页取时长 + 取链 + 体积校验串行
+  [SongUnlockServer.GEQUBAO]: 20000,
   // 咪咕：检索 + 音质遍历取链 + 时长与体积校验
   [SongUnlockServer.MIGU]: 30000,
   // 长青：可能先检索换 id 再取链，取链还要探测真实音频时长
