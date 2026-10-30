@@ -35,12 +35,29 @@ const makeResponse = (status, data, headers = {}) => ({
   config: {},
 });
 
+/**
+ * 构造 axios 形态的请求超时异常
+ * @param timeoutMs 超时阈值（毫秒）
+ * @returns 超时异常
+ */
+const makeTimeoutError = (timeoutMs = 12000) => {
+  const error = new Error(`timeout of ${timeoutMs}ms exceeded`);
+  error.code = "ECONNABORTED";
+  return error;
+};
+
 /** 假 axios */
 const fakeAxios = {
   async get(url, options = {}) {
     const href = String(url);
     if (href.includes("tang.api.s01s.cn")) {
       state.fishCalls += 1;
+      if (state.fishMode === "timeout_once" && state.fishCalls === 1) {
+        throw makeTimeoutError();
+      }
+      if (state.fishMode === "timeout_always") {
+        throw makeTimeoutError();
+      }
       if (state.fishMode === "http500") {
         return makeResponse(500, "");
       }

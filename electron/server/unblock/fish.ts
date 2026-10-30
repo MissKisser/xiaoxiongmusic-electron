@@ -7,6 +7,8 @@
  * 上游：糖果公开接口（社区公益接口，无需鉴权与 Cookie）
  * - 入口：https://tang.api.s01s.cn/music_open_api.php（单 GET，参数 mid）
  * - 单次请求即返回全档直链，无需逐档请求；
+ * - 首触（上游第一次遇到这首歌）要现查 QQ 曲库并换 vkey，耗时在亚秒到十秒级之间大幅波动；
+ *   命中上游缓存后回落到 1s 内，因此取链超时后重试一次；
  * - 上游暂无在线备域，主域故障时依赖熔断器跳过整源，不做域名故障转移。
  *
  * 能力：专接 QQ 音乐曲库。
@@ -48,7 +50,10 @@ import { CircuitBreaker, isUpstreamFault } from "./resilience";
 const FISH_API_BASE = "https://tang.api.s01s.cn/music_open_api.php";
 
 /** 单次取链请求超时（毫秒） */
-const REQUEST_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 12000;
+
+/** 首触超时后的重试超时（毫秒）：重试时上游通常已写入缓存，回落快 */
+const RETRY_TIMEOUT_MS = 8000;
 
 /** 直链探测超时（毫秒） */
 const PROBE_TIMEOUT_MS = 10000;
@@ -253,35 +258,80 @@ const resolveSongMid = async (
   return { mid: ranked[0].candidate.id, reason: "" };
 };
 
+/** 单次取链请求的结论 */
+type FishFetchOutcome = {
+  /** 上游响应体；为 null 表示本次请求未拿到可用信息 */
+  body: FishSongInfo | null;
+  /** 失败原因（用户可读文案） */
+  reason: string;
+  /** 是否属于上游故障 */
+  fault: boolean;
+  /** 是否为请求超时 */
+  timedOut: boolean;
+};
+
 /**
- * 向小鱼接口请求歌曲信息
+ * 判断异常是否为请求超时
+ * @param error 异常对象
+ * @returns 是否为超时
+ */
+const isTimeoutError = (error: unknown): boolean =>
+  /timeout of \d+ms exceeded|超时/i.test(
+    String((error as { message?: unknown })?.message ?? error),
+  );
+
+/**
+ * 向小鱼接口发起一次取链请求
  * @param mid QQ 歌曲 mid
+ * @param timeout 本次请求的超时阈值（毫秒）
  * @returns 上游响应体与失败结论
  */
-const requestFishSong = async (
-  mid: string,
-): Promise<{ body: FishSongInfo | null; reason: string; fault: boolean }> => {
+const fetchFishSong = async (mid: string, timeout: number): Promise<FishFetchOutcome> => {
   const url = `${FISH_API_BASE}?mid=${encodeURIComponent(mid)}`;
   try {
     const response = await axios.get(url, {
       headers: { "User-Agent": UA, Accept: "application/json" },
-      timeout: REQUEST_TIMEOUT_MS,
+      timeout,
       validateStatus: () => true,
     });
     if (response.status >= 500) {
-      return { body: null, reason: `上游 HTTP ${response.status}`, fault: true };
+      return { body: null, reason: `上游 HTTP ${response.status}`, fault: true, timedOut: false };
     }
     if (response.status >= 400) {
-      return { body: null, reason: `上游 HTTP ${response.status}`, fault: false };
+      return { body: null, reason: `上游 HTTP ${response.status}`, fault: false, timedOut: false };
     }
     const body = (response.data || {}) as FishSongInfo;
     if (!body || typeof body !== "object") {
-      return { body: null, reason: "上游未返回歌曲信息", fault: false };
+      return { body: null, reason: "上游未返回歌曲信息", fault: false, timedOut: false };
     }
-    return { body, reason: "", fault: false };
+    return { body, reason: "", fault: false, timedOut: false };
   } catch (error) {
-    return { body: null, reason: String(error), fault: isUpstreamFault(error) };
+    return {
+      body: null,
+      reason: String(error),
+      fault: isUpstreamFault(error),
+      timedOut: isTimeoutError(error),
+    };
   }
+};
+
+/**
+ * 向小鱼接口请求歌曲信息，首触超时后重试一次
+ *
+ * 上游对每首歌的首次解析要现查 QQ 曲库并换 vkey，耗时在亚秒到十秒级之间大幅波动，
+ * 命中上游缓存后回落到 1s 内。首触超时多是上游解析慢而非不可用，
+ * 故超时后重试一次：此时上游通常已把解析结果写入缓存，重试可直接命中。
+ * 服务端错误与连接失败不重试，交由熔断器统一降级。
+ * @param mid QQ 歌曲 mid
+ * @returns 上游响应体与失败结论
+ */
+const requestFishSong = async (mid: string): Promise<FishFetchOutcome> => {
+  const first = await fetchFishSong(mid, REQUEST_TIMEOUT_MS);
+  if (first.body || !first.timedOut) return first;
+  serverLog.warn(`⏱️ 小鱼音源 首触超时（${mid}），重试一次`);
+  const second = await fetchFishSong(mid, RETRY_TIMEOUT_MS);
+  if (second.body) serverLog.info("🔗 小鱼音源重试命中上游缓存");
+  return second;
 };
 
 /**

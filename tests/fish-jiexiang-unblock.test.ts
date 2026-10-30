@@ -182,6 +182,47 @@ describe("小鱼音源（QQ 音乐）换源逻辑", () => {
     assert.equal(tripped.reason, UPSTREAM_UNAVAILABLE_REASON);
     assert.equal(getState().fishCalls, callsBefore, "熔断期内零网络请求");
   });
+
+  it("首触超时后重试一次并命中上游缓存", async () => {
+    const unlock = await loadFish();
+    resetState();
+    getState().fishMode = "timeout_once";
+
+    const target = { title: "夜曲", artist: "周杰伦", duration: 200 };
+    const options = { platform: "qqmusic", platformId: "0039MnYb0qxYhV" };
+
+    const result = await unlock(target, options);
+    assert.equal(result.code, 200, "重试命中后应正常交付直链");
+    assert.ok(result.url?.includes("qqmusic.qq.com"));
+    assert.equal(getState().fishCalls, 2, "首触超时后应再发一次请求");
+  });
+
+  it("重试仍超时时判失败并计入熔断", async () => {
+    const unlock = await loadFish();
+    resetState();
+    getState().fishMode = "timeout_always";
+
+    const target = { title: "夜曲", artist: "周杰伦", duration: 200 };
+    const options = { platform: "qqmusic", platformId: "0039MnYb0qxYhV" };
+
+    const result = await unlock(target, options);
+    assert.equal(result.code, 404);
+    assert.equal(result.reason, FETCH_FAILED_REASON);
+    assert.equal(getState().fishCalls, 2, "只重试一次，不做无止境重试");
+  });
+
+  it("上游返回 HTTP 5xx 时不重试", async () => {
+    const unlock = await loadFish();
+    resetState();
+    getState().fishMode = "http500";
+
+    const target = { title: "夜曲", artist: "周杰伦", duration: 200 };
+    const options = { platform: "qqmusic", platformId: "0039MnYb0qxYhV" };
+
+    const result = await unlock(target, options);
+    assert.equal(result.code, 404);
+    assert.equal(getState().fishCalls, 1, "服务端故障由熔断器处理，不做即时重试");
+  });
 });
 
 describe("吉祥音源（酷狗曲库）换源逻辑", () => {
