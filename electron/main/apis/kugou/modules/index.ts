@@ -1,7 +1,7 @@
 /**
  * KG 模块注册表
  *
- * 平台数据面：登录、歌单读写、搜索、歌词、评论、播放地址、专辑、歌手、热门歌手、歌单详情、歌单广场、排行榜、刷歌推荐流、每日推荐、听书、首页新碟与场景电台。
+ * 平台数据面：登录、歌单读写、搜索、歌词、评论、播放地址、专辑、歌手、热门歌手、歌单详情、歌单广场、排行榜、刷歌推荐流、每日推荐、听书、首页新碟、场景电台与热搜。
  */
 
 import type { KGModule } from "../core/types";
@@ -20,6 +20,7 @@ import { album } from "./album";
 import { artist } from "./artist";
 import { audiobookCategory, audiobookDetail, audiobookList } from "./audiobook";
 import { hot_artists } from "./hot_artists";
+import { hot_search } from "./hot_search";
 import { comment } from "./comment";
 import { homeAlbum } from "./home_album";
 import { homeTheme } from "./home_theme";
@@ -55,6 +56,7 @@ export const modules: Record<string, KGModule> = {
   "audiobook/list": audiobookList,
   "audiobook/detail": audiobookDetail,
   hot_artists,
+  hot_search,
   playlist,
   playlist_square,
   leaderboard_list,

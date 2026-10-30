@@ -1310,6 +1310,24 @@ interface KgHotArtistsResponse {
   message?: string;
 }
 
+/** 酷狗热搜条目 */
+export interface KgHotSearchEntry {
+  /** 榜位 */
+  rank: number;
+  /** 热搜词 */
+  keyword: string;
+  /** 热搜描述（上游暂未提供真实描述，恒为空字符串） */
+  description: string;
+}
+
+/** 主进程酷狗热搜模块的原生返回 */
+export interface KgHotSearchResponse {
+  code?: number;
+  total?: number;
+  list?: Array<Record<string, any>>;
+  message?: string;
+}
+
 /**
  * 归一化酷狗热门歌手条目（补齐平台维度）
  *
@@ -1435,4 +1453,26 @@ export const kgHomeThemes = async (limit?: number): Promise<PlatformThemeCard[]>
     cover: fillCover(item.cover ?? ""),
     platform: KUGOU,
   }));
+};
+
+/**
+ * 读取酷狗音乐站内热搜榜
+ *
+ * 走主进程 `hot_search` 模块（上游原生热搜榜，失败时由主进程降级到兜底通道）。
+ * 上游不提供任何真实热度值，故归一化结果不带热度分，页面据此隐藏热度展示。
+ * @param limit 取回的条数，默认 20 条
+ * @returns 归一化后的热搜条目与总数
+ */
+export const kgHotSearch = async (
+  limit = 20,
+): Promise<{ total: number; list: KgHotSearchEntry[] }> => {
+  const res = await platformRequest<KgHotSearchResponse>(KUGOU, "hot_search", { limit });
+  return {
+    total: Number(res?.total ?? 0),
+    list: (res?.list ?? []).map((item) => ({
+      rank: Number(item?.rank ?? 0),
+      keyword: String(item?.keyword ?? ""),
+      description: String(item?.description ?? ""),
+    })),
+  };
 };

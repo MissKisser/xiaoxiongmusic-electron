@@ -40,6 +40,7 @@ import {
   kgHomeAlbums,
   kgHomeThemes,
   kgHotArtists,
+  kgHotSearch,
   kgLeaderboardDetail,
   kgLeaderboardList,
   kgPlaylistDetail,
@@ -1015,8 +1016,8 @@ export const dispatchSearch = async (
 export interface DispatchHotSearchItem {
   /** 热搜词 */
   searchWord: string;
-  /** 热度分 */
-  score: number;
+  /** 热度分：上游平台未提供热度值时该字段缺省，渲染层据此隐藏热度展示 */
+  score?: number;
   /** 热搜描述 */
   content: string;
   /** 图标地址 */
@@ -1028,8 +1029,7 @@ export interface DispatchHotSearchItem {
 /**
  * 读取当前平台的热搜榜
  *
- * 网易云走 `/search/hot/detail`；QQ 音乐走平台热搜模块；
- * 酷狗没有热搜模块，返回空列表（页面退化为只显示最近搜索）。
+ * 网易云走 `/search/hot/detail`；QQ 音乐与酷狗走各自的平台热搜模块。
  * @param platform 音源平台
  * @returns 归一化后的热搜条目
  */
@@ -1052,6 +1052,14 @@ export const dispatchHotSearch = async (
     return res.list.map((item) => ({
       searchWord: item.keyword,
       score: item.score,
+      content: item.description,
+    }));
+  }
+
+  if (platform === "kugou") {
+    const res = await kgHotSearch();
+    return res.list.map((item) => ({
+      searchWord: item.keyword,
       content: item.description,
     }));
   }

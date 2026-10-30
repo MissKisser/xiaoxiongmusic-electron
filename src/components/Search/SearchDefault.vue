@@ -49,7 +49,7 @@
               </div>
               <n-text class="content" depth="3">{{ item.content }}</n-text>
             </div>
-            <div class="hot">
+            <div v-if="item.score !== undefined" class="hot">
               <SvgIcon name="Fire" />
               <n-text class="hot-num">{{ item.score }} </n-text>
             </div>
@@ -73,7 +73,7 @@ import {
 
 interface SearchHotItem {
   searchWord: string;
-  score: number;
+  score?: number;
   content: string;
   iconUrl?: string;
   iconType?: number;
@@ -89,6 +89,8 @@ const settingStore = useSettingStore();
 const platformStore = usePlatformStore();
 
 const searchHotData = ref<SearchHotItem[]>([]);
+// 热搜请求序号：平台切换时作废在途响应，避免上一个平台的热搜串味
+const hotRequestId = ref<number>(0);
 
 // 是否展示
 const isShow = computed(() => {
@@ -115,13 +117,28 @@ const isShowHotSearch = computed(() => {
 const getSearchHotData = async () => {
   if (!settingStore.useOnlineService || !settingStore.showHotSearch) return;
   const platform = platformStore.currentPlatform;
+  // 请求序号：后发起的请求作废先发起的响应，避免旧结果覆盖新结果
+  const currentId = ++hotRequestId.value;
   // 网易云沿用既有缓存键，其余平台按平台隔离缓存
   const cacheKey = platform === "netease" ? "searchHotData" : `searchHotData-${platform}`;
-  const result = await getCacheData(() => dispatchHotSearch(platform), {
-    key: cacheKey,
-    time: 10,
-  });
-  searchHotData.value = result ?? [];
+  try {
+    const result = await getCacheData(() => dispatchHotSearch(platform), {
+      key: cacheKey,
+      time: 10,
+      // 空结果不写缓存，避免上游失败时把空态固化
+      skipEmpty: true,
+    });
+    // 序号不一致说明期间已切换平台，丢弃本次响应
+    if (currentId !== hotRequestId.value) return;
+    // 平台已切换，丢弃本次响应，避免上一个平台的热搜串味
+    if (platform !== platformStore.currentPlatform) return;
+    searchHotData.value = result ?? [];
+  } catch (error) {
+    console.error("获取热搜数据失败：", error);
+    // 取数失败时清空，不保留上一个平台的数据
+    if (currentId !== hotRequestId.value) return;
+    searchHotData.value = [];
+  }
 };
 
 // 删除搜索历史
@@ -143,6 +160,10 @@ onMounted(() => {
 
 // 平台切换后按新平台重新取热搜
 const stopPlatformWatch = onPlatformChange(() => {
+  // 作废在途响应，避免旧平台的热搜覆盖新平台
+  hotRequestId.value += 1;
+  // 清空旧平台的热搜，避免切换瞬间串味
+  searchHotData.value = [];
   getSearchHotData();
 });
 
