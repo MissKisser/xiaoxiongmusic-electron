@@ -49,6 +49,7 @@ import {
   isUpstreamFault,
   parseBusinessError,
 } from "./resilience";
+import { getQingGatewayHeaders, invalidateQingTicket } from "./qing-gateway";
 
 /** 吉祥音源解析网关地址 */
 const JIEXIANG_RESOLVE_URL = "https://musicserver.haitangw.cc/v1/music/resolve-url";
@@ -163,6 +164,10 @@ type JiexiangFetchOutcome = {
 
 /**
  * 向吉祥音源解析网关请求单档音频直链
+ *
+ * 故障口径：HTTP 5xx（除 503 单曲无资源外）、连接失败、超时以及重试后仍鉴权失败计入上游故障；
+ * 业务层无资源结论（HTTP 503 或 UPSTREAM_NO_RESOURCE）属单曲问题，不计入熔断；
+ * 鉴权失效（HTTP 401 或 APP_UPGRADE_REQUIRED）作废票据后自动重试一次。
  * @param hash 酷狗歌曲 hash（小写）
  * @param tier 音质档位配置
  * @returns 取链结论
@@ -171,51 +176,87 @@ const requestJiexiangSongUrl = async (
   hash: string,
   tier: JiexiangTier,
 ): Promise<JiexiangFetchOutcome> => {
-  try {
-    const response = await axios.post(
-      JIEXIANG_RESOLVE_URL,
-      {
-        source: "kg",
-        rid: hash,
-        level: tier.level,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": UA,
-          Accept: "application/json",
+  const bodyStr = JSON.stringify({
+    source: "kg",
+    rid: hash,
+    level: tier.level,
+  });
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const headers = await getQingGatewayHeaders("POST", "/v1/music/resolve-url", bodyStr);
+      const response = await axios.post(
+        JIEXIANG_RESOLVE_URL,
+        bodyStr,
+        {
+          headers: {
+            ...headers,
+            "User-Agent": UA,
+          },
+          timeout: REQUEST_TIMEOUT_MS,
+          validateStatus: () => true,
         },
-        timeout: REQUEST_TIMEOUT_MS,
-        validateStatus: () => true,
-      },
-    );
+      );
 
-    const body = (response.data || {}) as JiexiangResponse;
+      const body = (typeof response.data === "object" && response.data !== null
+        ? response.data
+        : {}) as JiexiangResponse;
 
-    // 单曲无资源时不计入整源故障
-    if (body.code === "UPSTREAM_NO_RESOURCE") {
-      return { url: null, reason: body.message || "上游暂无该曲目资源", fault: false };
+      // 鉴权失效检测：HTTP 401 或业务码 APP_UPGRADE_REQUIRED
+      const isAuthExpired =
+        response.status === 401 || body.code === "APP_UPGRADE_REQUIRED";
+      if (isAuthExpired) {
+        invalidateQingTicket();
+        if (attempt === 0) {
+          continue;
+        }
+        return {
+          url: null,
+          reason: body.message || "鉴权失效",
+          fault: true,
+        };
+      }
+
+      // 单曲无资源检测：业务码 UPSTREAM_NO_RESOURCE（上游以 HTTP 503 交付）
+      if (body.code === "UPSTREAM_NO_RESOURCE") {
+        return {
+          url: null,
+          reason: body.message || "播放地址解析失败",
+          fault: false,
+        };
+      }
+
+      // 成功判定：HTTP 200 或 201，且 code 为 0 或 "0"
+      if (
+        (response.status === 200 || response.status === 201) &&
+        (body.code === 0 || body.code === "0")
+      ) {
+        const url = String(body.data?.url ?? "").trim();
+        if (url) return { url, reason: "", fault: false };
+        return { url: null, reason: "上游未返回直链", fault: false };
+      }
+
+      // 其余 HTTP 5xx 故障
+      if (response.status >= 500) {
+        return { url: null, reason: `上游 HTTP ${response.status}`, fault: true };
+      }
+
+      // 其余 HTTP 4xx 客户端错误
+      if (response.status >= 400) {
+        return { url: null, reason: `上游 HTTP ${response.status}`, fault: false };
+      }
+
+      // 其他业务错误
+      const businessReason = body.message || `上游业务码 ${body.code ?? response.status}`;
+      const business = parseBusinessError(body);
+      const fault = business ? isBusinessFault(business) : false;
+      return { url: null, reason: businessReason, fault };
+    } catch (error) {
+      return { url: null, reason: String(error), fault: isUpstreamFault(error) };
     }
-
-    if (response.status >= 500) {
-      return { url: null, reason: `上游 HTTP ${response.status}`, fault: true };
-    }
-    if (response.status >= 400) {
-      return { url: null, reason: `上游 HTTP ${response.status}`, fault: false };
-    }
-
-    if ((body.code === 0 || body.code === "0") && body.data?.url) {
-      const url = body.data.url.trim();
-      return { url, reason: "", fault: false };
-    }
-
-    const businessReason = body.message || `上游业务码 ${body.code ?? response.status}`;
-    const business = parseBusinessError(body);
-    const fault = business ? isBusinessFault(business) : false;
-    return { url: null, reason: businessReason, fault };
-  } catch (error) {
-    return { url: null, reason: String(error), fault: isUpstreamFault(error) };
   }
+
+  return { url: null, reason: "鉴权失效", fault: true };
 };
 
 /**

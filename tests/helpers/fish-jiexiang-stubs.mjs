@@ -17,6 +17,8 @@ const state = {
   // jiexiang 相关
   jiexiangMode: "ok",
   jiexiangCalls: 0,
+  ticketCalls: 0,
+  jiexiangRequests: [],
   jiexiangContentLength: 8000000,
   jiexiangAudioBuffer: Buffer.from([0xff, 0xfb, 0xe0, 0x00]), // MPEG1 Layer3 320k 44.1kHz
 
@@ -129,8 +131,23 @@ const fakeAxios = {
 
   async post(url, body, options = {}) {
     const href = String(url);
+    if (href.includes("/v1/gateway/ticket")) {
+      state.ticketCalls = (state.ticketCalls || 0) + 1;
+      return makeResponse(200, {
+        ticket: `mock-ticket-${state.ticketCalls}`,
+        expiresAt: Date.now() + 43200 * 1000,
+        ttlSeconds: 43200,
+      });
+    }
+
     if (href.includes("musicserver.haitangw.cc")) {
       state.jiexiangCalls += 1;
+      state.jiexiangRequests = state.jiexiangRequests || [];
+      state.jiexiangRequests.push({
+        headers: options.headers || {},
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
+
       if (state.jiexiangMode === "http500") {
         return makeResponse(500, "");
       }
@@ -148,8 +165,43 @@ const fakeAxios = {
           data: { url: "http://v3-32-yp-qqmusic.a.bdycdn.cn/full/qu999_s123.mp3" },
         });
       }
+
+      const parsedBody = typeof body === "string" ? JSON.parse(body) : body;
+
+      if (state.jiexiangMode === "http201") {
+        const token = parsedBody?.level === "standard" ? "qu128" : "qu320";
+        return makeResponse(201, {
+          code: 0,
+          message: "ok",
+          data: {
+            url: `http://v3-32-yp-qqmusic.a.bdycdn.cn/full/${token}_s123.mp3`,
+          },
+        });
+      }
+      if (state.jiexiangMode === "auth_expired_once") {
+        if (state.jiexiangCalls === 1) {
+          return makeResponse(200, {
+            code: "APP_UPGRADE_REQUIRED",
+            message: "ticket expired",
+          });
+        }
+        const token = parsedBody?.level === "standard" ? "qu128" : "qu320";
+        return makeResponse(200, {
+          code: 0,
+          message: "ok",
+          data: {
+            url: `http://v3-32-yp-qqmusic.a.bdycdn.cn/full/${token}_s123.mp3`,
+          },
+        });
+      }
+      if (state.jiexiangMode === "auth_expired_always") {
+        return makeResponse(401, {
+          code: "APP_UPGRADE_REQUIRED",
+          message: "sign invalid",
+        });
+      }
       if (state.jiexiangMode === "fail_exhigh") {
-        if (body?.level === "exhigh") {
+        if (parsedBody?.level === "exhigh") {
           return makeResponse(200, {
             code: 1,
             message: "无高音质",
@@ -162,7 +214,7 @@ const fakeAxios = {
           data: { url: "http://v3-32-yp-qqmusic.a.bdycdn.cn/full/qu128_s123.mp3" },
         });
       }
-      const token = body?.level === "standard" ? "qu128" : "qu320";
+      const token = parsedBody?.level === "standard" ? "qu128" : "qu320";
       return makeResponse(200, {
         code: 0,
         message: "ok",

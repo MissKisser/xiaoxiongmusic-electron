@@ -9,11 +9,12 @@ import { kgSongUrl } from "@/api/platform/kugou";
 import { qqLyric } from "@/api/platform/qqmusic";
 import { qqSongUrl } from "@/api/platform/qqmusic";
 import { getPlatformLevel } from "@/api/platform/types";
-import type { ApiPlatform } from "@/types/shared";
+import { SongUnlockServer, type ApiPlatform } from "@/types/shared";
 
 import { songLevelData } from "@/utils/meta";
 import { getPlayerInfoObj } from "@/utils/format";
 import { getUnlockPriority } from "@/utils/unlockPriority";
+import { raceUnlockSources, type UnlockAttempt } from "@/utils/unlockRace";
 
 interface DownloadTask {
   song: SongType;
@@ -395,8 +396,11 @@ class DownloadManager {
           // 歌曲声明时长（秒），参与站外源的时长校验
           const duration = song.duration > 0 ? Math.round(song.duration / 1000) : undefined;
 
-          // 按顺序请求，一旦成功就使用
-          for (const server of sortedServers) {
+          // 并发请求，首个成功立即使用
+          const attempt = async (
+            server: SongUnlockServer,
+          ): Promise<UnlockAttempt<string>> => {
+            const startedAt = Date.now();
             try {
               const result = await unlockSongUrl(
                 song.id,
@@ -409,17 +413,38 @@ class DownloadManager {
                 platform,
                 song.platformId,
               );
+              const durationMs = Date.now() - startedAt;
               if (result.code === 200 && result.url) {
-                url = result.url;
-                // 尝试推断类型
-                type = inferAudioType(url);
-                console.log(`🔓 [${song.id}] Unlock download URL found from ${server}:`, url);
-                break; // 找到可用链接，退出循环
+                return {
+                  ok: true,
+                  server,
+                  durationMs,
+                  value: result.url,
+                };
               }
+              return {
+                ok: false,
+                server,
+                durationMs,
+                reason: result.reason || "未找到可用链接",
+              };
             } catch (error) {
+              const durationMs = Date.now() - startedAt;
               console.warn(`⚠️ [${song.id}] 解锁服务 ${server} 请求失败:`, error);
-              // 继续尝试下一个服务
+              return {
+                ok: false,
+                server,
+                durationMs,
+                reason: "请求失败",
+              };
             }
+          };
+
+          const { winner } = await raceUnlockSources(sortedServers, attempt);
+          if (winner) {
+            url = winner.value;
+            type = inferAudioType(url);
+            console.log(`🔓 [${song.id}] Unlock download URL found from ${winner.server}:`, url);
           }
         } catch (e) {
           console.error("Error fetching unlock url for download:", e);

@@ -9,6 +9,7 @@
 
 import { register } from "node:module";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { describe, it } from "node:test";
 
 import { SongUnlockServer } from "../src/types/shared";
@@ -32,6 +33,8 @@ type StubState = {
 
   jiexiangMode: string;
   jiexiangCalls: number;
+  ticketCalls: number;
+  jiexiangRequests: { headers: Record<string, string>; body: string }[];
   jiexiangContentLength: number;
   jiexiangAudioBuffer: Buffer;
 
@@ -62,7 +65,7 @@ const loadJiexiang = async (): Promise<UnlockFn> => {
   return mod.default as UnlockFn;
 };
 
-const resetState = (): void => {
+const resetState = async (): Promise<void> => {
   const s = getState();
   s.fishMode = "ok";
   s.fishCalls = 0;
@@ -72,10 +75,14 @@ const resetState = (): void => {
 
   s.jiexiangMode = "ok";
   s.jiexiangCalls = 0;
+  s.ticketCalls = 0;
+  s.jiexiangRequests = [];
   s.jiexiangContentLength = 8000000;
   s.jiexiangAudioBuffer = Buffer.from([0xff, 0xfb, 0xe0, 0x00]);
 
   s.logs.length = 0;
+  const { invalidateQingTicket } = await import("../electron/server/unblock/qing-gateway");
+  invalidateQingTicket();
 };
 
 describe("换源链优先级配置", () => {
@@ -228,7 +235,7 @@ describe("小鱼音源（QQ 音乐）换源逻辑", () => {
 describe("吉祥音源（酷狗曲库）换源逻辑", () => {
   it("歌名或歌手缺失时返回 404", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
 
     const noTitle = await unlock({ title: "", artist: "周杰伦" }, { platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" });
     assert.equal(noTitle.code, 404);
@@ -241,7 +248,7 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
 
   it("platformId 缺失时直接失败返回 NO_CANDIDATE_REASON", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
 
     const target = { title: "晴天", artist: "周杰伦", duration: 200 };
     const result = await unlock(target, {});
@@ -252,7 +259,7 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
 
   it("成功路径：直链保留 http 协议原样交付且音质标识 qu320 匹配", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
 
     const target = { title: "晴天", artist: "周杰伦", duration: 200 };
     const options = { platform: "kugou", platformId: "B3A52A7A958BF0AED0EBFBA2E9A818B7" };
@@ -267,7 +274,7 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
 
   it("音质标识不匹配时拦截拒绝", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
     getState().jiexiangMode = "wrong_token";
 
     const target = { title: "晴天", artist: "周杰伦", duration: 200 };
@@ -280,7 +287,7 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
 
   it("320k 失败时降级 128k 档取链", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
     getState().jiexiangMode = "fail_exhigh";
 
     const target = { title: "晴天", artist: "周杰伦", duration: 200 };
@@ -294,7 +301,7 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
 
   it("上游连续故障达到阈值熔断", async () => {
     const unlock = await loadJiexiang();
-    resetState();
+    await resetState();
     getState().jiexiangMode = "http500";
 
     const target = { title: "晴天", artist: "周杰伦", duration: 200 };
@@ -311,5 +318,112 @@ describe("吉祥音源（酷狗曲库）换源逻辑", () => {
     assert.equal(tripped.code, 404);
     assert.equal(tripped.reason, UPSTREAM_UNAVAILABLE_REASON);
     assert.equal(getState().jiexiangCalls, callsBefore, "熔断期内零网络请求");
+  });
+
+  it("成功路径（HTTP 201 + 嵌套 data.url）正常出链且含 qu320 标识", async () => {
+    const unlock = await loadJiexiang();
+    await resetState();
+    getState().jiexiangMode = "http201";
+
+    const target = { title: "晴天", artist: "周杰伦", duration: 200 };
+    const options = { platform: "kugou", platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" };
+
+    const result = await unlock(target, options);
+    assert.equal(result.code, 200);
+    assert.ok(result.url?.includes("qu320"));
+    assert.equal(result.lengthVerified, true);
+  });
+
+  it("HTTP 503 + UPSTREAM_NO_RESOURCE 判单曲拒绝且不推进熔断计数", async () => {
+    const unlock = await loadJiexiang();
+    await resetState();
+    getState().jiexiangMode = "no_resource";
+
+    const target = { title: "晴天", artist: "周杰伦", duration: 200 };
+    const options = { platform: "kugou", platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" };
+
+    for (let i = 0; i < 4; i += 1) {
+      const res = await unlock(target, options);
+      assert.equal(res.code, 404);
+      assert.equal(res.reason, FETCH_FAILED_REASON);
+    }
+  });
+
+  it("APP_UPGRADE_REQUIRED → 票据缓存被作废、自动换票重试一次后成功", async () => {
+    const unlock = await loadJiexiang();
+    await resetState();
+    getState().jiexiangMode = "auth_expired_once";
+
+    const target = { title: "晴天", artist: "周杰伦", duration: 200 };
+    const options = { platform: "kugou", platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" };
+
+    const result = await unlock(target, options);
+    assert.equal(result.code, 200);
+    assert.ok(result.url?.includes("qu320"));
+    assert.equal(getState().jiexiangCalls, 2, "应重试一次解析请求");
+    assert.equal(getState().ticketCalls, 2, "作废缓存后应重新请求 ticket");
+  });
+
+  it("重试后仍鉴权失败 → 判上游故障（计熔断）", async () => {
+    const unlock = await loadJiexiang();
+    await resetState();
+    getState().jiexiangMode = "auth_expired_always";
+
+    const target = { title: "晴天", artist: "周杰伦", duration: 200 };
+    const options = { platform: "kugou", platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" };
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await unlock(target, options);
+      assert.equal(res.code, 404);
+      assert.equal(res.reason, FETCH_FAILED_REASON);
+    }
+
+    const tripped = await unlock(target, options);
+    assert.equal(tripped.code, 404);
+    assert.equal(tripped.reason, UPSTREAM_UNAVAILABLE_REASON);
+  });
+
+  it("请求头完整性：捕获发出的请求头，重算 stringToSign 验证 X-Qing-Sign 并验证 nonce 防重放", async () => {
+    const unlock = await loadJiexiang();
+    await resetState();
+
+    const target = { title: "晴天", artist: "周杰伦", duration: 200 };
+    const options = { platform: "kugou", platformId: "b3a52a7a958bf0aed0ebfba2e9a818b7" };
+
+    await unlock(target, options);
+    await unlock(target, options);
+
+    const requests = getState().jiexiangRequests;
+    assert.equal(requests.length, 2);
+    const [req1, req2] = requests;
+
+    const SIGN_SECRET = "qm-gw-7c1f4e9a2b8d5360e1a7c4f9b2d8036c";
+
+    for (const req of [req1, req2]) {
+      assert.equal(req.headers["X-Qing-App-Id"], "qingmusic-android");
+      assert.equal(req.headers["X-Qing-App-Version"], "1.4.0");
+      assert.ok(req.headers["X-Qing-Device-Id"]?.startsWith("qingmusic-android-"));
+      assert.match(req.headers["X-Qing-Ts"], /^\d{13}$/);
+      assert.match(req.headers["X-Qing-Nonce"], /^[a-f0-9]{32}$/);
+      assert.match(req.headers["X-Qing-Sign"], /^[a-f0-9]{64}$/);
+      assert.ok(req.headers["Authorization"]?.startsWith("Bearer "));
+
+      const bodySha256 = crypto.createHash("sha256").update(req.body).digest("hex");
+      const stringToSign = [
+        req.headers["X-Qing-App-Id"],
+        req.headers["X-Qing-Ts"],
+        req.headers["X-Qing-Nonce"],
+        "POST",
+        "/v1/music/resolve-url",
+        bodySha256,
+      ].join("\n");
+      const expectedSign = crypto
+        .createHmac("sha256", SIGN_SECRET)
+        .update(stringToSign)
+        .digest("hex");
+      assert.equal(req.headers["X-Qing-Sign"], expectedSign);
+    }
+
+    assert.notEqual(req1.headers["X-Qing-Nonce"], req2.headers["X-Qing-Nonce"]);
   });
 });

@@ -35,6 +35,7 @@ import {
 import { sanitizeUrl } from "@/utils/sanitize";
 import { isAudiobookSong, resolveSongPlatform } from "@/utils/songPlatform";
 import { getPlatformLabel, getUnlockPriority } from "@/utils/unlockPriority";
+import { raceUnlockSources, type UnlockAttempt } from "@/utils/unlockRace";
 import { UnlockUrlCache } from "@/utils/unlockUrlCache";
 
 /**
@@ -560,9 +561,9 @@ class SongManager {
    *
    * 链位口径：链位固定，不随运行期可用性调整 —— 熔断与单源失败只影响本次是否命中。
    *
-   * 逐源隔离失败：单个源超时或报错只记失败，继续尝试下一个源，
+   * 全量并行竞速：在同一个事件循环内并发尝试所有启用的解锁源，首个成功立即采用；
    * 全部源都拿不到链接时给出平台语义的兜底提示（逐源明细只写控制台日志）。
-   * @param songData 歌曲数据
+   * @param song 歌曲数据
    * @returns 解锁播放信息
    */
   public getUnlockSongUrl = async (song: SongType): Promise<AudioSource> => {
@@ -625,8 +626,10 @@ class SongManager {
       };
     }
 
-    // 按顺序请求，一旦成功就返回
-    console.log(`🔓 [${songId}] 开始按优先级尝试解锁服务`);
+    // 并发请求，首个成功立即采用
+    console.log(
+      `🔓 [${songId}] 开始并发尝试解锁服务: ${sortedServers.map((s) => this.getUnlockSourceName(s)).join(", ")}`,
+    );
     console.log(
       `   📋 启用的服务: ${enabledServers.map((s) => this.getUnlockSourceName(s)).join(", ")}`,
     );
@@ -643,15 +646,15 @@ class SongManager {
       );
     }
 
-    // 逐源失败原因：单个源失败只记失败，不阻断其余源
-    const failures: string[] = [];
-    for (const server of sortedServers) {
+    const platformId = song.platformId || (isNeteaseSong ? String(songId) : undefined);
+
+    const attempt = async (
+      server: SongUnlockServer,
+    ): Promise<UnlockAttempt<{ originalUrl: string; finalUrl?: string }>> => {
       const sourceName = this.getUnlockSourceName(server);
       const startedAt = Date.now();
       try {
         console.log(`🔓 [${songId}] 正在尝试解锁服务: ${sourceName} (${server})...`);
-        const platformId =
-          song.platformId || (isNeteaseSong ? String(songId) : undefined);
         const result = await unlockSongUrl(
           songId,
           keyWord,
@@ -683,40 +686,17 @@ class SongManager {
 
           const finalUnlockUrl = unlockUrl || undefined;
 
-          // 推断音质
-          let quality = QualityType.HQ;
-          if (originalUrl.includes(".flac") || originalUrl.includes(".wav")) {
-            quality = QualityType.SQ;
-          }
-
-          // 调试信息：显示使用的解锁源
-          console.log(`✅ [${songId}] 解锁成功！`);
-          console.log(`   📍 解锁源: ${sourceName} (${server})`);
-          console.log(`   🎵 音质: ${quality}`);
-          console.log(`   🔗 原始 URL: ${sanitizeUrl(originalUrl)}`);
-          if (!isElectron) {
-            console.log(`   🌐 代理 URL: ${sanitizeUrl(finalUnlockUrl)}`);
-          }
-
-          // 解锁成功后，触发下载（使用原始 URL，仅 Electron 端）
-          this.triggerCacheDownload(cacheKey, originalUrl);
-
-          // 写入进程内直链缓存：上游抖动期重播不必再跑整条换源链
-          unlockedUrlCache.set(String(cacheKey), {
-            url: originalUrl,
-            quality,
-            unlockSource: server,
-          });
-
           return {
-            id: songId,
-            url: finalUnlockUrl,
-            isUnlocked: true,
-            quality,
-            unlockSource: server,
+            ok: true,
+            server,
+            durationMs,
+            value: {
+              originalUrl,
+              finalUrl: finalUnlockUrl,
+            },
           };
         }
-        failures.push(`${sourceName}：${result.reason || "未找到可用链接"}`);
+
         this.reportSourceProbe(
           server,
           false,
@@ -724,18 +704,72 @@ class SongManager {
           classifyUnlockFailure(result.reason),
         );
         console.warn(`⚠️ [${songId}] ${sourceName} 返回失败，继续尝试下一个服务...`);
+        return {
+          ok: false,
+          server,
+          durationMs,
+          reason: result.reason || "未找到可用链接",
+        };
       } catch (error) {
-        // 单个源失败只记失败，继续尝试下一个服务
         const durationMs = Date.now() - startedAt;
-        failures.push(`${sourceName}：${describeUnlockError(error)}`);
         this.reportSourceProbe(server, false, durationMs, classifyUnlockError(error));
         console.error(`❌ [${songId}] ${sourceName} 请求失败:`, error);
+        return {
+          ok: false,
+          server,
+          durationMs,
+          reason: describeUnlockError(error),
+        };
       }
+    };
+
+    const { winner, failures } = await raceUnlockSources(sortedServers, attempt);
+
+    if (winner) {
+      const { server: unlockSource, value } = winner;
+      const { originalUrl, finalUrl } = value;
+      const sourceName = this.getUnlockSourceName(unlockSource);
+
+      // 推断音质
+      let quality = QualityType.HQ;
+      if (originalUrl.includes(".flac") || originalUrl.includes(".wav")) {
+        quality = QualityType.SQ;
+      }
+
+      // 调试信息：显示使用的解锁源
+      console.log(`✅ [${songId}] 解锁成功！`);
+      console.log(`   📍 解锁源: ${sourceName} (${unlockSource})`);
+      console.log(`   🎵 音质: ${quality}`);
+      console.log(`   🔗 原始 URL: ${sanitizeUrl(originalUrl)}`);
+      if (!isElectron) {
+        console.log(`   🌐 代理 URL: ${sanitizeUrl(finalUrl)}`);
+      }
+
+      // 解锁成功后，触发下载（使用原始 URL，仅 Electron 端）
+      this.triggerCacheDownload(cacheKey, originalUrl);
+
+      // 写入进程内直链缓存：上游抖动期重播不必再跑整条换源链
+      unlockedUrlCache.set(String(cacheKey), {
+        url: originalUrl,
+        quality,
+        unlockSource,
+      });
+
+      return {
+        id: songId,
+        url: finalUrl,
+        isUnlocked: true,
+        quality,
+        unlockSource,
+      };
     }
 
     // 逐源失败明细只进日志：用户侧只给出平台语义的兜底结论，不暴露内部音源名
+    const formattedFailures = failures.map(
+      (item) => `${this.getUnlockSourceName(item.server)}：${item.reason}`,
+    );
     console.warn(
-      `⚠️ [${songId}] 换源链全部失败：${failures.length ? failures.join("；") : "无可用链接"}`,
+      `⚠️ [${songId}] 换源链全部失败：${formattedFailures.length ? formattedFailures.join("；") : "无可用链接"}`,
     );
     return { id: songId, url: undefined, failureReason: PLAYBACK_FAILED_TEXT };
   };
