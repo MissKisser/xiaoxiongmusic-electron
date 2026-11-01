@@ -23,6 +23,7 @@
     <n-flex class="menu" justify="end">
       <n-button v-if="!data?.isForce" strong secondary @click="emit('close')"> 取消 </n-button>
       <n-button
+        v-if="portableUrl"
         strong
         type="primary"
         :secondary="installType !== 'portable'"
@@ -31,6 +32,7 @@
         下载便携版
       </n-button>
       <n-button
+        v-if="setupUrl"
         strong
         type="primary"
         :secondary="installType === 'portable'"
@@ -38,15 +40,24 @@
       >
         下载安装版
       </n-button>
+      <n-button
+        v-if="!portableUrl && !setupUrl && data?.downloadUrl"
+        strong
+        type="primary"
+        @click="goDownload(data.downloadUrl)"
+      >
+        前往下载
+      </n-button>
     </n-flex>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { marked } from "marked";
 import type { UpdateInfoType } from "@/types/main";
 import { isElectron } from "@/utils/env";
+import { renderMarkdown } from "@/utils/renderMarkdown";
+import { pickPortableUrl, pickSetupUrl } from "@/utils/updateAssets";
 import packageJson from "@/../package.json";
 
 const props = defineProps<{ data: UpdateInfoType }>();
@@ -66,27 +77,27 @@ onMounted(async () => {
   }
 });
 
-// 渲染 Markdown 更新说明
+/**
+ * 渲染后的更新说明 HTML
+ */
 const renderedDescription = computed(() => {
   if (!props.data?.description) return "";
-  return marked.parse(props.data.description, { async: false }) as string;
+  return renderMarkdown(props.data.description);
 });
 
-// 依据构建产物命名规则推导两个版本的下发地址：
-// 安装版 `小熊音乐-{版本}-{架构}-setup.exe`，便携版 `小熊音乐-{版本}-{架构}-portable.exe`
-const isSetupUrl = (url: string): boolean => /-setup\.exe$/i.test(url);
+/**
+ * 便携版下载地址
+ */
+const portableUrl = computed(() =>
+  pickPortableUrl(props.data?.assets, props.data?.downloadUrl)
+);
 
-const portableUrl = computed(() => {
-  const url = props.data?.downloadUrl || "";
-  if (isSetupUrl(url)) return url.replace(/-setup(\.exe)$/i, "-portable$1");
-  return url;
-});
-
-const setupUrl = computed(() => {
-  const url = props.data?.downloadUrl || "";
-  if (/-portable\.exe$/i.test(url)) return url.replace(/-portable(\.exe)$/i, "-setup$1");
-  return url;
-});
+/**
+ * 安装版下载地址
+ */
+const setupUrl = computed(() =>
+  pickSetupUrl(props.data?.assets, props.data?.downloadUrl)
+);
 
 // 前往下载指定版本
 const goDownload = (url: string) => {
@@ -122,6 +133,8 @@ const goDownload = (url: string) => {
   }
   .update-desc {
     margin-top: 0 !important;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .markdown-body {
     margin-top: 0 !important;

@@ -410,6 +410,12 @@ export type SettingType =
   | "other"
   | "about";
 
+/** 更新安装包变体信息 */
+export interface UpdateAssetInfo {
+  variant: string;
+  url: string;
+}
+
 // 更新信息
 export interface UpdateInfoType {
   version: string;
@@ -417,6 +423,7 @@ export interface UpdateInfoType {
   downloadUrl: string;
   description: string;
   isForce: boolean;
+  assets?: UpdateAssetInfo[];
 }
 
 // 登录方式
