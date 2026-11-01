@@ -64,11 +64,6 @@ const config: Configuration = {
         target: "nsis",
         arch: ["x64", "arm64"],
       },
-      // 打包版
-      {
-        target: "portable",
-        arch: ["x64", "arm64"],
-      },
     ],
     // 注册协议
     protocols: [
@@ -98,11 +93,6 @@ const config: Configuration = {
     installerIcon: "public/icons/favicon.ico",
     // 卸载命令图标
     uninstallerIcon: "public/icons/favicon.ico",
-  },
-  // Portable 便携版配置
-  portable: {
-    // 便携版文件名
-    artifactName: "${productName}-${version}-${arch}-portable.${ext}",
   },
   // macOS 平台配置
   mac: {

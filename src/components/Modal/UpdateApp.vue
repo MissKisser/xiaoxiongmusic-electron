@@ -8,9 +8,6 @@
       <n-tag :bordered="false" type="warning">
         {{ data?.version || "v0.0.0" }}
       </n-tag>
-      <n-tag v-if="installType" :bordered="false" type="info" class="install-type">
-        当前为{{ installType === "setup" ? "安装版" : "便携版" }}
-      </n-tag>
     </n-flex>
     <n-scrollbar style="max-height: 500px">
       <div
@@ -21,61 +18,70 @@
       <div v-else class="markdown-body">暂无更新说明</div>
     </n-scrollbar>
     <n-flex class="menu" justify="end">
-      <n-button v-if="!data?.isForce" strong secondary @click="emit('close')"> 取消 </n-button>
-      <n-button
-        v-if="portableUrl"
-        strong
-        type="primary"
-        :secondary="installType !== 'portable'"
-        @click="goDownload(portableUrl)"
-      >
-        下载便携版
+      <n-button v-if="!data?.isForce" strong secondary @click="handleClose">
+        取消
       </n-button>
       <n-button
-        v-if="setupUrl"
+        v-if="!setupUrl && data?.downloadUrl"
         strong
         type="primary"
-        :secondary="installType === 'portable'"
-        @click="goDownload(setupUrl)"
-      >
-        下载安装版
-      </n-button>
-      <n-button
-        v-if="!portableUrl && !setupUrl && data?.downloadUrl"
-        strong
-        type="primary"
-        @click="goDownload(data.downloadUrl)"
+        @click="openExternal"
       >
         前往下载
       </n-button>
+      <n-button
+        v-else-if="setupUrl"
+        strong
+        type="primary"
+        :loading="downloading"
+        @click="startDownload"
+      >
+        下载安装版
+      </n-button>
     </n-flex>
+    <div v-if="downloading || progress" class="download-progress">
+      <n-progress
+        type="line"
+        :percentage="progressPercent"
+        :color="progressColor"
+        :indicator-placement="'inside'"
+        processing
+      />
+      <div class="download-meta">
+        <span>{{ progressText }}</span>
+        <n-button size="tiny" quaternary @click="cancelDownload">取消下载</n-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import type { UpdateInfoType } from "@/types/main";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useThemeVars } from "naive-ui";
+import type { InstallerDownloadProgress, UpdateInfoType } from "@/types/main";
 import { isElectron } from "@/utils/env";
 import { renderMarkdown } from "@/utils/renderMarkdown";
-import { pickPortableUrl, pickSetupUrl } from "@/utils/updateAssets";
+import { pickSetupUrl } from "@/utils/updateAssets";
+import { formatBytes } from "@/utils/installerDownload";
 import packageJson from "@/../package.json";
 
 const props = defineProps<{ data: UpdateInfoType }>();
 
 const emit = defineEmits<{ close: [] }>();
 
-// 当前安装类型，null 表示非 Electron 环境（Web）无法检测
-const installType = ref<"setup" | "portable" | null>(null);
+/** 是否正在下载安装包 */
+const downloading = ref(false);
 
-onMounted(async () => {
-  if (isElectron) {
-    try {
-      installType.value = await window.api.system.getInstallType();
-    } catch {
-      installType.value = null;
-    }
-  }
-});
+/** 安装包下载进度 */
+const progress = ref<InstallerDownloadProgress | null>(null);
+
+/** naive-ui 主题变量 */
+const themeVars = useThemeVars();
+
+/**
+ * 进度条填充色，跟随应用主题色（naive-ui 默认用 infoColor，与主色不一致）
+ */
+const progressColor = computed(() => themeVars.value.primaryColor);
 
 /**
  * 渲染后的更新说明 HTML
@@ -86,31 +92,132 @@ const renderedDescription = computed(() => {
 });
 
 /**
- * 便携版下载地址
- */
-const portableUrl = computed(() =>
-  pickPortableUrl(props.data?.assets, props.data?.downloadUrl)
-);
-
-/**
  * 安装版下载地址
  */
 const setupUrl = computed(() =>
   pickSetupUrl(props.data?.assets, props.data?.downloadUrl)
 );
 
-// 前往下载指定版本
-const goDownload = (url: string) => {
+/**
+ * 下载进度百分比
+ */
+const progressPercent = computed(() =>
+  Math.round((progress.value?.percent ?? 0) * 100)
+);
+
+/**
+ * 下载进度文本
+ */
+const progressText = computed(() => {
+  const current = progress.value;
+  if (!current) return "正在准备下载…";
+  const total = current.totalBytes
+    ? ` / ${formatBytes(current.totalBytes)}`
+    : "";
+  const speed = current.speed > 0 ? ` · ${formatBytes(current.speed)}/s` : "";
+  return `${formatBytes(current.transferredBytes)}${total}${speed}`;
+});
+
+/**
+ * 接收主进程推送的安装包下载进度
+ *
+ * @param _event IPC 事件对象
+ * @param payload 进度载荷
+ */
+const handleProgress = (
+  _event: unknown,
+  payload: InstallerDownloadProgress
+): void => {
+  progress.value = payload;
+};
+
+/**
+ * 取消进行中的安装包下载
+ */
+const cancelDownload = (): void => {
+  if (isElectron) {
+    window.electron.ipcRenderer.send("cancel-installer-download");
+  }
+  downloading.value = false;
+  progress.value = null;
+};
+
+/**
+ * 关闭弹窗；下载进行中时先中止下载，避免弹窗已关仍在后台拉起安装器
+ */
+const handleClose = (): void => {
+  if (downloading.value) {
+    cancelDownload();
+  }
+  emit("close");
+};
+
+/**
+ * 用系统浏览器打开外链地址
+ */
+const openExternal = (): void => {
+  const url = props.data?.downloadUrl;
   if (!url) return;
   if (isElectron) {
-    // Electron 环境：通过 IPC 打开系统浏览器
     window.electron.ipcRenderer.send("open-download-url", url);
   } else {
-    // Web 环境：直接打开新窗口
     window.open(url, "_blank");
   }
   emit("close");
 };
+
+/**
+ * 内置下载安装包，下载完成后由主进程直接拉起安装器
+ */
+const startDownload = async (): Promise<void> => {
+  const url = setupUrl.value;
+  if (!url) return;
+  if (!isElectron) {
+    window.open(url, "_blank");
+    return;
+  }
+  downloading.value = true;
+  progress.value = null;
+  try {
+    const result = await window.electron.ipcRenderer.invoke(
+      "download-installer",
+      url
+    );
+    if (result?.status === "error") {
+      downloading.value = false;
+      progress.value = null;
+      window.$message.error(result.message || "安装包下载失败");
+    } else if (result?.status === "cancelled") {
+      downloading.value = false;
+      progress.value = null;
+    }
+  } catch {
+    downloading.value = false;
+    progress.value = null;
+    window.$message.error("安装包下载失败，请稍后重试");
+  }
+};
+
+onMounted(() => {
+  if (isElectron) {
+    window.electron.ipcRenderer.on(
+      "installer-download-progress",
+      handleProgress
+    );
+  }
+});
+
+onBeforeUnmount(() => {
+  if (isElectron) {
+    window.electron.ipcRenderer.removeListener(
+      "installer-download-progress",
+      handleProgress
+    );
+    if (downloading.value) {
+      window.electron.ipcRenderer.send("cancel-installer-download");
+    }
+  }
+});
 </script>
 
 <style lang="scss" scoped>
@@ -130,6 +237,17 @@ const goDownload = (url: string) => {
   }
   .menu {
     margin-top: 20px;
+  }
+  .download-progress {
+    margin-top: 16px;
+    .download-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--n-text-color-3, #999);
+    }
   }
   .update-desc {
     margin-top: 0 !important;

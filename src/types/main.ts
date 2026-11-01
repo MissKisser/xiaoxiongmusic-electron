@@ -415,6 +415,14 @@ export interface UpdateAssetInfo {
   variant: string;
   url: string;
 }
+/** 安装包下载进度 */
+export interface InstallerDownloadProgress {
+  percent: number;
+  transferredBytes: number;
+  totalBytes: number;
+  speed: number;
+}
+
 
 // 更新信息
 export interface UpdateInfoType {
