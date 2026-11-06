@@ -16,6 +16,22 @@ import axiosRetry from "axios-retry";
 // 全局地址，避免遇到 VITE_API_URL 为 undefined 时变成字符串 "undefined" 的问题
 const baseURL: string = isDev ? "/api/netease" : (import.meta.env["VITE_API_URL"] || "/api/netease");
 
+/**
+ * 主进程本地服务专属路由前缀
+ *
+ * 这些路由只存在于应用内嵌的本地服务器（解锁等），外部 API 地址不可能提供，
+ * 开启外部 API 时不得改发，否则本地能力会被整体转发到外部地址而全部失败。
+ */
+const LOCAL_ONLY_BASE_PREFIXES = ["/api/unblock"];
+
+/**
+ * 判断请求是否指向主进程本地服务专属路由
+ * @param baseURL 请求的 baseURL
+ * @returns 命中本地专属前缀时返回 true
+ */
+const isLocalOnlyBase = (baseURL?: string): boolean =>
+  LOCAL_ONLY_BASE_PREFIXES.some((prefix) => baseURL?.startsWith(prefix) ?? false);
+
 // 基础配置
 const server: AxiosInstance = axios.create({
   baseURL,
@@ -38,7 +54,12 @@ server.interceptors.request.use(
     const settingStore = useSettingStore();
     if (!request.params) request.params = {};
     // 自定义外部 API baseURL（局域网开关）
-    if (settingStore.enableCustomApi && settingStore.customApiBaseUrl) {
+    // 本地专属路由（解锁等）豁免改发：解锁能力只存在于应用内嵌服务器，必须保持本地
+    if (
+      settingStore.enableCustomApi &&
+      settingStore.customApiBaseUrl &&
+      !isLocalOnlyBase(request.baseURL)
+    ) {
       request.baseURL = settingStore.customApiBaseUrl.replace(/\/+$/, "");
     }
     // Cookie
